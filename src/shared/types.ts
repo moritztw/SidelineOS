@@ -1,8 +1,8 @@
 export type TeamRolle = 'TEAM_ADMIN' | 'COACH' | 'PLAYER';
 
 /**
- * Multi-Rollen-Profil: Eine Person kann gleichzeitig Sysadmin, Team Admin und Coach sein
- * ODER ausschließlich Sysadmin ohne Zugriff auf Team-Inhalte.
+ * Angemeldetes Benutzerkonto (echte Berechtigungen).
+ * Ein Konto kann mehrere Rollen gleichzeitig besitzen (z. B. Sysadmin + Team Admin).
  */
 export interface BenutzerProfil {
   id: string;
@@ -16,6 +16,7 @@ export type NavigationsAnsicht =
   | 'cut-sync'
   | 'film-room'
   | 'playlists'
+  | 'team-settings'
   | 'settings'
   | 'sysadmin';
 
@@ -60,7 +61,6 @@ export type StandardBreakdownFeldKey =
   | 'stunt'
   | 'blitz';
 
-/** Erlaubt sowohl Standard-Spalten als auch Custom-Feld-Keys des Team Admins */
 export type BreakdownFeldKey = StandardBreakdownFeldKey | (string & {});
 
 export type TagFeldTyp = 'select' | 'combobox' | 'number' | 'text';
@@ -73,7 +73,6 @@ export interface TagFeldKonfig {
   typ: TagFeldTyp;
   aktiv: boolean;
   istCustom?: boolean;
-  /** Gespeicherte Definitionen (Wörterbuch); neue Coach-Eingaben werden automatisch ergänzt */
   definitionen?: string[];
 }
 
@@ -97,7 +96,6 @@ export interface PlayBreakdown {
   odk?: OdkWert;
   down?: 1 | 2 | 3 | 4;
   distance?: number;
-  /** -50 bis -1 = eigene Hälfte, +49 bis +1 = gegnerische Hälfte */
   yard_line?: number;
   hash?: HashWert;
   play_type?: PlayTyp;
@@ -117,7 +115,6 @@ export interface PlayBreakdown {
   coverage?: string;
   stunt?: string;
   blitz?: string;
-  /** Werte für vom Team Admin angelegte Custom-Felder */
   custom?: Record<string, string | number | undefined>;
 }
 
@@ -133,16 +130,36 @@ export type ZeichenWerkzeug = 'select' | 'pen' | 'arrow' | 'spotlight' | 'text';
 export type ZeichnungsTyp = 'pen' | 'arrow' | 'spotlight' | 'text';
 export type KommentarEcke = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
+export type HotkeyAktion =
+  | 'select'
+  | 'pen'
+  | 'arrow'
+  | 'spotlight'
+  | 'text'
+  | 'undo'
+  | 'toggleDrawBar'
+  | 'toggleFullscreen'
+  | 'switchAngle';
+
+export type BenutzerHotkeys = Record<HotkeyAktion, string>;
+
+export interface NutzerEinstellungen {
+  hotkeys: BenutzerHotkeys;
+  standardKommentarEcke: KommentarEcke;
+  standardAutoStop: boolean;
+  standardGeschwindigkeit: 0.5 | 1 | 1.5;
+}
+
 export interface NormPunkt {
-  /** Normalisiert 0.0 bis 1.0 relativ zur Videofläche */
   x: number;
   y: number;
 }
 
 export interface CanvasZeichnung {
   id: string;
-  /** Eindeutige Bindung an das Video / den Kamerawinkel, in dem gezeichnet wurde */
+  /** Bindung an den Kamerawinkel / das konkrete Video */
   angle: string;
+  /** Exakter Frame-Zeitstempel (quantisiert auf FRAME_MS) */
   timestamp_ms: number;
   werkzeug: ZeichnungsTyp;
   farbe: string;
@@ -161,7 +178,6 @@ export interface Spielzug {
 
 export interface TeamFreigabeEintrag {
   teamName: string;
-  /** Individuell gewählte Breakdown-Felder; leer = nur Videomaterial */
   freigegebeneFelder: BreakdownFeldKey[];
   geteiltAm: string;
 }
@@ -169,11 +185,9 @@ export interface TeamFreigabeEintrag {
 export interface ShareDownloadLink {
   id: string;
   token: string;
-  /** Relativer Pfad wie /share/sl-8f2a9c */
   pfad: string;
   bezeichnung: string;
   erstelltAm: string;
-  /** ISO-Zeitstempel für automatischen Link-Ablauf */
   gueltigBis: string;
   freigegebeneFelder: BreakdownFeldKey[];
   aktiv: boolean;
@@ -231,6 +245,12 @@ export const FREIGABE_LABELS: Record<SpielerFreigabe, string> = {
   UNIT_OFFENSE: 'Offense',
   UNIT_DEFENSE: 'Defense',
   UNIT_SPECIAL_TEAMS: 'Special Teams',
+};
+
+export const TEAM_ROLLEN_LABELS: Record<TeamRolle, string> = {
+  TEAM_ADMIN: 'Team Admin',
+  COACH: 'Coach',
+  PLAYER: 'Spieler',
 };
 
 export const DEMO_PROFILE: BenutzerProfil[] = [

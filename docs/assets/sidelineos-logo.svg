@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 72" width="360" height="72" role="img" aria-label="SidelineOS Logo">
+  <rect width="360" height="72" rx="10" fill="#0B0E11" />
+  <rect x="0.5" y="0.5" width="359" height="71" rx="9.5" fill="none" stroke="#232933" />
+  <!-- Minimalistisches Sideline-Signet -->
+  <g transform="translate(22, 18)">
+    <rect x="0" y="0" width="36" height="36" rx="6" fill="#13171D" stroke="#232933" stroke-width="1.5" />
+    <line x1="9" y1="8" x2="9" y2="28" stroke="#36404F" stroke-width="2" stroke-linecap="round" />
+    <line x1="15" y1="12" x2="15" y2="24" stroke="#36404F" stroke-width="2" stroke-linecap="round" />
+    <path d="M 20 11 L 29 18 L 20 25 Z" fill="#F59E0B" />
+  </g>
+  <!-- Wortmarke wie in der Kopfzeile -->
+  <text
+    x="74"
+    y="46"
+    font-family="'Plus Jakarta Sans', 'Segoe UI', system-ui, -apple-system, sans-serif"
+    font-size="30"
+    font-weight="700"
+    letter-spacing="-0.6"
+    fill="#FFFFFF"
+  >Sideline<tspan fill="#F59E0B">OS</tspan></text>
+</svg>

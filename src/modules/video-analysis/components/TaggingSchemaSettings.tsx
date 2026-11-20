@@ -123,12 +123,12 @@ export function TaggingSchemaSettings({
             </div>
             <div>
               <h1 className="text-base font-semibold text-white">
-                Tagging-Schema &amp; Team-Wörterbuch
+                Team-Einstellungen · Tagging-Schema &amp; Wörterbuch
               </h1>
               <p className="mt-1 max-w-2xl text-xs text-[#8B949E]">
-                Aktiviere oder deaktiviere Breakdown-Spalten, lege eigene Custom-Felder an und
-                bereinige Fehleinträge im Team-Wörterbuch. Neu eingegebene Begriffe aus dem Film
-                Room werden hier dauerhaft gespeichert.
+                Zentrale Team-Admin-Konfiguration für alle Coaches im Team: Aktiviere oder
+                deaktiviere Breakdown-Spalten, lege eigene Custom-Felder an und bereinige
+                Fehleinträge im dauerhaften Team-Wörterbuch.
               </p>
             </div>
           </div>

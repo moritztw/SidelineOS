@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowUpRight,
+  Check,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -21,6 +22,7 @@ import {
   Type,
   Undo2,
   Users,
+  X,
 } from 'lucide-react';
 import type {
   BreakdownFeldKey,
@@ -28,6 +30,7 @@ import type {
   CoachNotiz,
   KommentarEcke,
   NormPunkt,
+  NutzerEinstellungen,
   SpielerFreigabe,
   TagFeldKonfig,
   TeamRolle,
@@ -35,6 +38,12 @@ import type {
   ZeichenWerkzeug,
 } from '../../../shared/types.ts';
 import { FREIGABE_LABELS } from '../../../shared/types.ts';
+import {
+  FRAME_MS,
+  frameZuZeit,
+  istGleicherFrame,
+  zeitZuFrame,
+} from '../../../core/rolePermissions.ts';
 import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 import { leseBreakdownWert } from '../services/taggingEngine.ts';
 import { BreakdownGrid } from './BreakdownGrid.tsx';
@@ -44,6 +53,7 @@ interface FilmRoomViewProps {
   reel: VideoReel;
   teamRolle: TeamRolle;
   tagSchema: TagFeldKonfig[];
+  nutzerEinstellungen: NutzerEinstellungen;
   onZurueck: () => void;
   onSchemaSettingsOeffnen: () => void;
   onFreigabeAendern: (reelId: string, freigabe: SpielerFreigabe) => void;
@@ -56,6 +66,13 @@ interface FilmRoomViewProps {
   ) => void;
   onDefinitionLernen: (feldKey: BreakdownFeldKey, wert: string) => void;
   onNotizHinzufuegen: (reelId: string, playNumber: number, notiz: CoachNotiz) => void;
+  onNotizBearbeiten: (
+    reelId: string,
+    playNumber: number,
+    notizId: string,
+    neuerText: string
+  ) => void;
+  onNotizLoeschen: (reelId: string, playNumber: number, notizId: string) => void;
   onZeichnungHinzufuegen: (reelId: string, playNumber: number, zeichnung: CanvasZeichnung) => void;
   onZeichnungAktualisieren: (
     reelId: string,
@@ -112,12 +129,15 @@ export function FilmRoomView({
   reel,
   teamRolle,
   tagSchema,
+  nutzerEinstellungen,
   onZurueck,
   onSchemaSettingsOeffnen,
   onFreigabeAendern,
   onFeldAendern,
   onDefinitionLernen,
   onNotizHinzufuegen,
+  onNotizBearbeiten,
+  onNotizLoeschen,
   onZeichnungHinzufuegen,
   onZeichnungAktualisieren,
   onZeichnungEntfernen,
@@ -127,16 +147,23 @@ export function FilmRoomView({
 }: FilmRoomViewProps) {
   const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const istTeamAdmin = teamRolle === 'TEAM_ADMIN';
+  const hotkeys = nutzerEinstellungen.hotkeys;
 
   const playerContainerRef = useRef<HTMLDivElement | null>(null);
-  const gestoppteTimestampsRef = useRef<Set<number>>(new Set());
+  const gestoppteFramesRef = useRef<Set<number>>(new Set());
 
   const [aktiverPlayIndex, setAktiverPlayIndex] = useState(0);
   const [aktiverWinkel, setAktiverWinkel] = useState<string>(reel.angles[0] ?? 'SIDELINE');
   const [laeuft, setLaeuft] = useState(false);
-  const [zeitMs, setZeitMs] = useState(2400);
-  const [geschwindigkeit, setGeschwindigkeit] = useState<0.5 | 1 | 1.5>(1);
-  const [autoStop, setAutoStop] = useState(true);
+  const [zeitMs, setZeitMs] = useState(() => {
+    const startWinkel = reel.angles[0] ?? 'SIDELINE';
+    const ersteZeichnung = reel.plays[0]?.drawings?.find((d) => d.angle === startWinkel);
+    return ersteZeichnung ? frameZuZeit(zeitZuFrame(ersteZeichnung.timestamp_ms)) : 0;
+  });
+  const [geschwindigkeit, setGeschwindigkeit] = useState<0.5 | 1 | 1.5>(
+    nutzerEinstellungen.standardGeschwindigkeit
+  );
+  const [autoStop, setAutoStop] = useState(nutzerEinstellungen.standardAutoStop);
   const [autoStopMeldung, setAutoStopMeldung] = useState<string | null>(null);
   const [publishBestaetigung, setPublishBestaetigung] = useState<string | null>(null);
 
@@ -144,15 +171,30 @@ export function FilmRoomView({
   const [vollbildAktiv, setVollbildAktiv] = useState(false);
   const [zeichenOverlaySichtbar, setZeichenOverlaySichtbar] = useState(true);
   const [kommentarOverlaySichtbar, setKommentarOverlaySichtbar] = useState(true);
-  const [kommentarEcke, setKommentarEcke] = useState<KommentarEcke>('top-right');
+  const [kommentarEcke, setKommentarEcke] = useState<KommentarEcke>(
+    nutzerEinstellungen.standardKommentarEcke
+  );
 
   const [werkzeug, setWerkzeug] = useState<ZeichenWerkzeug | null>('select');
   const [farbe, setFarbe] = useState<string>('#F59E0B');
   const [ausgewaehlteZeichnungId, setAusgewaehlteZeichnungId] = useState<string | null>(null);
   const [notizText, setNotizText] = useState('');
+  const [bearbeiteNotizId, setBearbeiteNotizId] = useState<string | null>(null);
+  const [bearbeiteNotizText, setBearbeiteNotizText] = useState('');
   const [tagGruppeTab, setTagGruppeTab] = useState<'ALLE' | 'SITUATION' | 'OFFENSE' | 'DEFENSE'>(
     'ALLE'
   );
+
+  // Persönliche Voreinstellungen übernehmen, wenn der Nutzer sie in Einstellungen anpasst
+  useEffect(() => {
+    setKommentarEcke(nutzerEinstellungen.standardKommentarEcke);
+    setAutoStop(nutzerEinstellungen.standardAutoStop);
+    setGeschwindigkeit(nutzerEinstellungen.standardGeschwindigkeit);
+  }, [
+    nutzerEinstellungen.standardKommentarEcke,
+    nutzerEinstellungen.standardAutoStop,
+    nutzerEinstellungen.standardGeschwindigkeit,
+  ]);
 
   const sichererIndex = Math.min(aktiverPlayIndex, Math.max(0, reel.plays.length - 1));
   const aktiverPlay = reel.plays[sichererIndex] ?? null;
@@ -168,14 +210,15 @@ export function FilmRoomView({
     return Math.max(1000, aktuelleQuelle.end_ms - aktuelleQuelle.start_ms);
   }, [aktuelleQuelle, aktiverPlay]);
 
-  // Zeichnungen strikt gefiltert nach dem AKTIVEN Video/Kamerawinkel + Rolle!
+  // Zeichnungen strikt gefiltert nach dem AKTIVEN Video/Kamerawinkel + Rolle
   const winkelZeichnungen = useMemo(() => {
     const alle = (aktiverPlay?.drawings ?? []).filter((z) => z.angle === aktiverWinkel);
     return istCoach ? alle : alle.filter((z) => z.status === 'PUBLISHED');
   }, [aktiverPlay, aktiverWinkel, istCoach]);
 
+  // Exakte Frame-Bindung: Zeichnungen werden ausschließlich auf ihrem exakten Frame angezeigt
   const sichtbareZeichnungenJetzt = useMemo(
-    () => winkelZeichnungen.filter((z) => Math.abs(z.timestamp_ms - zeitMs) <= 1400),
+    () => winkelZeichnungen.filter((z) => istGleicherFrame(z.timestamp_ms, zeitMs)),
     [winkelZeichnungen, zeitMs]
   );
 
@@ -190,6 +233,29 @@ export function FilmRoomView({
     const zeitnah = playNotizen.filter((n) => Math.abs(n.timestamp_ms - zeitMs) <= 2200);
     return zeitnah.length > 0 ? zeitnah : playNotizen.slice(0, 2);
   }, [playNotizen, zeitMs]);
+
+  const darfNotizBearbeiten = (notiz: CoachNotiz): boolean =>
+    Boolean(notiz.id) && (istCoach || notiz.autorRolle === 'PLAYER');
+
+  const starteNotizBearbeitung = (notiz: CoachNotiz) => {
+    if (!notiz.id || !darfNotizBearbeiten(notiz)) return;
+    setBearbeiteNotizId(notiz.id);
+    setBearbeiteNotizText(notiz.text);
+  };
+
+  const speichereNotizBearbeitung = () => {
+    if (!aktiverPlay || !bearbeiteNotizId) return;
+    const bereinigt = bearbeiteNotizText.trim();
+    if (!bereinigt) return;
+    onNotizBearbeiten(reel.id, aktiverPlay.play_number, bearbeiteNotizId, bereinigt);
+    setBearbeiteNotizId(null);
+    setBearbeiteNotizText('');
+  };
+
+  const brecheNotizBearbeitungAb = () => {
+    setBearbeiteNotizId(null);
+    setBearbeiteNotizText('');
+  };
 
   const gesamtEntwuerfe = useMemo(
     () =>
@@ -249,14 +315,15 @@ export function FilmRoomView({
     setLaeuft(false);
     setAutoStopMeldung(null);
     setAusgewaehlteZeichnungId(null);
-    gestoppteTimestampsRef.current.clear();
+    setBearbeiteNotizId(null);
+    gestoppteFramesRef.current.clear();
 
     const zielPlay = reel.plays[neuerIndex];
     const ersteMarkierung =
       zielPlay.drawings?.find((d) => d.angle === aktiverWinkel)?.timestamp_ms ??
       zielPlay.notes?.[0]?.timestamp_ms ??
       0;
-    setZeitMs(ersteMarkierung);
+    setZeitMs(frameZuZeit(zeitZuFrame(ersteMarkierung)));
 
     if (zielPlay && !zielPlay.sources[aktiverWinkel]) {
       const ersatz = reel.angles.find((w) => zielPlay.sources[w] !== null);
@@ -264,7 +331,7 @@ export function FilmRoomView({
     }
   };
 
-  // Playback-Loop mit Auto-Stop bei Zeichnungen im AKTIVEN Winkel
+  // Playback-Loop mit exaktem Frame-Auto-Stop bei Zeichnungen im AKTIVEN Winkel
   useEffect(() => {
     if (!laeuft) return;
     let letzterFrame = performance.now();
@@ -278,26 +345,31 @@ export function FilmRoomView({
         const neu = alt + delta;
 
         if (autoStop) {
-          const getroffene = winkelZeichnungen.find(
-            (z) =>
-              z.timestamp_ms >= alt &&
-              z.timestamp_ms <= neu + 40 &&
-              !gestoppteTimestampsRef.current.has(z.timestamp_ms)
-          );
+          const getroffene = winkelZeichnungen.find((z) => {
+            const zielMs = frameZuZeit(zeitZuFrame(z.timestamp_ms));
+            const zielFrame = zeitZuFrame(zielMs);
+            return (
+              zielMs >= alt &&
+              zielMs <= neu + FRAME_MS &&
+              !gestoppteFramesRef.current.has(zielFrame)
+            );
+          });
           if (getroffene) {
-            gestoppteTimestampsRef.current.add(getroffene.timestamp_ms);
+            const zielMs = frameZuZeit(zeitZuFrame(getroffene.timestamp_ms));
+            const zielFrame = zeitZuFrame(zielMs);
+            gestoppteFramesRef.current.add(zielFrame);
             setLaeuft(false);
             setAutoStopMeldung(
-              `Auto-Stop bei ${formatiereZeit(getroffene.timestamp_ms)} · Zeichnung erreicht`
+              `Auto-Stop · Frame ${zielFrame} (${formatiereZeit(zielMs)})`
             );
-            return getroffene.timestamp_ms;
+            return zielMs;
           }
         }
 
         if (neu >= dauerMs) {
           setLaeuft(false);
-          gestoppteTimestampsRef.current.clear();
-          return dauerMs;
+          gestoppteFramesRef.current.clear();
+          return frameZuZeit(zeitZuFrame(dauerMs));
         }
         return neu;
       });
@@ -309,7 +381,7 @@ export function FilmRoomView({
     return () => cancelAnimationFrame(rafId);
   }, [laeuft, geschwindigkeit, dauerMs, autoStop, winkelZeichnungen]);
 
-  // Tastaturkürzel im Film Room
+  // Konfigurierbare Benutzer-Hotkeys + feste Transport-Tasten im Film Room
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
@@ -317,6 +389,10 @@ export function FilmRoomView({
         ziel &&
         (ziel.tagName === 'INPUT' || ziel.tagName === 'TEXTAREA' || ziel.tagName === 'SELECT')
       ) {
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey || e.altKey) {
         return;
       }
 
@@ -341,33 +417,86 @@ export function FilmRoomView({
         e.preventDefault();
         setAutoStopMeldung(null);
         setLaeuft((aktiv) => {
-          if (!aktiv && zeitMs >= dauerMs - 50) {
+          if (!aktiv && zeitMs >= dauerMs - FRAME_MS) {
             setZeitMs(0);
-            gestoppteTimestampsRef.current.clear();
+            gestoppteFramesRef.current.clear();
           }
           return !aktiv;
         });
-      } else if (e.key === 'ArrowDown') {
+        return;
+      }
+
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
         wechslePlay(sichererIndex + 1);
-      } else if (e.key === 'ArrowUp') {
+        return;
+      }
+      if (e.key === 'ArrowUp') {
         e.preventDefault();
         wechslePlay(sichererIndex - 1);
-      } else if (e.key === 'ArrowRight') {
+        return;
+      }
+      if (e.key === 'ArrowRight') {
         e.preventDefault();
         setLaeuft(false);
-        setZeitMs((t) => Math.min(dauerMs, t + 100));
-      } else if (e.key === 'ArrowLeft') {
+        setAutoStopMeldung(null);
+        setZeitMs((t) => Math.min(dauerMs, frameZuZeit(zeitZuFrame(t) + 1)));
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
         e.preventDefault();
         setLaeuft(false);
-        setZeitMs((t) => Math.max(0, t - 100));
-      } else if (e.key.toLowerCase() === 'a' && reel.angles.length > 1 && aktiverPlay) {
+        setAutoStopMeldung(null);
+        setZeitMs((t) => Math.max(0, frameZuZeit(zeitZuFrame(t) - 1)));
+        return;
+      }
+
+      const taste = e.key.toLowerCase();
+
+      if (taste === hotkeys.toggleFullscreen) {
+        e.preventDefault();
+        void toggleVollbild();
+        return;
+      }
+
+      if (taste === hotkeys.switchAngle && reel.angles.length > 1 && aktiverPlay) {
+        e.preventDefault();
         const idx = reel.angles.indexOf(aktiverWinkel);
         const naechster = reel.angles[(idx + 1) % reel.angles.length];
         if (aktiverPlay.sources[naechster]) {
           setAktiverWinkel(naechster);
           setAusgewaehlteZeichnungId(null);
         }
+        return;
+      }
+
+      if (!istCoach || !aktiverPlay) return;
+
+      const werkzeugZuordnung: Array<[ZeichenWerkzeug, string]> = [
+        ['select', hotkeys.select],
+        ['pen', hotkeys.pen],
+        ['arrow', hotkeys.arrow],
+        ['spotlight', hotkeys.spotlight],
+        ['text', hotkeys.text],
+      ];
+
+      const trefferWerkzeug = werkzeugZuordnung.find(([, key]) => key === taste);
+      if (trefferWerkzeug) {
+        e.preventDefault();
+        setZeichenOverlaySichtbar(true);
+        setWerkzeug((alt) => (alt === trefferWerkzeug[0] ? null : trefferWerkzeug[0]));
+        return;
+      }
+
+      if (taste === hotkeys.toggleDrawBar) {
+        e.preventDefault();
+        setZeichenOverlaySichtbar((v) => !v);
+        return;
+      }
+
+      if (taste === hotkeys.undo && winkelZeichnungen.length > 0) {
+        e.preventDefault();
+        onLetzteZeichnungEntfernen(reel.id, aktiverPlay.play_number, aktiverWinkel);
       }
     };
 
@@ -379,7 +508,7 @@ export function FilmRoomView({
     if (!aktiverPlay || !notizText.trim()) return;
     onNotizHinzufuegen(reel.id, aktiverPlay.play_number, {
       id: `note-${Date.now()}`,
-      timestamp_ms: Math.round(zeitMs),
+      timestamp_ms: frameZuZeit(zeitZuFrame(zeitMs)),
       text: notizText.trim(),
       status: istCoach ? 'DRAFT' : 'PUBLISHED',
       autorRolle: istCoach ? 'COACH' : 'PLAYER',
@@ -541,12 +670,14 @@ export function FilmRoomView({
                 ausgewaehlteId={ausgewaehlteZeichnungId}
                 onAuswaehlen={setAusgewaehlteZeichnungId}
                 onZeichnungHinzufuegen={(teil) => {
+                  const frameZeit = frameZuZeit(zeitZuFrame(zeitMs));
                   setLaeuft(false);
+                  setZeitMs(frameZeit);
                   const neu: CanvasZeichnung = {
                     ...teil,
                     id: `draw-${Date.now()}`,
                     angle: aktiverWinkel,
-                    timestamp_ms: Math.round(zeitMs),
+                    timestamp_ms: frameZeit,
                     status: 'DRAFT',
                   };
                   onZeichnungHinzufuegen(reel.id, aktiverPlay.play_number, neu);
@@ -589,17 +720,69 @@ export function FilmRoomView({
                   </div>
                 </div>
                 <ul className="mt-1.5 space-y-1.5">
-                  {aktiveOverlayNotizen.map((n, idx) => (
-                    <li key={n.id ?? idx} className="text-[11px] leading-snug text-[#E6EDF3]">
-                      <span className="mr-1.5 font-mono text-[10px] text-[#8B949E] tabular-nums">
-                        {formatiereZeit(n.timestamp_ms)}
-                      </span>
-                      {n.status === 'DRAFT' && (
-                        <span className="mr-1.5 font-mono text-[10px] text-[#F59E0B]">[DRAFT]</span>
-                      )}
-                      <span>{n.text}</span>
-                    </li>
-                  ))}
+                  {aktiveOverlayNotizen.map((n, idx) => {
+                    const wirdBearbeitet = Boolean(n.id && bearbeiteNotizId === n.id);
+                    return (
+                      <li key={n.id ?? idx} className="text-[11px] leading-snug text-[#E6EDF3]">
+                        {wirdBearbeitet ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="text"
+                              value={bearbeiteNotizText}
+                              onChange={(e) => setBearbeiteNotizText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') speichereNotizBearbeitung();
+                                if (e.key === 'Escape') brecheNotizBearbeitungAb();
+                              }}
+                              aria-label="Kommentar bearbeiten"
+                              className="min-w-0 flex-1 rounded border border-[#F59E0B] bg-[#13171D] px-1.5 py-0.5 text-[11px] text-white focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={speichereNotizBearbeitung}
+                              aria-label="Kommentar speichern"
+                              className="rounded bg-[#F59E0B] p-0.5 text-[#0B0E11]"
+                            >
+                              <Check className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={brecheNotizBearbeitungAb}
+                              aria-label="Abbrechen"
+                              className="rounded p-0.5 text-[#8B949E] hover:text-white"
+                            >
+                              <X className="h-3 w-3" aria-hidden="true" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <span className="mr-1.5 font-mono text-[10px] text-[#8B949E] tabular-nums">
+                                {formatiereZeit(n.timestamp_ms)}
+                              </span>
+                              {n.status === 'DRAFT' && (
+                                <span className="mr-1.5 font-mono text-[10px] text-[#F59E0B]">
+                                  [DRAFT]
+                                </span>
+                              )}
+                              <span>{n.text}</span>
+                            </div>
+                            {darfNotizBearbeiten(n) && (
+                              <button
+                                type="button"
+                                onClick={() => starteNotizBearbeitung(n)}
+                                title="Kommentar bearbeiten"
+                                aria-label="Kommentar bearbeiten"
+                                className="shrink-0 rounded p-0.5 text-[#8B949E] hover:bg-[#232933] hover:text-white"
+                              >
+                                <Pencil className="h-2.5 w-2.5" aria-hidden="true" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
@@ -616,24 +799,20 @@ export function FilmRoomView({
               <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center gap-1.5 rounded-md border border-[#303846] bg-[#0B0E11]/92 px-2.5 py-1.5 backdrop-blur-sm">
                 {(
                   [
-                    { id: 'select', label: 'Bearbeiten', Icon: MousePointer2 },
-                    { id: 'pen', label: 'Stift', Icon: Pencil },
-                    { id: 'arrow', label: 'Pfeil', Icon: ArrowUpRight },
-                    { id: 'spotlight', label: 'Spot', Icon: CircleDot },
-                    { id: 'text', label: 'Text', Icon: Type },
+                    { id: 'select', label: 'Bearbeiten', Icon: MousePointer2, taste: hotkeys.select },
+                    { id: 'pen', label: 'Stift', Icon: Pencil, taste: hotkeys.pen },
+                    { id: 'arrow', label: 'Pfeil', Icon: ArrowUpRight, taste: hotkeys.arrow },
+                    { id: 'spotlight', label: 'Spot', Icon: CircleDot, taste: hotkeys.spotlight },
+                    { id: 'text', label: 'Text', Icon: Type, taste: hotkeys.text },
                   ] as const
-                ).map(({ id, label, Icon }) => {
+                ).map(({ id, label, Icon, taste }) => {
                   const aktiv = werkzeug === id;
                   return (
                     <button
                       key={id}
                       type="button"
                       onClick={() => setWerkzeug(aktiv ? null : id)}
-                      title={
-                        id === 'select'
-                          ? 'Pfeile, Spotlights und Text verschieben oder skalieren'
-                          : label
-                      }
+                      title={`${label} (${taste.toUpperCase()})`}
                       className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
                         aktiv
                           ? 'bg-[#F59E0B] text-[#0B0E11]'
@@ -642,6 +821,15 @@ export function FilmRoomView({
                     >
                       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
                       <span className="hidden sm:inline">{label}</span>
+                      <kbd
+                        className={`rounded px-1 font-mono text-[9px] uppercase ${
+                          aktiv
+                            ? 'bg-[#0B0E11]/20 text-[#0B0E11]'
+                            : 'bg-[#161B22] text-[#8B949E]'
+                        }`}
+                      >
+                        {taste}
+                      </kbd>
                     </button>
                   );
                 })}
@@ -690,7 +878,7 @@ export function FilmRoomView({
                   onClick={() =>
                     onLetzteZeichnungEntfernen(reel.id, aktiverPlay.play_number, aktiverWinkel)
                   }
-                  title="Letzte Zeichnung in diesem Winkel rückgängig"
+                  title={`Letzte Zeichnung in diesem Winkel rückgängig (${hotkeys.undo.toUpperCase()})`}
                   className="rounded p-1 text-[#8B949E] hover:bg-[#1E2530] hover:text-white disabled:opacity-35"
                 >
                   <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -733,17 +921,22 @@ export function FilmRoomView({
 
               {winkelZeichnungen.map((z) => {
                 const pos = Math.min(100, Math.max(0, (z.timestamp_ms / dauerMs) * 100));
+                const zeichnungsFrame = zeitZuFrame(z.timestamp_ms);
+                const istAktiverFrame = istGleicherFrame(z.timestamp_ms, zeitMs);
                 return (
                   <button
                     key={z.id}
                     type="button"
-                    title={`Zeichnung (${z.angle}) bei ${formatiereZeit(z.timestamp_ms)}`}
+                    title={`Zeichnung (${z.angle}) · Frame ${zeichnungsFrame} (${formatiereZeit(z.timestamp_ms)})`}
                     onClick={() => {
                       setLaeuft(false);
-                      setZeitMs(z.timestamp_ms);
+                      setAutoStopMeldung(null);
+                      setZeitMs(frameZuZeit(zeichnungsFrame));
                     }}
                     style={{ left: `${pos}%` }}
-                    className="absolute top-0.5 h-4 w-1.5 -translate-x-1/2 rounded-sm bg-[#3B82F6] hover:bg-white"
+                    className={`absolute top-0.5 h-4 w-1.5 -translate-x-1/2 rounded-sm transition-colors ${
+                      istAktiverFrame ? 'bg-[#F59E0B] ring-1 ring-white' : 'bg-[#3B82F6] hover:bg-white'
+                    }`}
                   />
                 );
               })}
@@ -753,12 +946,12 @@ export function FilmRoomView({
                 aria-label="Videoposition"
                 min={0}
                 max={dauerMs}
-                step={20}
-                value={Math.round(zeitMs)}
+                step={FRAME_MS}
+                value={frameZuZeit(zeitZuFrame(zeitMs))}
                 onChange={(e) => {
                   setLaeuft(false);
                   setAutoStopMeldung(null);
-                  setZeitMs(Number(e.target.value));
+                  setZeitMs(frameZuZeit(zeitZuFrame(Number(e.target.value))));
                 }}
                 className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
               />
@@ -781,9 +974,11 @@ export function FilmRoomView({
                 type="button"
                 onClick={() => {
                   setLaeuft(false);
-                  setZeitMs((t) => Math.max(0, t - 100));
+                  setAutoStopMeldung(null);
+                  setZeitMs((t) => Math.max(0, frameZuZeit(zeitZuFrame(t) - 1)));
                 }}
-                aria-label="Ein Frame zurück"
+                aria-label="Exakt 1 Frame zurück"
+                title="Exakt 1 Frame zurück (←)"
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
               >
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -792,9 +987,9 @@ export function FilmRoomView({
                 type="button"
                 onClick={() => {
                   setAutoStopMeldung(null);
-                  if (!laeuft && zeitMs >= dauerMs - 50) {
+                  if (!laeuft && zeitMs >= dauerMs - FRAME_MS) {
                     setZeitMs(0);
-                    gestoppteTimestampsRef.current.clear();
+                    gestoppteFramesRef.current.clear();
                   }
                   setLaeuft((v) => !v);
                 }}
@@ -811,9 +1006,11 @@ export function FilmRoomView({
                 type="button"
                 onClick={() => {
                   setLaeuft(false);
-                  setZeitMs((t) => Math.min(dauerMs, t + 100));
+                  setAutoStopMeldung(null);
+                  setZeitMs((t) => Math.min(dauerMs, frameZuZeit(zeitZuFrame(t) + 1)));
                 }}
-                aria-label="Ein Frame vor"
+                aria-label="Exakt 1 Frame vor"
+                title="Exakt 1 Frame vor (→)"
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
               >
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -830,6 +1027,7 @@ export function FilmRoomView({
 
               <span className="ml-2 font-mono text-xs text-[#E6EDF3] tabular-nums">
                 {formatiereZeit(zeitMs)}{' '}
+                <span className="text-[#F59E0B]">· Fr {zeitZuFrame(zeitMs)}</span>{' '}
                 <span className="text-[#6E7681]">/ {formatiereZeit(dauerMs)}</span>
               </span>
             </div>
@@ -849,6 +1047,7 @@ export function FilmRoomView({
               <div
                 role="group"
                 aria-label="Kamerawinkel wählen"
+                title={`Kamerawinkel wechseln (${hotkeys.switchAngle.toUpperCase()})`}
                 className="flex items-center gap-0.5 rounded border border-[#232933] bg-[#13171D] p-0.5"
               >
                 {reel.angles.map((winkel) => {
@@ -889,7 +1088,7 @@ export function FilmRoomView({
                 <button
                   type="button"
                   onClick={() => setZeichenOverlaySichtbar((v) => !v)}
-                  title="Zeichenwerkzeuge über dem Video ein-/ausblenden"
+                  title={`Zeichenwerkzeuge über dem Video ein-/ausblenden (${hotkeys.toggleDrawBar.toUpperCase()})`}
                   className={`rounded border p-1.5 transition-colors ${
                     zeichenOverlaySichtbar
                       ? 'border-[#F59E0B]/60 bg-[#F59E0B]/10 text-[#F59E0B]'
@@ -917,7 +1116,11 @@ export function FilmRoomView({
               <button
                 type="button"
                 onClick={() => void toggleVollbild()}
-                title={vollbildAktiv ? 'Vollbild beenden (Esc)' : 'Vollbildmodus aktivieren'}
+                title={
+                  vollbildAktiv
+                    ? `Vollbild beenden (Esc / ${hotkeys.toggleFullscreen.toUpperCase()})`
+                    : `Vollbildmodus aktivieren (${hotkeys.toggleFullscreen.toUpperCase()})`
+                }
                 aria-label={vollbildAktiv ? 'Vollbild beenden' : 'Vollbildmodus aktivieren'}
                 className="rounded border border-[#232933] bg-[#13171D] p-1.5 text-[#E6EDF3] hover:border-[#F59E0B] hover:text-white"
               >
@@ -1075,39 +1278,123 @@ export function FilmRoomView({
               </span>
             </div>
 
-            <div className="mt-2.5 max-h-36 flex-1 space-y-2 overflow-y-auto">
+            <div className="mt-2.5 max-h-40 flex-1 space-y-2 overflow-y-auto">
               {playNotizen.length === 0 ? (
                 <p className="py-3 text-center text-xs text-[#6E7681]">
                   Noch keine Notizen für Play #{aktiverPlay?.play_number ?? '–'}.
                 </p>
               ) : (
-                playNotizen.map((notiz, idx) => (
-                  <button
-                    key={notiz.id ?? idx}
-                    type="button"
-                    onClick={() => {
-                      setLaeuft(false);
-                      setZeitMs(notiz.timestamp_ms);
-                    }}
-                    className="block w-full rounded border border-[#232933] bg-[#0B0E11] p-2.5 text-left transition-colors hover:border-[#36404F]"
-                  >
-                    <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-                      <span className="text-[#8B949E] tabular-nums">
-                        {formatiereZeit(notiz.timestamp_ms)}
-                      </span>
-                      <span
-                        className={notiz.status === 'DRAFT' ? 'text-[#F59E0B]' : 'text-[#4ADE80]'}
-                      >
-                        {notiz.status === 'DRAFT'
-                          ? 'DRAFT (Nur Coach)'
-                          : notiz.autorRolle === 'PLAYER'
-                            ? 'Eigene Notiz'
-                            : 'PUBLISHED'}
-                      </span>
+                playNotizen.map((notiz, idx) => {
+                  const wirdBearbeitet = Boolean(notiz.id && bearbeiteNotizId === notiz.id);
+                  const editierbar = darfNotizBearbeiten(notiz);
+
+                  return (
+                    <div
+                      key={notiz.id ?? idx}
+                      className="rounded border border-[#232933] bg-[#0B0E11] p-2.5 transition-colors hover:border-[#36404F]"
+                    >
+                      <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLaeuft(false);
+                            setAutoStopMeldung(null);
+                            setZeitMs(frameZuZeit(zeitZuFrame(notiz.timestamp_ms)));
+                          }}
+                          title="Zu diesem Zeitpunkt springen"
+                          className="text-[#8B949E] hover:text-white tabular-nums"
+                        >
+                          {formatiereZeit(notiz.timestamp_ms)}
+                        </button>
+
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={
+                              notiz.status === 'DRAFT' ? 'text-[#F59E0B]' : 'text-[#4ADE80]'
+                            }
+                          >
+                            {notiz.status === 'DRAFT'
+                              ? 'DRAFT'
+                              : notiz.autorRolle === 'PLAYER'
+                                ? 'Eigene Notiz'
+                                : 'PUBLISHED'}
+                          </span>
+
+                          {editierbar && !wirdBearbeitet && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => starteNotizBearbeitung(notiz)}
+                                title="Kommentar bearbeiten"
+                                aria-label="Kommentar bearbeiten"
+                                className="rounded p-0.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
+                              >
+                                <Pencil className="h-3 w-3" aria-hidden="true" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (aktiverPlay && notiz.id) {
+                                    onNotizLoeschen(reel.id, aktiverPlay.play_number, notiz.id);
+                                  }
+                                }}
+                                title="Kommentar löschen"
+                                aria-label="Kommentar löschen"
+                                className="rounded p-0.5 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
+                              >
+                                <Trash2 className="h-3 w-3" aria-hidden="true" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {wirdBearbeitet ? (
+                        <div className="mt-1.5 flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={bearbeiteNotizText}
+                            onChange={(e) => setBearbeiteNotizText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') speichereNotizBearbeitung();
+                              if (e.key === 'Escape') brecheNotizBearbeitungAb();
+                            }}
+                            aria-label="Kommentartext bearbeiten"
+                            className="min-w-0 flex-1 rounded border border-[#F59E0B] bg-[#13171D] px-2 py-1 text-xs text-white focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={speichereNotizBearbeitung}
+                            aria-label="Änderung speichern"
+                            className="rounded bg-[#F59E0B] p-1 text-[#0B0E11] hover:bg-[#FBBF24]"
+                          >
+                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={brecheNotizBearbeitungAb}
+                            aria-label="Bearbeitung abbrechen"
+                            className="rounded border border-[#232933] p-1 text-[#8B949E] hover:text-white"
+                          >
+                            <X className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setLaeuft(false);
+                            setAutoStopMeldung(null);
+                            setZeitMs(frameZuZeit(zeitZuFrame(notiz.timestamp_ms)));
+                          }}
+                          className="mt-1 block w-full text-left text-xs leading-snug text-[#E6EDF3]"
+                        >
+                          {notiz.text}
+                        </button>
+                      )}
                     </div>
-                    <p className="mt-1 text-xs leading-snug text-[#E6EDF3]">{notiz.text}</p>
-                  </button>
-                ))
+                  );
+                })
               )}
             </div>
 

@@ -1,23 +1,19 @@
-import { ArrowLeft, Film, Layers, ListFilter, Settings } from 'lucide-react';
-import type { NavigationsAnsicht, VideoReel } from '../shared/types.ts';
+import { ArrowLeft, Layers, ListFilter } from 'lucide-react';
+import type { VideoReel } from '../shared/types.ts';
 import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../shared/types.ts';
 
+type PlatzhalterAnsicht = 'cut-sync' | 'playlists';
+
 interface ModulePlaceholderViewProps {
-  ansicht: Exclude<NavigationsAnsicht, 'dashboard' | 'sysadmin'>;
+  ansicht: PlatzhalterAnsicht;
   ausgewaehltesReel: VideoReel | null;
   onZurueckZumDashboard: () => void;
 }
 
 const ANSICHT_META: Record<
-  Exclude<NavigationsAnsicht, 'dashboard' | 'sysadmin'>,
+  PlatzhalterAnsicht,
   { titel: string; paket: string; beschreibung: string }
 > = {
-  'film-room': {
-    titel: 'Film Room & Breakdown-Matrix',
-    paket: 'Paket 2',
-    beschreibung:
-      'Interaktiver Player mit Angle-Switcher (Sideline / Endzone), normalisiertem Vektor-Canvas, Auto-Stop, Draft/Publish-Session und Hudl-konformer Tastatur-Tabelle.',
-  },
   'cut-sync': {
     titel: 'Cut & Multi-Angle Sync Editor',
     paket: 'Paket 3',
@@ -30,12 +26,6 @@ const ANSICHT_META: Record<
     beschreibung:
       'Dynamische Cutups über beliebige Breakdown-Spalten (z. B. alle 3rd Downs in der Redzone) sowie typsichere Suchanfragen.',
   },
-  settings: {
-    titel: 'Team- & Instanz-Einstellungen',
-    paket: 'Paket 3',
-    beschreibung:
-      'Team-Farbpaletten für das Vektor-Canvas, Breakdown-Schema, App2App-Sharing-Token sowie Sysadmin-Optionen.',
-  },
 };
 
 export function ModulePlaceholderView({
@@ -44,14 +34,7 @@ export function ModulePlaceholderView({
   onZurueckZumDashboard,
 }: ModulePlaceholderViewProps) {
   const meta = ANSICHT_META[ansicht];
-  const Icon =
-    ansicht === 'film-room'
-      ? Film
-      : ansicht === 'cut-sync'
-        ? Layers
-        : ansicht === 'playlists'
-          ? ListFilter
-          : Settings;
+  const Icon = ansicht === 'cut-sync' ? Layers : ListFilter;
 
   return (
     <div className="space-y-6">
@@ -78,7 +61,7 @@ export function ModulePlaceholderView({
           </div>
         </div>
 
-        {ausgewaehltesReel && (ansicht === 'film-room' || ansicht === 'cut-sync') && (
+        {ausgewaehltesReel && ansicht === 'cut-sync' && (
           <div className="mt-6 border-t border-[#232933] pt-6">
             <h2 className="text-xs font-medium text-[#8B949E]">
               Aktuell gewähltes Reel für diese Ansicht

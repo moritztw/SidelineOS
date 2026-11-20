@@ -21,7 +21,10 @@ Dieses Dokument beschreibt die verbindliche Zielarchitektur von **SidelineOS** (
 | **Coordinator / Position Coach** | Upload, Cut & Sync, Breakdown, Telestration, `DRAFT`-Notizen, `Publish Session`, Spieler-Freigaben | Schreibzugriff im eigenen Team |
 | **Player** | Wiedergabe freigegebener Reels & Smart Playlists, eigene Notizen (optional) | Nur **explizit freigegebene** Reels/Units und `PUBLISHED`-Coach-Notizen |
 
-> **Multi-Rollen & Datenschutz:** Benutzer können mehrere Rollen gleichzeitig tragen (z. B. *Sysadmin + Team Admin + Coach*). Sämtliche Instanz-Funktionen liegen deshalb in einem eigenen **`Sysadmin`-Tab**, strikt getrennt von Team-Ansichten. Besitzt ein Konto ausschließlich die Rolle `Instance Admin` (ohne Team-Rolle), besteht auf Applikations- und API-Ebene keinerlei Einsicht in Team-Videos, Breakdowns oder Notizen.
+> **Multi-Rollen, Ansichts-Umschalter & Tab-Trennung:**
+> * **Getrennte Bereiche:** `Team-Einstellungen` (nur für `Team Admin`: Tagging-Schema, Custom-Felder, Wörterbuch), `Einstellungen` (persönliche Benutzer-Optionen für alle Team-Rollen: konfigurierbare Film-Room-Hotkeys, Kommentar-Overlay-Position, Auto-Stop) und `Sysadmin` (Instanz-Verwaltung & S3-Cleanup) sind strikt voneinander getrennt.
+> * **Produktiver Ansichts-Umschalter:** Konten mit untergeordneten Rollen können gezielt in deren Ansicht wechseln (`Team Admin` → `Coach` / `Spieler`; `Coach` → `Spieler`), um Freigaben und Fehler praxisnah zu prüfen. Für reine `Spieler` ist der Umschalter ausgeblendet.
+> * **Datenschutz (Sysadmin-Isolation):** Besitzt ein Konto ausschließlich die Rolle `Instance Admin` (ohne Team-Rolle), besteht auf Applikations- und API-Ebene keinerlei Einsicht in Team-Videos, Breakdowns oder Notizen.
 
 ---
 
@@ -71,5 +74,5 @@ PostgreSQL-Trigger führen niemals direkte S3-HTTP-Aufrufe aus. Stattdessen gilt
 
 ## 5. Sicherheitsprinzipien für KI-Suche & Canvas
 
-* **Normalisierte Canvas-Koordinaten:** Alle Vektorzeichnungen werden relativ zur Videofläche im Wertebereich `0.0` bis `1.0` gespeichert, damit Zeichnungen auf allen Bildschirmgrößen exakt liegen bleiben.
+* **Normalisierte & frame-gebundene Canvas-Zeichnungen:** Alle Vektorzeichnungen werden relativ zur Videofläche (`0.0` bis `1.0`), streng an ihren Kamerawinkel (`angle`) und an ihren exakten Video-Frame (`timestamp_ms` quantisiert auf Frame-Raster) gebunden. Auto-Stop pausiert die Wiedergabe exakt auf dem gezeichneten Frame.
 * **Typsichere KI-Suche:** Eine optionale LLM-Anbindung (Ollama / externe API) generiert niemals rohes SQL, sondern ausschließlich ein strikt validiertes JSON-Filterobjekt identisch zum Smart-Playlist-Filter. `team_id` wird immer serverseitig erzwungen.

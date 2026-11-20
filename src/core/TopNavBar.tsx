@@ -1,20 +1,23 @@
-import type { BenutzerProfil, NavigationsAnsicht } from '../shared/types.ts';
+import type { BenutzerProfil, NavigationsAnsicht, TeamRolle } from '../shared/types.ts';
 
 interface TopNavBarProps {
   aktiveAnsicht: NavigationsAnsicht;
-  profil: BenutzerProfil;
+  konto: BenutzerProfil;
+  aktiveTeamAnsicht: TeamRolle | null;
   onAnsichtWechseln: (ansicht: NavigationsAnsicht) => void;
   onPrimaerAktion: () => void;
 }
 
 export function TopNavBar({
   aktiveAnsicht,
-  profil,
+  konto,
+  aktiveTeamAnsicht,
   onAnsichtWechseln,
   onPrimaerAktion,
 }: TopNavBarProps) {
-  const hatTeamZugriff = profil.teamRolle !== null;
-  const istCoach = profil.teamRolle === 'COACH' || profil.teamRolle === 'TEAM_ADMIN';
+  const hatTeamZugriff = aktiveTeamAnsicht !== null;
+  const istCoach = aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN';
+  const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
 
   const sichtbareLinks: Array<{ id: NavigationsAnsicht; label: string }> = [];
 
@@ -25,25 +28,26 @@ export function TopNavBar({
     }
     sichtbareLinks.push({ id: 'film-room', label: 'Film Room' });
     sichtbareLinks.push({ id: 'playlists', label: 'Playlists' });
-    if (istCoach) {
-      sichtbareLinks.push({ id: 'settings', label: 'Einstellungen' });
+    if (istTeamAdmin) {
+      sichtbareLinks.push({ id: 'team-settings', label: 'Team-Einstellungen' });
     }
+    sichtbareLinks.push({ id: 'settings', label: 'Einstellungen' });
   }
 
-  // Eigener Sysadmin-Tab – auch wenn jemand gleichzeitig Team Admin / Coach ist
-  if (profil.istSysadmin) {
+  // Eigener Sysadmin-Tab – hängt immer am echten Benutzerkonto
+  if (konto.istSysadmin) {
     sichtbareLinks.push({ id: 'sysadmin', label: 'Sysadmin' });
   }
 
   const primaerLabel = istCoach
     ? 'Tapes hochladen'
-    : profil.teamRolle === 'PLAYER'
+    : aktiveTeamAnsicht === 'PLAYER'
       ? 'Film Room öffnen'
       : 'Cleanup prüfen';
 
   return (
     <header className="sticky top-0 z-30 border-b border-[#232933] bg-[#0B0E11]/95 backdrop-blur-sm">
-      <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-8 px-6">
+      <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-6 px-6">
         {/* Zone 1: Wortmarke */}
         <button
           type="button"
@@ -54,7 +58,7 @@ export function TopNavBar({
         </button>
 
         {/* Zone 2: Einzeilige Text-Navigation */}
-        <nav aria-label="Hauptnavigation" className="flex items-center gap-6 overflow-x-auto">
+        <nav aria-label="Hauptnavigation" className="flex items-center gap-5 overflow-x-auto">
           {sichtbareLinks.map((eintrag) => {
             const istAktiv = aktiveAnsicht === eintrag.id;
             return (

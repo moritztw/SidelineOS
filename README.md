@@ -1,14 +1,20 @@
+<p align="left">
+  <img src="docs/assets/sidelineos-logo.svg" alt="SidelineOS Logo" width="280" />
+</p>
+
 # SidelineOS
 
 **SidelineOS** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Sie bietet eine schlanke, datenschutzfreundliche Alternative zu kommerziellen Videoanalyse-Systemen.
 
-> **Projektstatus:** Aktiver UI-Prototyp (**Paket 1** – Core Shell, Videobibliothek, Spieler-Freigaben, JSON-Bundle-Import & Rollen-Trennung). Das Backend (PostgreSQL + S3-Grid) folgt nach Abschluss der UI-Abnahme.
+> **Projektstatus:** Aktiver UI-Prototyp (**Paket 1 & 2 abgeschlossen** – Core-Shell, Rollen-Ansichtsumschalter, Videobibliothek, granulare `/share/`-Links, JSON-Bundle-Import, Film Room mit frame-genauem editierbarem Vektor-Canvas, Vollbild, anpassbaren Hotkeys, Team-Einstellungen & Sysadmin-Tab). Das Backend (PostgreSQL + S3-Grid) folgt nach Abschluss der UI-Abnahme.
 
 ---
 
 ## Kernfunktionen
 
-* **Modulare Architektur:** Schlanker Core (Mandanten, Rollen, App-Shell) mit steckbaren Fachmodulen (Startfokus: **Modul A – Videoanalyse**).
+* **Modulare Architektur & klare Rollen-Trennung:** Schlanker Core mit separaten Bereichen für **Team-Einstellungen** (Team Admin), persönliche **Einstellungen** (Nutzer-Hotkeys & Präferenzen) sowie einem eigenen **Sysadmin**-Tab. Multi-Rollen-Konten können direkt in untergeordnete Ansichten wechseln (*Team Admin → Coach / Spieler*, *Coach → Spieler*).
+* **Frame-genauer Film Room:** Editierbares Vektor-Canvas (Pfeile, Spotlights, Text, Freihand) mit strikter Bindung an **exakten Frame und Kamerawinkel**, Vollbildmodus inkl. Video-Overlays, editierbaren Kommentaren in verschiebbarer Ecke sowie konfigurierbaren Nutzer-Hotkeys.
+* **Konfigurierbares Football-Tagging & Auto-Berechnung:** Vollständiger Football-Grundstock inkl. editierbarer `YD LN` ↔ `GN/LS` Automatik (pausiert bei `FLAG`), lernendem Team-Wörterbuch und Team-Admin-Verwaltung für Custom-Felder & Fehleinträge.
 * **Hybrid-Video-Modell:** Unterstützt sowohl vorgeschnittene **Einzelclips** (Kamera Start/Stop) als auch lange **Einzeldatei-Tapes** über Byte-Range-Time-Slices (`start_ms` / `end_ms`) im selben Schema.
 * **Multi-Angle mit optionalem Offset:** Mehrere Kamerawinkel pro Play (`SIDELINE`, `ENDZONE`, `TIGHT`). Lücken und fehlende Clips pro Winkel sind nativ zulässig; Zeitversatz (`offset_ms`) ist vollständig optional.
 * **Companion-App JSON-Import (`sideline-bundle.json`):** Importiert Clip-Zuordnungen, optionale Sync-Offsets, Breakdown-Tags und Coach-Notizen gebündelt in einem Schritt.

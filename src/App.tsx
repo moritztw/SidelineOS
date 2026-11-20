@@ -1,10 +1,18 @@
 import { useState } from 'react';
+import { Eye, RotateCcw } from 'lucide-react';
 import { TopNavBar } from './core/TopNavBar.tsx';
 import { SysadminIsolationView } from './core/SysadminIsolationView.tsx';
 import { ModulePlaceholderView } from './core/ModulePlaceholderView.tsx';
+import {
+  STANDARD_HOTKEYS,
+  STANDARD_NUTZER_EINSTELLUNGEN,
+  darfAnsichtWechseln,
+  ermittleWaehlbareTeamAnsichten,
+} from './core/rolePermissions.ts';
 import { DashboardView } from './modules/video-analysis/components/DashboardView.tsx';
 import { FilmRoomView } from './modules/video-analysis/components/FilmRoomView.tsx';
 import { TaggingSchemaSettings } from './modules/video-analysis/components/TaggingSchemaSettings.tsx';
+import { UserSettingsView } from './modules/video-analysis/components/UserSettingsView.tsx';
 import { DEMO_TEAMS, INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
 import {
   STANDARD_TAG_SCHEMA,
@@ -18,13 +26,35 @@ import type {
   CoachNotiz,
   NavigationsAnsicht,
   NormPunkt,
+  NutzerEinstellungen,
   ShareDownloadLink,
   SpielerFreigabe,
   TagFeldKonfig,
   TeamFreigabeEintrag,
+  TeamRolle,
   VideoReel,
 } from './shared/types.ts';
-import { DEMO_PROFILE } from './shared/types.ts';
+import { DEMO_PROFILE, TEAM_ROLLEN_LABELS } from './shared/types.ts';
+
+const SETTINGS_STORAGE_KEY = 'sidelineos.user_settings.v1';
+
+function ladeNutzerEinstellungen(): NutzerEinstellungen {
+  try {
+    const roh = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!roh) return STANDARD_NUTZER_EINSTELLUNGEN;
+    const geparst = JSON.parse(roh) as Partial<NutzerEinstellungen>;
+    return {
+      ...STANDARD_NUTZER_EINSTELLUNGEN,
+      ...geparst,
+      hotkeys: {
+        ...STANDARD_HOTKEYS,
+        ...(geparst.hotkeys ?? {}),
+      },
+    };
+  } catch {
+    return STANDARD_NUTZER_EINSTELLUNGEN;
+  }
+}
 
 function zaehleGetaggtePlays(reel: VideoReel): number {
   return reel.plays.filter((play) => {
@@ -49,28 +79,48 @@ function zaehleEntwuerfe(reel: VideoReel): number {
 
 export default function App() {
   const [aktiveAnsicht, setAktiveAnsicht] = useState<NavigationsAnsicht>('dashboard');
-  const [profilId, setProfilId] = useState<string>(DEMO_PROFILE[0].id);
+  const [kontoId, setKontoId] = useState<string>(DEMO_PROFILE[0].id);
+  const [aktiveTeamAnsicht, setAktiveTeamAnsicht] = useState<TeamRolle | null>(
+    DEMO_PROFILE[0].teamRolle
+  );
   const [aktivesTeamId, setAktivesTeamId] = useState<string>(DEMO_TEAMS[0].id);
   const [reels, setReels] = useState<VideoReel[]>(INITIALE_DEMO_REELS);
   const [tagSchema, setTagSchema] = useState<TagFeldKonfig[]>(STANDARD_TAG_SCHEMA);
+  const [nutzerEinstellungen, setNutzerEinstellungen] = useState<NutzerEinstellungen>(
+    ladeNutzerEinstellungen
+  );
   const [ausgewaehltesReelId, setAusgewaehltesReelId] = useState<string>(
     INITIALE_DEMO_REELS[0].id
   );
   const [uploadHervorgehoben, setUploadHervorgehoben] = useState(false);
 
-  const profil: BenutzerProfil =
-    DEMO_PROFILE.find((p) => p.id === profilId) ?? DEMO_PROFILE[0];
+  const konto: BenutzerProfil = DEMO_PROFILE.find((p) => p.id === kontoId) ?? DEMO_PROFILE[0];
+  const waehlbareAnsichten = ermittleWaehlbareTeamAnsichten(konto);
+  const kannAnsichtWechseln = darfAnsichtWechseln(konto);
+  const istVorschauModus =
+    aktiveTeamAnsicht !== null &&
+    konto.teamRolle !== null &&
+    aktiveTeamAnsicht !== konto.teamRolle;
 
   const sichtbareTeamReels = reels.filter(
     (r) =>
       r.teamId === aktivesTeamId &&
-      (profil.teamRolle === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
+      (aktiveTeamAnsicht === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
   );
 
   const ausgewaehltesReel =
     sichtbareTeamReels.find((r) => r.id === ausgewaehltesReelId) ??
     sichtbareTeamReels[0] ??
     null;
+
+  const handleNutzerEinstellungenAendern = (neu: NutzerEinstellungen) => {
+    setNutzerEinstellungen(neu);
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(neu));
+    } catch {
+      // Speicher im eingebetteten Kontext ggf. deaktiviert
+    }
+  };
 
   const aktualisiereReel = (reelId: string, updater: (reel: VideoReel) => VideoReel) => {
     setReels((alt) =>
@@ -87,10 +137,12 @@ export default function App() {
     );
   };
 
-  const handleProfilWechseln = (neueId: string) => {
+  // Demo-Konto wechseln (simuliert Login mit einem anderen Benutzerkonto)
+  const handleKontoWechseln = (neueId: string) => {
     const neu = DEMO_PROFILE.find((p) => p.id === neueId);
     if (!neu) return;
-    setProfilId(neueId);
+    setKontoId(neueId);
+    setAktiveTeamAnsicht(neu.teamRolle);
 
     if (neu.teamRolle === null) {
       setAktiveAnsicht('sysadmin');
@@ -100,23 +152,42 @@ export default function App() {
       setAktiveAnsicht('dashboard');
       return;
     }
-    if (
-      neu.teamRolle === 'PLAYER' &&
-      (aktiveAnsicht === 'cut-sync' || aktiveAnsicht === 'settings' || aktiveAnsicht === 'sysadmin')
-    ) {
+    if (neu.teamRolle !== 'TEAM_ADMIN' && aktiveAnsicht === 'team-settings') {
+      setAktiveAnsicht('dashboard');
+      return;
+    }
+    if (neu.teamRolle === 'PLAYER' && aktiveAnsicht === 'cut-sync') {
+      setAktiveAnsicht('dashboard');
+    }
+  };
+
+  // Produktiver Ansichts-Umschalter für untergeordnete Rollen (Team Admin -> Coach/Spieler, Coach -> Spieler)
+  const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
+    if (!waehlbareAnsichten.includes(zielRolle)) return;
+    setAktiveTeamAnsicht(zielRolle);
+
+    if (aktiveAnsicht === 'sysadmin') {
+      setAktiveAnsicht('dashboard');
+      return;
+    }
+    if (zielRolle !== 'TEAM_ADMIN' && aktiveAnsicht === 'team-settings') {
+      setAktiveAnsicht('dashboard');
+      return;
+    }
+    if (zielRolle === 'PLAYER' && aktiveAnsicht === 'cut-sync') {
       setAktiveAnsicht('dashboard');
     }
   };
 
   const handlePrimaerAktion = () => {
-    if (profil.teamRolle === 'COACH' || profil.teamRolle === 'TEAM_ADMIN') {
+    if (aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN') {
       setAktiveAnsicht('dashboard');
       setUploadHervorgehoben(true);
       setTimeout(() => {
         document.getElementById('upload-panel')?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
       setTimeout(() => setUploadHervorgehoben(false), 1800);
-    } else if (profil.teamRolle === 'PLAYER') {
+    } else if (aktiveTeamAnsicht === 'PLAYER') {
       setAktiveAnsicht('film-room');
     } else {
       setAktiveAnsicht('sysadmin');
@@ -184,13 +255,48 @@ export default function App() {
     setTagSchema((alt) => alt.filter((f) => f.key !== feldKey));
   };
 
-  // Notizen & Canvas-Zeichnungen
+  // Notizen (erstellen, bearbeiten, löschen) & Canvas-Zeichnungen
   const handleNotizHinzufuegen = (reelId: string, playNumber: number, notiz: CoachNotiz) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
       plays: reel.plays.map((play) =>
         play.play_number === playNumber
           ? { ...play, notes: [...(play.notes ?? []), notiz] }
+          : play
+      ),
+    }));
+  };
+
+  const handleNotizBearbeiten = (
+    reelId: string,
+    playNumber: number,
+    notizId: string,
+    neuerText: string
+  ) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? {
+              ...play,
+              notes: (play.notes ?? []).map((n) =>
+                n.id === notizId ? { ...n, text: neuerText } : n
+              ),
+            }
+          : play
+      ),
+    }));
+  };
+
+  const handleNotizLoeschen = (reelId: string, playNumber: number, notizId: string) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? {
+              ...play,
+              notes: (play.notes ?? []).filter((n) => n.id !== notizId),
+            }
           : play
       ),
     }));
@@ -295,16 +401,17 @@ export default function App() {
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
       <TopNavBar
         aktiveAnsicht={aktiveAnsicht}
-        profil={profil}
+        konto={konto}
+        aktiveTeamAnsicht={aktiveTeamAnsicht}
         onAnsichtWechseln={setAktiveAnsicht}
         onPrimaerAktion={handlePrimaerAktion}
       />
 
-      {/* Kontext-Leiste: Team-Wahl & Multi-Rollen-Profil-Umschalter */}
+      {/* Kontext-Leiste: Team-Wahl, produktiver Ansichts-Umschalter (nur bei Rollen unter sich) & Demo-Konto */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex items-center gap-3">
-            {profil.teamRolle === null || aktiveAnsicht === 'sysadmin' ? (
+            {aktiveTeamAnsicht === null || aktiveAnsicht === 'sysadmin' ? (
               <span className="text-xs font-medium text-[#8B949E]">
                 Instanz-Verwaltung · Sysadmin-Bereich (getrennt von Team-Daten)
               </span>
@@ -326,43 +433,93 @@ export default function App() {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-[#8B949E]">Profil testen</span>
-            <div
-              role="group"
-              aria-label="Rollen-Profil wechseln"
-              className="flex flex-wrap items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
-            >
-              {DEMO_PROFILE.map((p) => {
-                const aktiv = p.id === profil.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => handleProfilWechseln(p.id)}
-                    className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
-                      aktiv ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
-                    }`}
-                  >
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Produktiver Multi-Rollen-Ansichtsumschalter – nur für Rollen mit untergeordneten Ansichten */}
+            {kannAnsichtWechseln && (
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
+                  <Eye className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+                  Ansicht
+                </span>
+                <div
+                  role="group"
+                  aria-label="Rollen-Ansicht umschalten"
+                  className="flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
+                >
+                  {waehlbareAnsichten.map((rolle) => {
+                    const aktiv = aktiveTeamAnsicht === rolle;
+                    return (
+                      <button
+                        key={rolle}
+                        type="button"
+                        onClick={() => handleTeamAnsichtWechseln(rolle)}
+                        className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                          aktiv
+                            ? 'bg-[#232933] text-white'
+                            : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                        }`}
+                      >
+                        {TEAM_ROLLEN_LABELS[rolle]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Prototyp-Kontoauswahl zum Prüfen der Sichtbarkeit je echtem Login-Konto */}
+            <label className="flex items-center gap-2 border-l border-[#232933] pl-4 text-xs text-[#6E7681]">
+              <span>Demo-Konto</span>
+              <select
+                aria-label="Angemeldetes Demo-Konto wechseln"
+                value={konto.id}
+                onChange={(e) => handleKontoWechseln(e.target.value)}
+                className="rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-xs text-[#E6EDF3] focus:border-[#F59E0B] focus:outline-none"
+              >
+                {DEMO_PROFILE.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-[#13171D]">
                     {p.label}
-                  </button>
-                );
-              })}
-            </div>
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
       </div>
 
+      {/* Hinweis-Banner bei aktiver Vorschau einer untergeordneten Rolle */}
+      {istVorschauModus && konto.teamRolle && aktiveTeamAnsicht && (
+        <div className="border-b border-[#F59E0B]/30 bg-[#F59E0B]/10">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-[#FDE68A]">
+            <span>
+              Ansichts-Vorschau aktiv: Du siehst die Oberfläche als{' '}
+              <strong className="font-semibold text-white">
+                {TEAM_ROLLEN_LABELS[aktiveTeamAnsicht]}
+              </strong>{' '}
+              (deine eigentliche Rolle: {TEAM_ROLLEN_LABELS[konto.teamRolle]}).
+            </span>
+            <button
+              type="button"
+              onClick={() => handleTeamAnsichtWechseln(konto.teamRolle!)}
+              className="inline-flex items-center gap-1.5 rounded border border-[#F59E0B]/50 bg-[#0B0E11] px-2.5 py-1 text-xs font-medium text-[#F59E0B] hover:bg-[#13171D]"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              Zurück zu {TEAM_ROLLEN_LABELS[konto.teamRolle]}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Hauptinhalt */}
       <main className="mx-auto max-w-[1440px] px-6 py-6">
-        {aktiveAnsicht === 'sysadmin' && profil.istSysadmin ? (
+        {aktiveAnsicht === 'sysadmin' && konto.istSysadmin ? (
           <SysadminIsolationView />
-        ) : profil.teamRolle === null ? (
+        ) : aktiveTeamAnsicht === null ? (
           <SysadminIsolationView />
         ) : aktiveAnsicht === 'dashboard' ? (
           <DashboardView
             teamId={aktivesTeamId}
-            teamRolle={profil.teamRolle}
+            teamRolle={aktiveTeamAnsicht}
             tagSchema={tagSchema}
             reels={reels}
             uploadHervorgehoben={uploadHervorgehoben}
@@ -376,14 +533,17 @@ export default function App() {
           <FilmRoomView
             key={ausgewaehltesReel.id}
             reel={ausgewaehltesReel}
-            teamRolle={profil.teamRolle}
+            teamRolle={aktiveTeamAnsicht}
             tagSchema={tagSchema}
+            nutzerEinstellungen={nutzerEinstellungen}
             onZurueck={() => setAktiveAnsicht('dashboard')}
-            onSchemaSettingsOeffnen={() => setAktiveAnsicht('settings')}
+            onSchemaSettingsOeffnen={() => setAktiveAnsicht('team-settings')}
             onFreigabeAendern={handleFreigabeAendern}
             onFeldAendern={handleFeldAendern}
             onDefinitionLernen={handleDefinitionLernen}
             onNotizHinzufuegen={handleNotizHinzufuegen}
+            onNotizBearbeiten={handleNotizBearbeiten}
+            onNotizLoeschen={handleNotizLoeschen}
             onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
             onZeichnungAktualisieren={handleZeichnungAktualisieren}
             onZeichnungEntfernen={handleZeichnungEntfernen}
@@ -391,9 +551,9 @@ export default function App() {
             onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
             onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
           />
-        ) : aktiveAnsicht === 'settings' ? (
+        ) : aktiveAnsicht === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
           <TaggingSchemaSettings
-            teamRolle={profil.teamRolle}
+            teamRolle={aktiveTeamAnsicht}
             tagSchema={tagSchema}
             onFeldToggle={handleFeldToggle}
             onDefinitionHinzufuegen={handleDefinitionLernen}
@@ -401,9 +561,15 @@ export default function App() {
             onCustomFeldErstellen={handleCustomFeldErstellen}
             onCustomFeldLoeschen={handleCustomFeldLoeschen}
           />
+        ) : aktiveAnsicht === 'settings' ? (
+          <UserSettingsView
+            aktiveTeamAnsicht={aktiveTeamAnsicht}
+            einstellungen={nutzerEinstellungen}
+            onEinstellungenAendern={handleNutzerEinstellungenAendern}
+          />
         ) : (
           <ModulePlaceholderView
-            ansicht={aktiveAnsicht as 'cut-sync' | 'playlists' | 'film-room' | 'settings'}
+            ansicht={aktiveAnsicht === 'playlists' ? 'playlists' : 'cut-sync'}
             ausgewaehltesReel={ausgewaehltesReel}
             onZurueckZumDashboard={() => setAktiveAnsicht('dashboard')}
           />
