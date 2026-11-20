@@ -1,9 +1,11 @@
 import type {
+  BreakdownFeldKey,
   CoachNotiz,
   PlayBreakdown,
   PlayQuelle,
   QuellModus,
   ReelKategorie,
+  ShareDownloadLink,
   SidelineBundleV1,
   SpielerFreigabe,
   Spielzug,
@@ -63,7 +65,6 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
     );
   }
 
-  // Reel-Metadaten prüfen
   const reelRoh = daten.reel;
   let reelTitel = '';
   let reelKategorie: ReelKategorie = 'GAME';
@@ -110,7 +111,6 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
     }
   }
 
-  // Kamerawinkel prüfen
   const anglesRoh = daten.angles;
   const angles: string[] = [];
   if (!Array.isArray(anglesRoh) || anglesRoh.length === 0) {
@@ -128,7 +128,6 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
     }
   }
 
-  // Spielzüge prüfen
   const playsRoh = daten.plays;
   const spielzuege: Spielzug[] = [];
   let anzahlOhneOffset = 0;
@@ -224,7 +223,6 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
         fehler.push(`${praefix} benötigt mindestens eine gültige Videoquelle.`);
       }
 
-      // Fehlende deklarierte Winkel als Lücke registrieren
       for (const winkel of angles) {
         if (!(winkel in bereinigteQuellen)) {
           bereinigteQuellen[winkel] = null;
@@ -242,10 +240,12 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
               (n): n is Record<string, unknown> =>
                 istObjekt(n) && typeof n.text === 'string' && typeof n.timestamp_ms === 'number'
             )
-            .map((n) => ({
+            .map((n, noteIdx) => ({
+              id: typeof n.id === 'string' ? n.id : `note-${index}-${noteIdx}`,
               timestamp_ms: n.timestamp_ms as number,
               text: (n.text as string).trim(),
               status: n.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
+              autorRolle: n.autorRolle === 'PLAYER' ? 'PLAYER' : 'COACH',
             }))
         : undefined;
 
@@ -291,9 +291,6 @@ export function validiereUndParseBundle(rohText: string): ValidierungsErgebnis {
   };
 }
 
-/**
- * Konvertiert ein validiertes JSON-Bundle in ein VideoReel für die Bibliothek.
- */
 export function bundleZuReel(
   bundle: SidelineBundleV1,
   teamId: string,
@@ -325,15 +322,13 @@ export function bundleZuReel(
     playCount: bundle.plays.length,
     taggedCount: getaggtePlays,
     visibility: bundle.reel.visibility ?? 'COACHES_ONLY',
-    sharedWithTeams: [],
+    teamFreigaben: [],
+    shareLinks: [],
     draftNoteCount: entwurfsNotizen,
     plays: bundle.plays,
   };
 }
 
-/**
- * Exportiert ein bestehendes Reel wieder als standardkonformes sideline-bundle.json (v1.0).
- */
 export function reelZuBundle(reel: VideoReel): SidelineBundleV1 {
   return {
     schema_version: '1.0',
@@ -349,8 +344,113 @@ export function reelZuBundle(reel: VideoReel): SidelineBundleV1 {
 }
 
 /**
- * Beispiel-Bundle für Companion-App-Tests (Multi-Angle, optionaler Offset, Lücke in Angle B).
+ * Erzeugt ein datenschutzgefiltertes Bundle für Team-Tausch oder /share/ Download-Links.
+ * Coach-Notizen und Canvas-Zeichnungen werden niemals an fremde Teams/Links weitergegeben.
  */
+export function filtereBundleFuerFreigabe(
+  reel: VideoReel,
+  freigegebeneFelder: BreakdownFeldKey[]
+): SidelineBundleV1 {
+  const erlaubteFelder = new Set<BreakdownFeldKey>(freigegebeneFelder);
+
+  return {
+    schema_version: '1.0',
+    reel: {
+      title: reel.title,
+      category: reel.category,
+      event_date: reel.eventDate,
+    },
+    angles: [...reel.angles],
+    plays: reel.plays.map((play) => {
+      const gefiltertesBreakdown: PlayBreakdown = {};
+      if (play.breakdown && erlaubteFelder.size > 0) {
+        for (const feld of erlaubteFelder) {
+          const wert = play.breakdown[feld];
+          if (wert !== undefined) {
+            (gefiltertesBreakdown as Record<string, unknown>)[feld] = wert;
+          }
+        }
+      }
+
+      return {
+        play_number: play.play_number,
+        sources: play.sources,
+        ...(Object.keys(gefiltertesBreakdown).length > 0
+          ? { breakdown: gefiltertesBreakdown }
+          : {}),
+      };
+    }),
+  };
+}
+
+/**
+ * Prüft, ob ein /share/-Download-Link aktiv und noch nicht abgelaufen ist.
+ */
+export function istShareLinkGueltig(
+  link: ShareDownloadLink,
+  jetzt: Date = new Date()
+): boolean {
+  if (!link.aktiv) return false;
+  const ablauf = Date.parse(link.gueltigBis);
+  if (Number.isNaN(ablauf)) return false;
+  return ablauf > jetzt.getTime();
+}
+
+/**
+ * Erzeugt einen zufälligen /share/<token>-Pfad.
+ */
+export function generiereShareLinkPfad(): { token: string; pfad: string } {
+  const zeichen = 'abcdefghjkmnpqrstuvwxyz23456789';
+  let token = 'sl-';
+  for (let i = 0; i < 8; i += 1) {
+    token += zeichen[Math.floor(Math.random() * zeichen.length)];
+  }
+  return { token, pfad: `/share/${token}` };
+}
+
+/**
+ * Exportiert Spielzüge als Hudl-kompatible CSV-Tabelle (optional auf bestimmte Felder eingeschränkt).
+ */
+export function exportiereBreakdownAlsCsv(
+  plays: Spielzug[],
+  felder?: BreakdownFeldKey[]
+): string {
+  const spalten: Array<{ key: BreakdownFeldKey; header: string }> = [
+    { key: 'odk', header: 'ODK' },
+    { key: 'down', header: 'DN' },
+    { key: 'distance', header: 'DIST' },
+    { key: 'yard_line', header: 'YARD LN' },
+    { key: 'hash', header: 'HASH' },
+    { key: 'play_type', header: 'PLAY TYPE' },
+    { key: 'off_form', header: 'OFF FORM' },
+    { key: 'def_front', header: 'DEF FRONT' },
+    { key: 'coverage', header: 'COVERAGE' },
+    { key: 'result', header: 'RESULT' },
+    { key: 'gn_ls', header: 'GN/LS' },
+  ];
+
+  const aktiveSpalten = felder
+    ? spalten.filter((s) => felder.includes(s.key))
+    : spalten;
+
+  const escapeCsv = (wert: unknown): string => {
+    if (wert === undefined || wert === null) return '';
+    const text = String(wert);
+    if (/[",\n]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const kopfzeile = ['PLAY #', ...aktiveSpalten.map((s) => s.header)].join(',');
+  const zeilen = plays.map((play) => {
+    const werte = aktiveSpalten.map((s) => escapeCsv(play.breakdown?.[s.key]));
+    return [play.play_number, ...werte].join(',');
+  });
+
+  return [kopfzeile, ...zeilen].join('\n');
+}
+
 export function erstelleBeispielBundle(): SidelineBundleV1 {
   return {
     schema_version: '1.0',
@@ -389,9 +489,11 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
         },
         notes: [
           {
+            id: 'demo-n1',
             timestamp_ms: 2100,
             text: 'Sauberer Double-Team am 3-Tech, Cutback-Lane offen.',
             status: 'DRAFT',
+            autorRolle: 'COACH',
           },
         ],
       },
@@ -399,7 +501,6 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
         play_number: 2,
         sources: {
           SIDELINE: { file: 'sl_002.mp4', source_mode: 'CLIP_FILE', start_ms: 0, end_ms: 9100 },
-          // Bewusst ohne offset_ms – Offset ist optional
           ENDZONE: { file: 'ez_002.mp4', source_mode: 'CLIP_FILE', start_ms: 0, end_ms: 9100 },
         },
         breakdown: {
@@ -420,7 +521,6 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
         play_number: 3,
         sources: {
           SIDELINE: { file: 'sl_003.mp4', source_mode: 'CLIP_FILE', start_ms: 0, end_ms: 6800 },
-          // Endzone-Kamera hat diesen Spielzug verpasst
           ENDZONE: null,
         },
         breakdown: {

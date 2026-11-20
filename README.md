@@ -76,8 +76,8 @@ sidelineos/
 ## Roadmap
 
 - [x] **Paket 1:** Repository-Grundgerüst, Core-Shell, Dashboard, Spieler-Freigaben, JSON-Bundle-Import & -Export, Rollenansichten (Coach / Spieler / Sysadmin)
-- [ ] **Paket 2:** Interaktiver Film Room, Vektor-Canvas (normalisierte Koordinaten), Hudl-Breakdown-Data-Grid & `Draft / Publish Session`
-- [ ] **Paket 3:** Cut & Multi-Angle Sync Editor (`Einzelclip-Sync` + `Fast-Cut Raw Tape`), Smart Playlists & Sysadmin-S3-Cleanup-Queue
+- [x] **Paket 2:** Interaktiver Film Room, Vektor-Canvas (normalisierte Koordinaten), Hudl-Breakdown-Data-Grid, `Draft / Publish Session`, granulare Tagging-Freigaben je Team & ablaufende `/share/`-Download-Links
+- [ ] **Paket 3:** Cut & Multi-Angle Sync Editor (`Einzelclip-Sync` + `Fast-Cut Raw Tape`), Smart Playlists & erweiterte Team-/Instanz-Einstellungen
 - [ ] **Phase 4:** Stateless Backend (Express + PostgreSQL + S3-Storage + Docker Compose / Proxmox LXC)
 
 ---

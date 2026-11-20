@@ -50,10 +50,14 @@ media_reels (physisches Asset-Container-Objekt)
 
 ---
 
-## 4. Team-Sharing & S3-Cleanup mit Schonfrist
+## 4. Team-Sharing, `/share/`-Download-Links & S3-Cleanup mit Schonfrist
 
 ### Trennung von Asset und Team-Metadaten
-Titel (`vs. Berlin Rebels`), Kategorie (`GAME` vs. `SCOUTING`), Sichtbarkeit für Spieler sowie sämtliche Breakdowns und Notizen liegen **immer auf der Team-Ebene** (`team_reel_access`), niemals global am physischen Asset. Beim Teilen auf derselben Instanz wird nur eine neue Referenz angelegt – Team B sieht keine internen Play-Calls von Team A.
+Titel (`vs. Berlin Rebels`), Kategorie (`GAME` vs. `SCOUTING`), Sichtbarkeit für Spieler sowie sämtliche Breakdowns und Notizen liegen **immer auf der Team-Ebene** (`team_reel_access`), niemals global am physischen Asset.
+
+### Granulare Freigabe von Tagging-Daten (Team-zu-Team & Download-Links)
+* **Instanz-Teams & Scouting-Pools:** Für jedes geteilte Team wird individuell konfiguriert, welche Breakdown-Spalten mitgegeben werden (Standard: `[]` = nur Videomaterial; optional einzelne Spalten wie `ODK`, `DN`, `DIST`, `HASH` oder das gesamte Breakdown). Coach-Notizen und Canvas-Zeichnungen bleiben **immer privat**.
+* **Externe `/share/<token>`-Download-Links:** Coaches können zeitlich befristete Download-Links unter `/share/<token>` erzeugen (inkl. wählbarer Ablaufzeit, z. B. 24 h / 7 / 14 / 30 Tage, und individueller Spalten-Auswahl für das mitgelieferte JSON/CSV-Paket). Nach Ablauf oder manuellem Widerruf liefert der Endpunkt `410 Gone` zurück.
 
 ### Ausfallsicheres S3-Löschen (Outbox-Pattern + Retention-Delay)
 PostgreSQL-Trigger führen niemals direkte S3-HTTP-Aufrufe aus. Stattdessen gilt folgender Ablauf:

@@ -3,11 +3,17 @@ import { TopNavBar } from './core/TopNavBar.tsx';
 import { SysadminIsolationView } from './core/SysadminIsolationView.tsx';
 import { ModulePlaceholderView } from './core/ModulePlaceholderView.tsx';
 import { DashboardView } from './modules/video-analysis/components/DashboardView.tsx';
+import { FilmRoomView } from './modules/video-analysis/components/FilmRoomView.tsx';
 import { DEMO_TEAMS, INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
 import type {
   BenutzerRolle,
+  CanvasZeichnung,
+  CoachNotiz,
   NavigationsAnsicht,
+  PlayBreakdown,
+  ShareDownloadLink,
   SpielerFreigabe,
+  TeamFreigabeEintrag,
   VideoReel,
 } from './shared/types.ts';
 
@@ -16,6 +22,22 @@ const ROLLEN_TABS: Array<{ id: BenutzerRolle; label: string }> = [
   { id: 'PLAYER', label: 'Spieler' },
   { id: 'SYSADMIN', label: 'Sysadmin' },
 ];
+
+function zaehleGetaggtePlays(reel: VideoReel): number {
+  return reel.plays.filter(
+    (play) =>
+      play.breakdown &&
+      Object.values(play.breakdown).some((v) => v !== undefined && v !== '')
+  ).length;
+}
+
+function zaehleEntwuerfe(reel: VideoReel): number {
+  return reel.plays.reduce((summe, play) => {
+    const notes = (play.notes ?? []).filter((n) => n.status === 'DRAFT').length;
+    const drawings = (play.drawings ?? []).filter((d) => d.status === 'DRAFT').length;
+    return summe + notes + drawings;
+  }, 0);
+}
 
 export default function App() {
   const [aktiveAnsicht, setAktiveAnsicht] = useState<NavigationsAnsicht>('dashboard');
@@ -27,11 +49,34 @@ export default function App() {
   );
   const [uploadHervorgehoben, setUploadHervorgehoben] = useState(false);
 
-  const ausgewaehltesReel = reels.find((r) => r.id === ausgewaehltesReelId) ?? null;
+  const sichtbareTeamReels = reels.filter(
+    (r) =>
+      r.teamId === aktivesTeamId &&
+      (rolle === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
+  );
+
+  const ausgewaehltesReel =
+    sichtbareTeamReels.find((r) => r.id === ausgewaehltesReelId) ??
+    sichtbareTeamReels[0] ??
+    null;
+
+  const aktualisiereReel = (reelId: string, updater: (reel: VideoReel) => VideoReel) => {
+    setReels((alt) =>
+      alt.map((reel) => {
+        if (reel.id !== reelId) return reel;
+        const neu = updater(reel);
+        return {
+          ...neu,
+          playCount: neu.plays.length,
+          taggedCount: zaehleGetaggtePlays(neu),
+          draftNoteCount: zaehleEntwuerfe(neu),
+        };
+      })
+    );
+  };
 
   const handleRolleWechseln = (neueRolle: BenutzerRolle) => {
     setRolle(neueRolle);
-    // Bei Rollenwechsel auf erlaubte Startansicht zurücksetzen
     if (neueRolle === 'SYSADMIN' && aktiveAnsicht !== 'dashboard' && aktiveAnsicht !== 'settings') {
       setAktiveAnsicht('dashboard');
     }
@@ -61,15 +106,87 @@ export default function App() {
   };
 
   const handleFreigabeAendern = (reelId: string, freigabe: SpielerFreigabe) => {
-    setReels((alt) =>
-      alt.map((reel) => (reel.id === reelId ? { ...reel, visibility: freigabe } : reel))
-    );
+    aktualisiereReel(reelId, (reel) => ({ ...reel, visibility: freigabe }));
   };
 
-  const handleTeilenAendern = (reelId: string, teams: string[]) => {
-    setReels((alt) =>
-      alt.map((reel) => (reel.id === reelId ? { ...reel, sharedWithTeams: teams } : reel))
-    );
+  const handleTeamFreigabenAendern = (reelId: string, teamFreigaben: TeamFreigabeEintrag[]) => {
+    aktualisiereReel(reelId, (reel) => ({ ...reel, teamFreigaben }));
+  };
+
+  const handleShareLinksAendern = (reelId: string, shareLinks: ShareDownloadLink[]) => {
+    aktualisiereReel(reelId, (reel) => ({ ...reel, shareLinks }));
+  };
+
+  const handleBreakdownAendern = (
+    reelId: string,
+    playNumber: number,
+    patch: Partial<PlayBreakdown>
+  ) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? { ...play, breakdown: { ...(play.breakdown ?? {}), ...patch } }
+          : play
+      ),
+    }));
+  };
+
+  const handleNotizHinzufuegen = (reelId: string, playNumber: number, notiz: CoachNotiz) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? { ...play, notes: [...(play.notes ?? []), notiz] }
+          : play
+      ),
+    }));
+  };
+
+  const handleZeichnungHinzufuegen = (
+    reelId: string,
+    playNumber: number,
+    zeichnung: CanvasZeichnung
+  ) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? { ...play, drawings: [...(play.drawings ?? []), zeichnung] }
+          : play
+      ),
+    }));
+  };
+
+  const handleLetzteZeichnungEntfernen = (reelId: string, playNumber: number) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? { ...play, drawings: (play.drawings ?? []).slice(0, -1) }
+          : play
+      ),
+    }));
+  };
+
+  const handleAlleZeichnungenLeeren = (reelId: string, playNumber: number) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber ? { ...play, drawings: [] } : play
+      ),
+    }));
+  };
+
+  const handleSessionVeroeffentlichen = (reelId: string) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) => ({
+        ...play,
+        notes: play.notes?.map((n) => ({ ...n, status: 'PUBLISHED' as const })),
+        drawings: play.drawings?.map((d) => ({ ...d, status: 'PUBLISHED' as const })),
+      })),
+    }));
   };
 
   const handleReelOeffnen = (reel: VideoReel) => {
@@ -86,7 +203,7 @@ export default function App() {
         onPrimaerAktion={handlePrimaerAktion}
       />
 
-      {/* Kontext-Leiste unterhalb der Top-Navigation: Team-Wahl & Rollen-Umschalter */}
+      {/* Kontext-Leiste: Team-Wahl & Rollen-Umschalter */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex items-center gap-3">
@@ -151,8 +268,23 @@ export default function App() {
             uploadHervorgehoben={uploadHervorgehoben}
             onNeuesReel={handleNeuesReel}
             onFreigabeAendern={handleFreigabeAendern}
-            onTeilenAendern={handleTeilenAendern}
+            onTeamFreigabenAendern={handleTeamFreigabenAendern}
+            onShareLinksAendern={handleShareLinksAendern}
             onReelOeffnen={handleReelOeffnen}
+          />
+        ) : aktiveAnsicht === 'film-room' && ausgewaehltesReel ? (
+          <FilmRoomView
+            key={ausgewaehltesReel.id}
+            reel={ausgewaehltesReel}
+            rolle={rolle}
+            onZurueck={() => setAktiveAnsicht('dashboard')}
+            onFreigabeAendern={handleFreigabeAendern}
+            onBreakdownAendern={handleBreakdownAendern}
+            onNotizHinzufuegen={handleNotizHinzufuegen}
+            onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
+            onLetzteZeichnungEntfernen={handleLetzteZeichnungEntfernen}
+            onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
+            onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
           />
         ) : (
           <ModulePlaceholderView

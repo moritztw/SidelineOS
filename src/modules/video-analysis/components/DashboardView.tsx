@@ -3,6 +3,7 @@ import {
   Download,
   Eye,
   Film,
+  Link2,
   Lock,
   Play,
   Search,
@@ -12,11 +13,13 @@ import {
 import type {
   BenutzerRolle,
   ReelKategorie,
+  ShareDownloadLink,
   SpielerFreigabe,
+  TeamFreigabeEintrag,
   VideoReel,
 } from '../../../shared/types.ts';
 import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../../../shared/types.ts';
-import { reelZuBundle } from '../services/bundleSchema.ts';
+import { istShareLinkGueltig, reelZuBundle } from '../services/bundleSchema.ts';
 import { TeamShareModal } from './TeamShareModal.tsx';
 import { UploadPanel } from './UploadPanel.tsx';
 
@@ -27,7 +30,8 @@ interface DashboardViewProps {
   uploadHervorgehoben: boolean;
   onNeuesReel: (reel: VideoReel) => void;
   onFreigabeAendern: (reelId: string, freigabe: SpielerFreigabe) => void;
-  onTeilenAendern: (reelId: string, teams: string[]) => void;
+  onTeamFreigabenAendern: (reelId: string, freigaben: TeamFreigabeEintrag[]) => void;
+  onShareLinksAendern: (reelId: string, links: ShareDownloadLink[]) => void;
   onReelOeffnen: (reel: VideoReel) => void;
 }
 
@@ -85,7 +89,8 @@ export function DashboardView({
   uploadHervorgehoben,
   onNeuesReel,
   onFreigabeAendern,
-  onTeilenAendern,
+  onTeamFreigabenAendern,
+  onShareLinksAendern,
   onReelOeffnen,
 }: DashboardViewProps) {
   const [aktiveKategorie, setAktiveKategorie] = useState<'ALL' | ReelKategorie>('ALL');
@@ -96,7 +101,6 @@ export function DashboardView({
     const query = suchbegriff.trim().toLowerCase();
     return reels
       .filter((reel) => reel.teamId === teamId)
-      // Spieler sehen strikt nur freigegebene Reels (niemals COACHES_ONLY)
       .filter((reel) => (rolle === 'PLAYER' ? reel.visibility !== 'COACHES_ONLY' : true))
       .filter((reel) => (aktiveKategorie === 'ALL' ? true : reel.category === aktiveKategorie))
       .filter((reel) =>
@@ -141,9 +145,7 @@ export function DashboardView({
                 aria-selected={aktiv}
                 onClick={() => setAktiveKategorie(tab.id)}
                 className={`rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
-                  aktiv
-                    ? 'bg-[#232933] text-white'
-                    : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                  aktiv ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
                 }`}
               >
                 {tab.label}
@@ -168,7 +170,7 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Hauptbereich: Bibliothek + Upload/JSON-Import (nur für Coaches) */}
+      {/* Hauptbereich */}
       <div
         className={`grid grid-cols-1 gap-6 ${
           rolle === 'COACH' ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
@@ -199,18 +201,18 @@ export function DashboardView({
               </p>
             </div>
           ) : (
-            <div className="overflow-hidden rounded-lg border border-[#232933] bg-[#13171D] divide-y divide-[#232933]">
+            <div className="divide-y divide-[#232933] overflow-hidden rounded-lg border border-[#232933] bg-[#13171D]">
               {gefilterteReels.map((reel) => {
                 const prozent =
                   reel.playCount > 0 ? Math.round((reel.taggedCount / reel.playCount) * 100) : 0;
                 const istNurCoaches = reel.visibility === 'COACHES_ONLY';
+                const aktiveLinks = reel.shareLinks.filter((l) => istShareLinkGueltig(l)).length;
 
                 return (
                   <article
                     key={reel.id}
                     className="group flex flex-col gap-4 p-4 transition-colors hover:bg-[#171C24] xl:flex-row xl:items-center xl:justify-between"
                   >
-                    {/* Links: Thumbnail + Titel + unboxed Metadaten */}
                     <div className="flex min-w-0 items-start gap-4">
                       <button
                         type="button"
@@ -230,7 +232,6 @@ export function DashboardView({
                           {reel.title}
                         </button>
 
-                        {/* Unboxed Metadata mit sauberen Trennern */}
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#8B949E]">
                           <span>{KATEGORIE_LABELS[reel.category]}</span>
                           <span aria-hidden="true">·</span>
@@ -247,7 +248,6 @@ export function DashboardView({
                           </span>
                         </div>
 
-                        {/* Breakdown-Fortschritt + Tausch-Hinweis */}
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 text-xs">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-[#E6EDF3] tabular-nums">
@@ -267,11 +267,26 @@ export function DashboardView({
                             </span>
                           </div>
 
-                          {reel.sharedWithTeams.length > 0 && (
+                          {reel.teamFreigaben.length > 0 && (
                             <span className="text-[#8B949E]">
-                              Geteilt mit: {reel.sharedWithTeams.join(', ')}
+                              Geteilt:{' '}
+                              {reel.teamFreigaben
+                                .map((t) =>
+                                  t.freigegebeneFelder.length > 0
+                                    ? `${t.teamName} (${t.freigegebeneFelder.length} Tags)`
+                                    : `${t.teamName} (Video)`
+                                )
+                                .join(', ')}
                             </span>
                           )}
+
+                          {aktiveLinks > 0 && rolle === 'COACH' && (
+                            <span className="inline-flex items-center gap-1 text-[#8B949E]">
+                              <Link2 className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
+                              {aktiveLinks} /share/-Link{aktiveLinks > 1 ? 's' : ''}
+                            </span>
+                          )}
+
                           {reel.receivedFromTeam && (
                             <span className="text-[#8B949E]">
                               Erhalten von: {reel.receivedFromTeam}
@@ -281,9 +296,7 @@ export function DashboardView({
                       </div>
                     </div>
 
-                    {/* Rechts: Spieler-Freigabe & Aktionen */}
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#232933] pt-3 xl:justify-end xl:border-t-0 xl:pt-0">
-                      {/* Explizite Spieler-Freigabe */}
                       {rolle === 'COACH' ? (
                         <label className="flex items-center gap-2 text-xs text-[#8B949E]">
                           {istNurCoaches ? (
@@ -327,7 +340,7 @@ export function DashboardView({
                             <button
                               type="button"
                               onClick={() => setTeilenReelId(reel.id)}
-                              title="Mit anderem Team tauschen"
+                              title="Teams & /share/-Download-Links verwalten"
                               className="inline-flex items-center gap-1 rounded-md border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs font-medium text-[#E6EDF3] transition-colors hover:border-[#36404F] hover:text-white whitespace-nowrap"
                             >
                               <Share2 className="h-3.5 w-3.5 text-[#8B949E]" aria-hidden="true" />
@@ -365,7 +378,6 @@ export function DashboardView({
           )}
         </section>
 
-        {/* Rechte Spalte: Upload & JSON-Import (nur für Coaches) */}
         {rolle === 'COACH' && (
           <UploadPanel
             teamId={teamId}
@@ -375,12 +387,12 @@ export function DashboardView({
         )}
       </div>
 
-      {/* Team-Sharing Modal */}
       {teilenReel && (
         <TeamShareModal
           reel={teilenReel}
           onSchliessen={() => setTeilenReelId(null)}
-          onTeilenAendern={onTeilenAendern}
+          onTeamFreigabenAendern={onTeamFreigabenAendern}
+          onShareLinksAendern={onShareLinksAendern}
         />
       )}
     </div>

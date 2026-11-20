@@ -109,7 +109,8 @@ export function UploadPanel({
         playCount: istEinzeldatei ? 0 : videoDateien.length,
         taggedCount: 0,
         visibility: 'COACHES_ONLY',
-        sharedWithTeams: [],
+        teamFreigaben: [],
+        shareLinks: [],
         draftNoteCount: 0,
         plays: istEinzeldatei
           ? []
