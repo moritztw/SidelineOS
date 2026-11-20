@@ -1,8 +1,24 @@
 import { useState } from 'react';
 import { Eye, RotateCcw } from 'lucide-react';
-import { TopNavBar } from './core/TopNavBar.tsx';
-import { SysadminIsolationView } from './core/SysadminIsolationView.tsx';
+import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
+import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
+import { ModulePreviewView } from './core/hub/ModulePreviewView.tsx';
+import { UserSettingsPage } from './core/settings/UserSettingsPage.tsx';
+import { TeamSettingsPage } from './core/settings/TeamSettingsPage.tsx';
+import { SysadminPage } from './core/settings/SysadminPage.tsx';
 import { ModulePlaceholderView } from './core/ModulePlaceholderView.tsx';
+import {
+  INITIALE_BENUTZER,
+  INITIALE_EINLADUNGEN,
+  INITIALE_MITGLIEDSCHAFTEN,
+  INITIALE_S3_KONFIG,
+  INITIALE_SMTP_KONFIG,
+  INITIALE_TEAMS,
+} from './core/demoOrgData.ts';
+import {
+  STANDARD_AKTIVIERTE_MODULE,
+  istModulFuerTeamAktiv,
+} from './core/moduleRegistry.ts';
 import {
   STANDARD_HOTKEYS,
   STANDARD_NUTZER_EINSTELLUNGEN,
@@ -11,27 +27,35 @@ import {
 } from './core/rolePermissions.ts';
 import { DashboardView } from './modules/video-analysis/components/DashboardView.tsx';
 import { FilmRoomView } from './modules/video-analysis/components/FilmRoomView.tsx';
-import { TaggingSchemaSettings } from './modules/video-analysis/components/TaggingSchemaSettings.tsx';
-import { UserSettingsView } from './modules/video-analysis/components/UserSettingsView.tsx';
-import { DEMO_TEAMS, INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
+import { INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
 import {
   STANDARD_TAG_SCHEMA,
   registriereDefinitionWennNeu,
   wendeBreakdownUpdateMitAutoCalcAn,
 } from './modules/video-analysis/services/taggingEngine.ts';
 import type {
+  BenutzerKonto,
   BenutzerProfil,
   BreakdownFeldKey,
   CanvasZeichnung,
   CoachNotiz,
-  NavigationsAnsicht,
+  CoreBereich,
+  ModulId,
   NormPunkt,
   NutzerEinstellungen,
+  ProfilCustomFeld,
+  S3Konfiguration,
   ShareDownloadLink,
+  SmtpKonfiguration,
   SpielerFreigabe,
+  SpielerUnit,
   TagFeldKonfig,
+  TeamEinladung,
   TeamFreigabeEintrag,
+  TeamKontext,
+  TeamMitgliedschaft,
   TeamRolle,
+  VideoModulTab,
   VideoReel,
 } from './shared/types.ts';
 import { DEMO_PROFILE, TEAM_ROLLEN_LABELS } from './shared/types.ts';
@@ -78,12 +102,32 @@ function zaehleEntwuerfe(reel: VideoReel): number {
 }
 
 export default function App() {
-  const [aktiveAnsicht, setAktiveAnsicht] = useState<NavigationsAnsicht>('dashboard');
+  // Core-Navigation (Hub, Modul, zentrale Einstellungen)
+  const [bereich, setBereich] = useState<CoreBereich>('hub');
+  const [aktivesModulId, setAktivesModulId] = useState<ModulId | null>(null);
+  const [videoTab, setVideoTab] = useState<VideoModulTab>('dashboard');
+
+  // Konto & produktiver Rollen-Ansichtsumschalter
   const [kontoId, setKontoId] = useState<string>(DEMO_PROFILE[0].id);
   const [aktiveTeamAnsicht, setAktiveTeamAnsicht] = useState<TeamRolle | null>(
     DEMO_PROFILE[0].teamRolle
   );
-  const [aktivesTeamId, setAktivesTeamId] = useState<string>(DEMO_TEAMS[0].id);
+
+  // Core-Plattform-Zustand (Module, Teams, Benutzer, Mitgliedschaften, Einladungen, S3 & SMTP)
+  const [globalAktivierteModule, setGlobalAktivierteModule] = useState<ModulId[]>(
+    STANDARD_AKTIVIERTE_MODULE
+  );
+  const [teams, setTeams] = useState<TeamKontext[]>(INITIALE_TEAMS);
+  const [aktivesTeamId, setAktivesTeamId] = useState<string>(INITIALE_TEAMS[0].id);
+  const [benutzerListe, setBenutzerListe] = useState<BenutzerKonto[]>(INITIALE_BENUTZER);
+  const [mitgliedschaften, setMitgliedschaften] = useState<TeamMitgliedschaft[]>(
+    INITIALE_MITGLIEDSCHAFTEN
+  );
+  const [einladungen, setEinladungen] = useState<TeamEinladung[]>(INITIALE_EINLADUNGEN);
+  const [s3Konfig, setS3Konfig] = useState<S3Konfiguration>(INITIALE_S3_KONFIG);
+  const [smtpKonfig, setSmtpKonfig] = useState<SmtpKonfiguration>(INITIALE_SMTP_KONFIG);
+
+  // Modul-Zustand: Videoanalyse
   const [reels, setReels] = useState<VideoReel[]>(INITIALE_DEMO_REELS);
   const [tagSchema, setTagSchema] = useState<TagFeldKonfig[]>(STANDARD_TAG_SCHEMA);
   const [nutzerEinstellungen, setNutzerEinstellungen] = useState<NutzerEinstellungen>(
@@ -95,6 +139,14 @@ export default function App() {
   const [uploadHervorgehoben, setUploadHervorgehoben] = useState(false);
 
   const konto: BenutzerProfil = DEMO_PROFILE.find((p) => p.id === kontoId) ?? DEMO_PROFILE[0];
+  const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0];
+  const aktuellerBenutzer =
+    benutzerListe.find((b) => b.uuid === konto.userUuid) ?? benutzerListe[0];
+  const aktuelleMitgliedschaft =
+    mitgliedschaften.find(
+      (m) => m.userUuid === konto.userUuid && m.teamId === aktivesTeam.id
+    ) ?? null;
+
   const waehlbareAnsichten = ermittleWaehlbareTeamAnsichten(konto);
   const kannAnsichtWechseln = darfAnsichtWechseln(konto);
   const istVorschauModus =
@@ -102,9 +154,15 @@ export default function App() {
     konto.teamRolle !== null &&
     aktiveTeamAnsicht !== konto.teamRolle;
 
+  const videoModulAktiv = istModulFuerTeamAktiv(
+    'video-analysis',
+    globalAktivierteModule,
+    aktivesTeam.aktivierteModule
+  );
+
   const sichtbareTeamReels = reels.filter(
     (r) =>
-      r.teamId === aktivesTeamId &&
+      r.teamId === aktivesTeam.id &&
       (aktiveTeamAnsicht === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
   );
 
@@ -112,6 +170,12 @@ export default function App() {
     sichtbareTeamReels.find((r) => r.id === ausgewaehltesReelId) ??
     sichtbareTeamReels[0] ??
     null;
+
+  const ausstehendeAnfragenAnzahl = mitgliedschaften.filter(
+    (m) => m.teamId === aktivesTeam.id && m.status === 'WARTET_AUF_FREIGABE'
+  ).length;
+
+  const teamPlayAnzahl = sichtbareTeamReels.reduce((s, r) => s + r.playCount, 0);
 
   const handleNutzerEinstellungenAendern = (neu: NutzerEinstellungen) => {
     setNutzerEinstellungen(neu);
@@ -122,6 +186,250 @@ export default function App() {
     }
   };
 
+  // --- Navigation ---
+  const handleLogoKlick = () => {
+    setAktivesModulId(null);
+    setBereich(aktiveTeamAnsicht === null ? 'sysadmin' : 'hub');
+  };
+
+  const handleBereichWechseln = (ziel: CoreBereich) => {
+    if (ziel !== 'modul') {
+      setAktivesModulId(null);
+    }
+    setBereich(ziel);
+  };
+
+  const handleModulOeffnen = (modulId: ModulId) => {
+    if (!istModulFuerTeamAktiv(modulId, globalAktivierteModule, aktivesTeam.aktivierteModule)) {
+      return;
+    }
+    setAktivesModulId(modulId);
+    setBereich('modul');
+    if (modulId === 'video-analysis') {
+      setVideoTab('dashboard');
+    }
+  };
+
+  const handleKontoWechseln = (neueId: string) => {
+    const neu = DEMO_PROFILE.find((p) => p.id === neueId);
+    if (!neu) return;
+    setKontoId(neueId);
+    setAktiveTeamAnsicht(neu.teamRolle);
+
+    if (neu.teamRolle === null) {
+      setAktivesModulId(null);
+      setBereich('sysadmin');
+      return;
+    }
+    if (!neu.istSysadmin && bereich === 'sysadmin') {
+      setAktivesModulId(null);
+      setBereich('hub');
+      return;
+    }
+    if (neu.teamRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
+      setAktivesModulId(null);
+      setBereich('hub');
+      return;
+    }
+    if (neu.teamRolle === 'PLAYER' && bereich === 'modul' && videoTab === 'cut-sync') {
+      setVideoTab('dashboard');
+    }
+  };
+
+  const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
+    if (!waehlbareAnsichten.includes(zielRolle)) return;
+    setAktiveTeamAnsicht(zielRolle);
+
+    if (bereich === 'sysadmin') {
+      setAktivesModulId(null);
+      setBereich('hub');
+      return;
+    }
+    if (zielRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
+      setAktivesModulId(null);
+      setBereich('hub');
+      return;
+    }
+    if (zielRolle === 'PLAYER' && bereich === 'modul' && videoTab === 'cut-sync') {
+      setVideoTab('dashboard');
+    }
+  };
+
+  const handlePrimaerAktion = () => {
+    if (bereich === 'modul' && aktivesModulId === 'video-analysis') {
+      if (aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN') {
+        setVideoTab('dashboard');
+        setUploadHervorgehoben(true);
+        setTimeout(() => {
+          document.getElementById('upload-panel')?.scrollIntoView({ behavior: 'smooth' });
+        }, 50);
+        setTimeout(() => setUploadHervorgehoben(false), 1800);
+      } else {
+        setVideoTab('film-room');
+      }
+      return;
+    }
+
+    if (bereich === 'modul') {
+      handleLogoKlick();
+      return;
+    }
+
+    if (aktiveTeamAnsicht === null) {
+      setBereich('sysadmin');
+      return;
+    }
+
+    if (videoModulAktiv) {
+      handleModulOeffnen('video-analysis');
+    } else {
+      setBereich('hub');
+    }
+  };
+
+  // --- Core-Stammdaten-Handler (Sysadmin / Team Admin / Profil) ---
+  const handleGlobalModulToggle = (modulId: ModulId) => {
+    setGlobalAktivierteModule((alt) => {
+      const aktiv = alt.includes(modulId);
+      const neu = aktiv ? alt.filter((id) => id !== modulId) : [...alt, modulId];
+      if (aktiv && aktivesModulId === modulId) {
+        setAktivesModulId(null);
+        setBereich('hub');
+      }
+      return neu;
+    });
+  };
+
+  const handleTeamModulToggle = (teamId: string, modulId: ModulId) => {
+    setTeams((alt) =>
+      alt.map((team) => {
+        if (team.id !== teamId) return team;
+        const hat = team.aktivierteModule.includes(modulId);
+        return {
+          ...team,
+          aktivierteModule: hat
+            ? team.aktivierteModule.filter((id) => id !== modulId)
+            : [...team.aktivierteModule, modulId],
+        };
+      })
+    );
+  };
+
+  const handleTeamAktualisieren = (aktualisiert: TeamKontext) => {
+    setTeams((alt) => alt.map((t) => (t.id === aktualisiert.id ? aktualisiert : t)));
+  };
+
+  const handleTeamErstellen = (neuesTeam: TeamKontext) => {
+    setTeams((alt) => [...alt, neuesTeam]);
+  };
+
+  const handleTeamArchivToggle = (teamId: string) => {
+    setTeams((alt) =>
+      alt.map((t) => (t.id === teamId ? { ...t, archiviert: !t.archiviert } : t))
+    );
+  };
+
+  const handleTeamLoeschen = (teamId: string) => {
+    setTeams((alt) => {
+      const rest = alt.filter((t) => t.id !== teamId);
+      if (rest.length > 0 && aktivesTeamId === teamId) {
+        setAktivesTeamId(rest[0].id);
+      }
+      return rest;
+    });
+    setMitgliedschaften((alt) => alt.filter((m) => m.teamId !== teamId));
+    setEinladungen((alt) => alt.filter((e) => e.teamId !== teamId));
+  };
+
+  const handleBenutzerAktualisieren = (aktualisiert: BenutzerKonto) => {
+    setBenutzerListe((alt) =>
+      alt.map((b) => (b.uuid === aktualisiert.uuid ? aktualisiert : b))
+    );
+  };
+
+  const handleBenutzerErstellen = (
+    benutzer: BenutzerKonto,
+    teamZuweisung?: { teamId: string; rolle: TeamRolle }
+  ) => {
+    setBenutzerListe((alt) => [...alt, benutzer]);
+    if (teamZuweisung) {
+      setMitgliedschaften((alt) => [
+        ...alt,
+        {
+          id: `mem-${Date.now()}`,
+          userUuid: benutzer.uuid,
+          teamId: teamZuweisung.teamId,
+          rolle: teamZuweisung.rolle,
+          units: ['OFFENSE'],
+          status: 'AKTIV',
+          beigetretenAm: new Date().toISOString().slice(0, 10),
+        },
+      ]);
+    }
+  };
+
+  const handleBenutzerSysadminToggle = (userUuid: string) => {
+    setBenutzerListe((alt) =>
+      alt.map((b) => (b.uuid === userUuid ? { ...b, istSysadmin: !b.istSysadmin } : b))
+    );
+  };
+
+  const handleBenutzerLoeschen = (userUuid: string) => {
+    setBenutzerListe((alt) => alt.filter((b) => b.uuid !== userUuid));
+    setMitgliedschaften((alt) => alt.filter((m) => m.userUuid !== userUuid));
+  };
+
+  const handleMitgliedRolleAendern = (mitgliedschaftId: string, rolle: TeamRolle) => {
+    setMitgliedschaften((alt) =>
+      alt.map((m) => (m.id === mitgliedschaftId ? { ...m, rolle } : m))
+    );
+  };
+
+  const handleMitgliedUnitsAendern = (mitgliedschaftId: string, units: SpielerUnit[]) => {
+    setMitgliedschaften((alt) =>
+      alt.map((m) => (m.id === mitgliedschaftId ? { ...m, units } : m))
+    );
+  };
+
+  const handleMitgliedBestaetigen = (mitgliedschaftId: string) => {
+    setMitgliedschaften((alt) =>
+      alt.map((m) => (m.id === mitgliedschaftId ? { ...m, status: 'AKTIV' } : m))
+    );
+  };
+
+  const handleMitgliedEntfernen = (mitgliedschaftId: string) => {
+    setMitgliedschaften((alt) => alt.filter((m) => m.id !== mitgliedschaftId));
+  };
+
+  const handleEinladungErstellen = (einladung: TeamEinladung) => {
+    setEinladungen((alt) => [einladung, ...alt]);
+  };
+
+  const handleEinladungWiderrufen = (einladungId: string) => {
+    setEinladungen((alt) => alt.filter((e) => e.id !== einladungId));
+  };
+
+  const handleProfilCustomFeldHinzufuegen = (teamId: string, feld: ProfilCustomFeld) => {
+    setTeams((alt) =>
+      alt.map((t) =>
+        t.id === teamId
+          ? { ...t, customProfilFelder: [...t.customProfilFelder, feld] }
+          : t
+      )
+    );
+  };
+
+  const handleProfilCustomFeldLoeschen = (teamId: string, key: string) => {
+    setTeams((alt) =>
+      alt.map((t) =>
+        t.id === teamId
+          ? { ...t, customProfilFelder: t.customProfilFelder.filter((f) => f.key !== key) }
+          : t
+      )
+    );
+  };
+
+  // --- Videoanalyse-Handler ---
   const aktualisiereReel = (reelId: string, updater: (reel: VideoReel) => VideoReel) => {
     setReels((alt) =>
       alt.map((reel) => {
@@ -135,63 +443,6 @@ export default function App() {
         };
       })
     );
-  };
-
-  // Demo-Konto wechseln (simuliert Login mit einem anderen Benutzerkonto)
-  const handleKontoWechseln = (neueId: string) => {
-    const neu = DEMO_PROFILE.find((p) => p.id === neueId);
-    if (!neu) return;
-    setKontoId(neueId);
-    setAktiveTeamAnsicht(neu.teamRolle);
-
-    if (neu.teamRolle === null) {
-      setAktiveAnsicht('sysadmin');
-      return;
-    }
-    if (!neu.istSysadmin && aktiveAnsicht === 'sysadmin') {
-      setAktiveAnsicht('dashboard');
-      return;
-    }
-    if (neu.teamRolle !== 'TEAM_ADMIN' && aktiveAnsicht === 'team-settings') {
-      setAktiveAnsicht('dashboard');
-      return;
-    }
-    if (neu.teamRolle === 'PLAYER' && aktiveAnsicht === 'cut-sync') {
-      setAktiveAnsicht('dashboard');
-    }
-  };
-
-  // Produktiver Ansichts-Umschalter für untergeordnete Rollen (Team Admin -> Coach/Spieler, Coach -> Spieler)
-  const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
-    if (!waehlbareAnsichten.includes(zielRolle)) return;
-    setAktiveTeamAnsicht(zielRolle);
-
-    if (aktiveAnsicht === 'sysadmin') {
-      setAktiveAnsicht('dashboard');
-      return;
-    }
-    if (zielRolle !== 'TEAM_ADMIN' && aktiveAnsicht === 'team-settings') {
-      setAktiveAnsicht('dashboard');
-      return;
-    }
-    if (zielRolle === 'PLAYER' && aktiveAnsicht === 'cut-sync') {
-      setAktiveAnsicht('dashboard');
-    }
-  };
-
-  const handlePrimaerAktion = () => {
-    if (aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN') {
-      setAktiveAnsicht('dashboard');
-      setUploadHervorgehoben(true);
-      setTimeout(() => {
-        document.getElementById('upload-panel')?.scrollIntoView({ behavior: 'smooth' });
-      }, 50);
-      setTimeout(() => setUploadHervorgehoben(false), 1800);
-    } else if (aktiveTeamAnsicht === 'PLAYER') {
-      setAktiveAnsicht('film-room');
-    } else {
-      setAktiveAnsicht('sysadmin');
-    }
   };
 
   const handleNeuesReel = (neuesReel: VideoReel) => {
@@ -211,7 +462,6 @@ export default function App() {
     aktualisiereReel(reelId, (reel) => ({ ...reel, shareLinks }));
   };
 
-  // Breakdown-Feld aktualisieren inkl. automatischer YD LN <-> GN/LS Berechnung (außer FLAG)
   const handleFeldAendern = (
     reelId: string,
     playNumber: number,
@@ -225,12 +475,10 @@ export default function App() {
     }));
   };
 
-  // Einmal eingegebene Definition dauerhaft im Team-Wörterbuch speichern
   const handleDefinitionLernen = (feldKey: BreakdownFeldKey, begriff: string) => {
     setTagSchema((alt) => registriereDefinitionWennNeu(alt, feldKey, begriff));
   };
 
-  // Team-Admin Schema-Aktionen
   const handleFeldToggle = (feldKey: BreakdownFeldKey) => {
     setTagSchema((alt) =>
       alt.map((f) => (f.key === feldKey ? { ...f, aktiv: !f.aktiv } : f))
@@ -255,7 +503,6 @@ export default function App() {
     setTagSchema((alt) => alt.filter((f) => f.key !== feldKey));
   };
 
-  // Notizen (erstellen, bearbeiten, löschen) & Canvas-Zeichnungen
   const handleNotizHinzufuegen = (reelId: string, playNumber: number, notiz: CoachNotiz) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
@@ -394,16 +641,23 @@ export default function App() {
 
   const handleReelOeffnen = (reel: VideoReel) => {
     setAusgewaehltesReelId(reel.id);
-    setAktiveAnsicht('film-room');
+    setAktivesModulId('video-analysis');
+    setBereich('modul');
+    setVideoTab('film-room');
   };
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
-      <TopNavBar
-        aktiveAnsicht={aktiveAnsicht}
+      <CoreTopBar
+        bereich={bereich}
+        aktivesModulId={aktivesModulId}
+        videoTab={videoTab}
         konto={konto}
         aktiveTeamAnsicht={aktiveTeamAnsicht}
-        onAnsichtWechseln={setAktiveAnsicht}
+        ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
+        onLogoKlick={handleLogoKlick}
+        onBereichWechseln={handleBereichWechseln}
+        onVideoTabWechseln={setVideoTab}
         onPrimaerAktion={handlePrimaerAktion}
       />
 
@@ -411,7 +665,7 @@ export default function App() {
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex items-center gap-3">
-            {aktiveTeamAnsicht === null || aktiveAnsicht === 'sysadmin' ? (
+            {aktiveTeamAnsicht === null || bereich === 'sysadmin' ? (
               <span className="text-xs font-medium text-[#8B949E]">
                 Instanz-Verwaltung · Sysadmin-Bereich (getrennt von Team-Daten)
               </span>
@@ -419,13 +673,14 @@ export default function App() {
               <label className="flex items-center gap-2 text-xs text-[#8B949E]">
                 <span>Team</span>
                 <select
-                  value={aktivesTeamId}
+                  value={aktivesTeam.id}
                   onChange={(e) => setAktivesTeamId(e.target.value)}
                   className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
                 >
-                  {DEMO_TEAMS.map((team) => (
+                  {teams.map((team) => (
                     <option key={team.id} value={team.id} className="bg-[#13171D]">
                       {team.name} · {team.saison}
+                      {team.archiviert ? ' (Archiv)' : ''}
                     </option>
                   ))}
                 </select>
@@ -434,7 +689,6 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
-            {/* Produktiver Multi-Rollen-Ansichtsumschalter – nur für Rollen mit untergeordneten Ansichten */}
             {kannAnsichtWechseln && (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
@@ -467,7 +721,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Prototyp-Kontoauswahl zum Prüfen der Sichtbarkeit je echtem Login-Konto */}
             <label className="flex items-center gap-2 border-l border-[#232933] pl-4 text-xs text-[#6E7681]">
               <span>Demo-Konto</span>
               <select
@@ -512,66 +765,158 @@ export default function App() {
 
       {/* Hauptinhalt */}
       <main className="mx-auto max-w-[1440px] px-6 py-6">
-        {aktiveAnsicht === 'sysadmin' && konto.istSysadmin ? (
-          <SysadminIsolationView />
+        {bereich === 'sysadmin' && konto.istSysadmin ? (
+          <SysadminPage
+            globalAktivierteModule={globalAktivierteModule}
+            teams={teams}
+            benutzerListe={benutzerListe}
+            mitgliedschaften={mitgliedschaften}
+            s3Konfig={s3Konfig}
+            smtpKonfig={smtpKonfig}
+            onGlobalModulToggle={handleGlobalModulToggle}
+            onTeamModulToggle={handleTeamModulToggle}
+            onTeamErstellen={handleTeamErstellen}
+            onTeamArchivToggle={handleTeamArchivToggle}
+            onTeamLoeschen={handleTeamLoeschen}
+            onBenutzerErstellen={handleBenutzerErstellen}
+            onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
+            onBenutzerLoeschen={handleBenutzerLoeschen}
+            onS3Speichern={setS3Konfig}
+            onSmtpSpeichern={setSmtpKonfig}
+          />
         ) : aktiveTeamAnsicht === null ? (
-          <SysadminIsolationView />
-        ) : aktiveAnsicht === 'dashboard' ? (
-          <DashboardView
-            teamId={aktivesTeamId}
-            teamRolle={aktiveTeamAnsicht}
-            tagSchema={tagSchema}
-            reels={reels}
-            uploadHervorgehoben={uploadHervorgehoben}
-            onNeuesReel={handleNeuesReel}
-            onFreigabeAendern={handleFreigabeAendern}
-            onTeamFreigabenAendern={handleTeamFreigabenAendern}
-            onShareLinksAendern={handleShareLinksAendern}
-            onReelOeffnen={handleReelOeffnen}
+          <SysadminPage
+            globalAktivierteModule={globalAktivierteModule}
+            teams={teams}
+            benutzerListe={benutzerListe}
+            mitgliedschaften={mitgliedschaften}
+            s3Konfig={s3Konfig}
+            smtpKonfig={smtpKonfig}
+            onGlobalModulToggle={handleGlobalModulToggle}
+            onTeamModulToggle={handleTeamModulToggle}
+            onTeamErstellen={handleTeamErstellen}
+            onTeamArchivToggle={handleTeamArchivToggle}
+            onTeamLoeschen={handleTeamLoeschen}
+            onBenutzerErstellen={handleBenutzerErstellen}
+            onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
+            onBenutzerLoeschen={handleBenutzerLoeschen}
+            onS3Speichern={setS3Konfig}
+            onSmtpSpeichern={setSmtpKonfig}
           />
-        ) : aktiveAnsicht === 'film-room' && ausgewaehltesReel ? (
-          <FilmRoomView
-            key={ausgewaehltesReel.id}
-            reel={ausgewaehltesReel}
-            teamRolle={aktiveTeamAnsicht}
-            tagSchema={tagSchema}
-            nutzerEinstellungen={nutzerEinstellungen}
-            onZurueck={() => setAktiveAnsicht('dashboard')}
-            onSchemaSettingsOeffnen={() => setAktiveAnsicht('team-settings')}
-            onFreigabeAendern={handleFreigabeAendern}
-            onFeldAendern={handleFeldAendern}
-            onDefinitionLernen={handleDefinitionLernen}
-            onNotizHinzufuegen={handleNotizHinzufuegen}
-            onNotizBearbeiten={handleNotizBearbeiten}
-            onNotizLoeschen={handleNotizLoeschen}
-            onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
-            onZeichnungAktualisieren={handleZeichnungAktualisieren}
-            onZeichnungEntfernen={handleZeichnungEntfernen}
-            onLetzteZeichnungEntfernen={handleLetzteZeichnungEntfernen}
-            onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
-            onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
-          />
-        ) : aktiveAnsicht === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
-          <TaggingSchemaSettings
-            teamRolle={aktiveTeamAnsicht}
-            tagSchema={tagSchema}
-            onFeldToggle={handleFeldToggle}
-            onDefinitionHinzufuegen={handleDefinitionLernen}
-            onDefinitionLoeschen={handleDefinitionLoeschen}
-            onCustomFeldErstellen={handleCustomFeldErstellen}
-            onCustomFeldLoeschen={handleCustomFeldLoeschen}
-          />
-        ) : aktiveAnsicht === 'settings' ? (
-          <UserSettingsView
+        ) : bereich === 'hub' ? (
+          <SidelineHubView
+            team={aktivesTeam}
+            benutzer={aktuellerBenutzer}
+            konto={konto}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
+            globalAktivierteModule={globalAktivierteModule}
+            teamReelAnzahl={sichtbareTeamReels.length}
+            teamPlayAnzahl={teamPlayAnzahl}
+            ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
+            onModulOeffnen={handleModulOeffnen}
+            onBereichOeffnen={handleBereichWechseln}
+          />
+        ) : bereich === 'settings' ? (
+          <UserSettingsPage
+            benutzer={aktuellerBenutzer}
+            team={aktivesTeam}
+            mitgliedschaft={aktuelleMitgliedschaft}
+            aktiveTeamAnsicht={aktiveTeamAnsicht}
+            videoModulAktiv={videoModulAktiv}
             einstellungen={nutzerEinstellungen}
+            onBenutzerAktualisieren={handleBenutzerAktualisieren}
             onEinstellungenAendern={handleNutzerEinstellungenAendern}
           />
+        ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
+          <TeamSettingsPage
+            team={aktivesTeam}
+            benutzerListe={benutzerListe}
+            mitgliedschaften={mitgliedschaften}
+            einladungen={einladungen}
+            videoModulAktiv={videoModulAktiv}
+            tagSchema={tagSchema}
+            onTeamAktualisieren={handleTeamAktualisieren}
+            onMitgliedRolleAendern={handleMitgliedRolleAendern}
+            onMitgliedUnitsAendern={handleMitgliedUnitsAendern}
+            onMitgliedBestaetigen={handleMitgliedBestaetigen}
+            onMitgliedEntfernen={handleMitgliedEntfernen}
+            onEinladungErstellen={handleEinladungErstellen}
+            onEinladungWiderrufen={handleEinladungWiderrufen}
+            onProfilCustomFeldHinzufuegen={handleProfilCustomFeldHinzufuegen}
+            onProfilCustomFeldLoeschen={handleProfilCustomFeldLoeschen}
+            onTagFeldToggle={handleFeldToggle}
+            onTagDefinitionHinzufuegen={handleDefinitionLernen}
+            onTagDefinitionLoeschen={handleDefinitionLoeschen}
+            onTagCustomFeldErstellen={handleCustomFeldErstellen}
+            onTagCustomFeldLoeschen={handleCustomFeldLoeschen}
+          />
+        ) : bereich === 'modul' && aktivesModulId === 'video-analysis' && videoModulAktiv ? (
+          videoTab === 'dashboard' ? (
+            <DashboardView
+              teamId={aktivesTeam.id}
+              teamRolle={aktiveTeamAnsicht}
+              tagSchema={tagSchema}
+              reels={reels}
+              uploadHervorgehoben={uploadHervorgehoben}
+              onNeuesReel={handleNeuesReel}
+              onFreigabeAendern={handleFreigabeAendern}
+              onTeamFreigabenAendern={handleTeamFreigabenAendern}
+              onShareLinksAendern={handleShareLinksAendern}
+              onReelOeffnen={handleReelOeffnen}
+            />
+          ) : videoTab === 'film-room' && ausgewaehltesReel ? (
+            <FilmRoomView
+              key={ausgewaehltesReel.id}
+              reel={ausgewaehltesReel}
+              teamRolle={aktiveTeamAnsicht}
+              tagSchema={tagSchema}
+              nutzerEinstellungen={nutzerEinstellungen}
+              onZurueck={() => setVideoTab('dashboard')}
+              onSchemaSettingsOeffnen={() => {
+                setAktivesModulId(null);
+                setBereich('team-settings');
+              }}
+              onFreigabeAendern={handleFreigabeAendern}
+              onFeldAendern={handleFeldAendern}
+              onDefinitionLernen={handleDefinitionLernen}
+              onNotizHinzufuegen={handleNotizHinzufuegen}
+              onNotizBearbeiten={handleNotizBearbeiten}
+              onNotizLoeschen={handleNotizLoeschen}
+              onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
+              onZeichnungAktualisieren={handleZeichnungAktualisieren}
+              onZeichnungEntfernen={handleZeichnungEntfernen}
+              onLetzteZeichnungEntfernen={handleLetzteZeichnungEntfernen}
+              onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
+              onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
+            />
+          ) : (
+            <ModulePlaceholderView
+              ansicht={videoTab === 'playlists' ? 'playlists' : 'cut-sync'}
+              ausgewaehltesReel={ausgewaehltesReel}
+              onZurueckZumDashboard={() => setVideoTab('dashboard')}
+            />
+          )
+        ) : bereich === 'modul' &&
+          aktivesModulId &&
+          aktivesModulId !== 'video-analysis' &&
+          istModulFuerTeamAktiv(
+            aktivesModulId,
+            globalAktivierteModule,
+            aktivesTeam.aktivierteModule
+          ) ? (
+          <ModulePreviewView modulId={aktivesModulId} onZurUebersicht={handleLogoKlick} />
         ) : (
-          <ModulePlaceholderView
-            ansicht={aktiveAnsicht === 'playlists' ? 'playlists' : 'cut-sync'}
-            ausgewaehltesReel={ausgewaehltesReel}
-            onZurueckZumDashboard={() => setAktiveAnsicht('dashboard')}
+          <SidelineHubView
+            team={aktivesTeam}
+            benutzer={aktuellerBenutzer}
+            konto={konto}
+            aktiveTeamAnsicht={aktiveTeamAnsicht}
+            globalAktivierteModule={globalAktivierteModule}
+            teamReelAnzahl={sichtbareTeamReels.length}
+            teamPlayAnzahl={teamPlayAnzahl}
+            ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
+            onModulOeffnen={handleModulOeffnen}
+            onBereichOeffnen={handleBereichWechseln}
           />
         )}
       </main>

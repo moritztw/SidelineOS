@@ -6,25 +6,26 @@ Dieses Dokument beschreibt die verbindliche Zielarchitektur von **SidelineOS** (
 
 ## 1. Architekturprinzipien (KISS)
 
-1. **Modularer Monolith statt Microservices:** Eine einzige deploybare Anwendung reduziert Betriebsaufwand auf Vereins-Hardware (Raspberry Pi, Mini-PC, Proxmox LXC). Fachfunktionen liegen strikt getrennt in `src/modules/` und `server/modules/`.
-2. **Stateless Anwendungscontainer:** Keine lokale Medienspeicherung im Container. Alle Videodateien liegen in einem S3-kompatiblen Object Storage (MinIO, Hetzner Object Storage, Ceph, AWS S3).
-3. **Datenbank als Single Source of Truth:** Alle Teamzuordnungen, Sichtbarkeiten, Breakdowns, Timecodes und Freigaben liegen ausschließlich in PostgreSQL – keine Manifest-Dateien auf S3 als Datenquelle.
+1. **Modularer Core-Hub statt starrer Einzelfunktion:** Der SidelineOS-Core stellt Hub/Landing-Page, Authentifizierung, Benutzerkonten, Team-Mitgliedschaften (Multi-Unit) sowie die zentralen Einstellungsseiten bereit. Fachfunktionen (z. B. `video-analysis`) registrieren sich als entkoppelte Module über die zentrale `SIDELINE_MODULE_REGISTRY` und klinken eigene Einstellungs-Kategorien dynamisch in die Core-Einstellungen ein.
+2. **Zweistufige Modul-Aktivierung & ENV-Bootstrap:** Die Ersteinrichtung erfolgt deployment-unabhängig ausschließlich über `.env` (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`, S3, SMTP) ohne Browser-Wizard. Aktivierte Module können vom Sysadmin zusätzlich pro Mandant/Team freigeschaltet oder deaktiviert werden.
+3. **Stateless Anwendungscontainer:** Keine lokale Medienspeicherung im Container. Alle Videodateien liegen in einem S3-kompatiblen Object Storage (MinIO, Hetzner Object Storage, Ceph, AWS S3).
+4. **Datenbank als Single Source of Truth:** Alle Teamzuordnungen, Sichtbarkeiten, Breakdowns, Timecodes und Freigaben liegen ausschließlich in PostgreSQL – keine Manifest-Dateien auf S3 als Datenquelle.
 
 ---
 
-## 2. Multi-Tenancy & Rollenmodell (RBAC)
+## 2. Multi-Tenancy, Rollenmodell (RBAC) & Konto-Portabilität
 
 | Rolle | Befugnisse | Datenzugriff |
 | :--- | :--- | :--- |
-| **Instance Admin (Sysadmin)** | Server-Setup, S3-Bucket, Retention-Delay, Cleanup-Trigger, Mandanten anlegen, Module aktivieren | **Kein App-Zugriff** auf Team-Videos, Breakdowns, Notizen oder Kommentare |
-| **Team Admin (Head Coach)** | Teammitglieder, Units, Teamfarben, Breakdown-Schema, App2App-Sharing-Token, Spieler-Freigaben | Vollzugriff im eigenen Team |
+| **Instance Admin (Sysadmin)** | Modul-Aktivierung, Teams/Mandanten, globale Benutzer, S3/SMTP, Retention-Delay, Cleanup-Trigger | **Kein App-Zugriff** auf Team-Videos, Breakdowns, Notizen oder Kommentare |
+| **Team Admin (Head Coach)** | Teammitglieder, Multi-Units, Einladungen (E-Mail & Team-Link inkl. Freigabe-Warteliste), Spieler-Custom-Felder, Modul-Konfigurationen (z. B. Tagging-Schema) | Vollzugriff im eigenen Team |
 | **Coordinator / Position Coach** | Upload, Cut & Sync, Breakdown, Telestration, `DRAFT`-Notizen, `Publish Session`, Spieler-Freigaben | Schreibzugriff im eigenen Team |
-| **Player** | Wiedergabe freigegebener Reels & Smart Playlists, eigene Notizen (optional) | Nur **explizit freigegebene** Reels/Units und `PUBLISHED`-Coach-Notizen |
+| **Player** | Wiedergabe freigegebener Reels & Smart Playlists, eigenes Profil (Nummer, Position, Kontakte, Team-Custom-Felder), eigene Notizen | Nur **explizit freigegebene** Reels/Units und `PUBLISHED`-Coach-Notizen |
 
-> **Multi-Rollen, Ansichts-Umschalter & Tab-Trennung:**
-> * **Getrennte Bereiche:** `Team-Einstellungen` (nur für `Team Admin`: Tagging-Schema, Custom-Felder, Wörterbuch), `Einstellungen` (persönliche Benutzer-Optionen für alle Team-Rollen: konfigurierbare Film-Room-Hotkeys, Kommentar-Overlay-Position, Auto-Stop) und `Sysadmin` (Instanz-Verwaltung & S3-Cleanup) sind strikt voneinander getrennt.
-> * **Produktiver Ansichts-Umschalter:** Konten mit untergeordneten Rollen können gezielt in deren Ansicht wechseln (`Team Admin` → `Coach` / `Spieler`; `Coach` → `Spieler`), um Freigaben und Fehler praxisnah zu prüfen. Für reine `Spieler` ist der Umschalter ausgeblendet.
-> * **Datenschutz (Sysadmin-Isolation):** Besitzt ein Konto ausschließlich die Rolle `Instance Admin` (ohne Team-Rolle), besteht auf Applikations- und API-Ebene keinerlei Einsicht in Team-Videos, Breakdowns oder Notizen.
+> **Hub, Settings-Layout & Konto-Portabilität:**
+> * **Getrennte Navigation:** Innerhalb eines Moduls (z. B. Videoanalyse) erscheinen ausschließlich Fach-Tabs (`Bibliothek`, `Cut & Sync`, `Film Room`, `Playlists`). Ein Klick auf das `SidelineOS`-Logo führt zurück zum Hub, wo `Einstellungen`, `Team-Einstellungen` und `Sysadmin` jeweils ein einheitliches 2-Spalten-Layout mit offenem sticky Seitenmenü nutzen.
+> * **Produktiver Ansichts-Umschalter:** Konten mit untergeordneten Rollen können gezielt in deren Ansicht wechseln (`Team Admin` → `Coach` / `Spieler`; `Coach` → `Spieler`). Für reine `Spieler` ist der Umschalter ausgeblendet.
+> * **Konto-Erhalt & spätere Migration:** Globale Benutzerkonten (`user_uuid`) sind strikt von `team_memberships` getrennt. Ein Entfernen aus einem Team löscht das Konto nicht – das bereitet einen späteren **Konto-Umzug zwischen Teams oder SidelineOS-Servern** vor.
 
 ---
 

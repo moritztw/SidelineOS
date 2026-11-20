@@ -1,23 +1,9 @@
-import type { TeamKontext, VideoReel } from '../../../shared/types.ts';
+import type { VideoReel } from '../../../shared/types.ts';
+export { INITIALE_TEAMS as DEMO_TEAMS } from '../../../core/demoOrgData.ts';
 
 export const THUMB_SIDELINE = '/src/assets/images/film_thumb_sideline_game_1795162829101.jpg';
 export const THUMB_ENDZONE = '/src/assets/images/film_thumb_endzone_practice_1795162830601.jpg';
 export const THUMB_NIGHT = '/src/assets/images/film_thumb_night_scouting_1795162829132.jpg';
-
-export const DEMO_TEAMS: TeamKontext[] = [
-  {
-    id: 'team-stallions-seniors',
-    name: 'Munich Stallions',
-    saison: '2026',
-    kurzname: 'Seniors',
-  },
-  {
-    id: 'team-stallions-u19',
-    name: 'Munich Stallions U19',
-    saison: '2026',
-    kurzname: 'U19',
-  },
-];
 
 export const VERFUEGBARE_TAUSCH_TEAMS: string[] = [
   'Berlin Rebels',
