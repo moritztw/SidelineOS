@@ -4,7 +4,13 @@ export type SpielerUnit = 'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS';
 
 export type ModulId = 'video-analysis' | 'playbook' | 'roster-attendance';
 
-export type CoreBereich = 'hub' | 'modul' | 'settings' | 'team-settings' | 'sysadmin';
+export type CoreBereich =
+  | 'hub'
+  | 'settings-hub'
+  | 'modul'
+  | 'settings'
+  | 'team-settings'
+  | 'sysadmin';
 
 export type VideoModulTab = 'dashboard' | 'cut-sync' | 'film-room' | 'playlists';
 
@@ -147,10 +153,11 @@ export interface TagFeldKonfig {
 export interface TeamKontext {
   id: string;
   name: string;
-  saison: string;
   kurzname: string;
+  /** Aktuelle Saison des langlebigen Teams (alte Saisons bleiben abrufbar) */
+  aktiveSaison: string;
+  saisons: string[];
   primaerFarbe?: string;
-  archiviert?: boolean;
   aktivierteModule: ModulId[];
   customProfilFelder: ProfilCustomFeld[];
 }
@@ -268,6 +275,8 @@ export interface ShareDownloadLink {
 export interface VideoReel {
   id: string;
   teamId: string;
+  /** Zugeordnete Saison (z. B. "2026" oder "2025"; Standard: Jahr aus eventDate) */
+  saison?: string;
   title: string;
   category: ReelKategorie;
   eventDate: string;

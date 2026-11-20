@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react';
 
 export interface SettingsKategorie {
   id: string;
@@ -12,6 +13,8 @@ interface SettingsShellProps {
   untertitel: string;
   kategorien: SettingsKategorie[];
   kopfAktion?: ReactNode;
+  zurueckLabel?: string;
+  onZurueck?: () => void;
   children: ReactNode;
 }
 
@@ -24,6 +27,8 @@ export function SettingsShell({
   untertitel,
   kategorien,
   kopfAktion,
+  zurueckLabel,
+  onZurueck,
   children,
 }: SettingsShellProps) {
   const [aktiveId, setAktiveId] = useState<string>(kategorien[0]?.id ?? '');
@@ -78,6 +83,16 @@ export function SettingsShell({
       <section className="rounded-lg border border-[#232933] bg-[#13171D] p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
+            {onZurueck && (
+              <button
+                type="button"
+                onClick={onZurueck}
+                className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#8B949E] transition-colors hover:text-[#F59E0B]"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+                {zurueckLabel ?? 'Alle Einstellungen'}
+              </button>
+            )}
             <h1 className="text-lg font-semibold text-white">{titel}</h1>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[#8B949E]">{untertitel}</p>
           </div>

@@ -22,8 +22,10 @@ Dieses Dokument beschreibt die verbindliche Zielarchitektur von **SidelineOS** (
 | **Coordinator / Position Coach** | Upload, Cut & Sync, Breakdown, Telestration, `DRAFT`-Notizen, `Publish Session`, Spieler-Freigaben | Schreibzugriff im eigenen Team |
 | **Player** | Wiedergabe freigegebener Reels & Smart Playlists, eigenes Profil (Nummer, Position, Kontakte, Team-Custom-Felder), eigene Notizen | Nur **explizit freigegebene** Reels/Units und `PUBLISHED`-Coach-Notizen |
 
-> **Hub, Settings-Layout & Konto-Portabilität:**
-> * **Getrennte Navigation:** Innerhalb eines Moduls (z. B. Videoanalyse) erscheinen ausschließlich Fach-Tabs (`Bibliothek`, `Cut & Sync`, `Film Room`, `Playlists`). Ein Klick auf das `SidelineOS`-Logo führt zurück zum Hub, wo `Einstellungen`, `Team-Einstellungen` und `Sysadmin` jeweils ein einheitliches 2-Spalten-Layout mit offenem sticky Seitenmenü nutzen.
+> **Hub, dauerhafte Multi-Saison-Teams & Konto-Portabilität:**
+> * **Aufgeräumte Startseite & Einstellungs-Hub:** Die Startseite zeigt ausschließlich Kacheln für die freigeschalteten Module des Teams sowie eine Kachel `Einstellungen`. Nicht freigeschaltete Module werden vollständig ausgeblendet. Hinter `Einstellungen` liegt eine dedizierte Einstellungs-Übersichtsseite (`Persönliche Einstellungen`, `Team-Einstellungen`, `Sysadmin & Instanz` – jeweils nach Berechtigung), die in ein einheitliches 2-Spalten-Layout mit offenem sticky Seitenmenü führt.
+> * **Team-sortierte Modulverwaltung:** Im Sysadmin-Bereich werden installierte Module (`ENABLED_MODULES`) instanzweit gesteuert und die Mandanten-Freigaben übersichtlich **nach Team sortiert** zugewiesen.
+> * **Dauerhafte Multi-Saison-Teams:** Teams werden bei einem Saisonwechsel nicht neu angelegt. Jedes Team führt eine `aktiveSaison` und eine Liste aller bisherigen `saisons` (`2026`, `2025`, `2024`, …). Kader, Units, Custom-Felder und Tagging-Wörterbücher bleiben erhalten, während ältere Spielzeiten direkt über den Saison-Umschalter abrufbar bleiben.
 > * **Produktiver Ansichts-Umschalter:** Konten mit untergeordneten Rollen können gezielt in deren Ansicht wechseln (`Team Admin` → `Coach` / `Spieler`; `Coach` → `Spieler`). Für reine `Spieler` ist der Umschalter ausgeblendet.
 > * **Konto-Erhalt & spätere Migration:** Globale Benutzerkonten (`user_uuid`) sind strikt von `team_memberships` getrennt. Ein Entfernen aus einem Team löscht das Konto nicht – das bereitet einen späteren **Konto-Umzug zwischen Teams oder SidelineOS-Servern** vor.
 
@@ -77,3 +79,17 @@ PostgreSQL-Trigger führen niemals direkte S3-HTTP-Aufrufe aus. Stattdessen gilt
 
 * **Normalisierte & frame-gebundene Canvas-Zeichnungen:** Alle Vektorzeichnungen werden relativ zur Videofläche (`0.0` bis `1.0`), streng an ihren Kamerawinkel (`angle`) und an ihren exakten Video-Frame (`timestamp_ms` quantisiert auf Frame-Raster) gebunden. Auto-Stop pausiert die Wiedergabe exakt auf dem gezeichneten Frame.
 * **Typsichere KI-Suche:** Eine optionale LLM-Anbindung (Ollama / externe API) generiert niemals rohes SQL, sondern ausschließlich ein strikt validiertes JSON-Filterobjekt identisch zum Smart-Playlist-Filter. `team_id` wird immer serverseitig erzwungen.
+
+---
+
+## 6. Cross-Platform & App-Architektur (Android, iOS, Linux, Windows, macOS)
+
+Die UI- und Code-Struktur ist von Beginn an **API-First** und plattformneutral ausgelegt, um spätere Desktop- und Mobile-Clients ohne Neuentwicklung der Geschäftslogik zu ermöglichen:
+
+1. **Headless TypeScript Core (`src/core/*`, `src/modules/*/services/*`, `src/shared/types.ts`):** Sämtliche Domänenlogik (Tagging-Auto-Calc, Frame-Quantisierung, Saison-Filterung, Bundle-Validierung, RBAC-Regeln) ist frei von Browser-DOM-Abhängigkeiten und lässt sich unverändert in Web, Mobile-Apps und Desktop-Clients nutzen.
+2. **Strikte API-Grenze (Paket 4):** Authentifizierung (JWT/Session + Refresh), Presigned S3-URLs (`206 Partial Content`), JSON-Bundles und Metadaten laufen ausschließlich über eine sauber versionierte REST-API (`/api/v1/*`).
+3. **Empfohlene App-Pfade (KISS):**
+   * **Mobile (Android & iOS):** **Capacitor** (nutzt direkt die bestehende React/Tailwind-UI + native Plugins für Kamera-Sync, Offline-Cache und System-Share) oder optional **React Native / Flutter** gegen dieselbe `/api/v1`-Schnittstelle.
+   * **Desktop (Linux, Windows, macOS):** **Tauri v2** (sehr kleine Binärdateien, nativer System-WebView, direkter Zugriff auf lokale Kamera-SD-Karten für Multi-Clip-Bulk-Uploads).
+   * **Touch-First & Responsive UI:** Großzügige Kachel- und Button-Ziele, keine Hover-only-Pflichtfunktionen und normalisierte Canvas-Koordinaten (`0..1`) funktionieren konsistent per Maus, Touch, Apple Pencil und Stylus.
+

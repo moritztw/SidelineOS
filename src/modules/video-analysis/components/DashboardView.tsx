@@ -20,12 +20,15 @@ import type {
   VideoReel,
 } from '../../../shared/types.ts';
 import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../../../shared/types.ts';
+import { filtereReelsNachSaison } from '../../../core/seasonUtils.ts';
 import { istShareLinkGueltig, reelZuBundle } from '../services/bundleSchema.ts';
 import { TeamShareModal } from './TeamShareModal.tsx';
 import { UploadPanel } from './UploadPanel.tsx';
 
 interface DashboardViewProps {
   teamId: string;
+  gewaehlteSaison: string;
+  teamAktiveSaison: string;
   teamRolle: TeamRolle;
   tagSchema: TagFeldKonfig[];
   reels: VideoReel[];
@@ -86,6 +89,8 @@ function ReelThumbnail({ src, titel }: { src: string; titel: string }) {
 
 export function DashboardView({
   teamId,
+  gewaehlteSaison,
+  teamAktiveSaison,
   teamRolle,
   tagSchema,
   reels,
@@ -97,21 +102,23 @@ export function DashboardView({
   onReelOeffnen,
 }: DashboardViewProps) {
   const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
+  const istArchivSaison = gewaehlteSaison !== 'ALL' && gewaehlteSaison !== teamAktiveSaison;
   const [aktiveKategorie, setAktiveKategorie] = useState<'ALL' | ReelKategorie>('ALL');
   const [suchbegriff, setSuchbegriff] = useState('');
   const [teilenReelId, setTeilenReelId] = useState<string | null>(null);
 
   const gefilterteReels = useMemo(() => {
     const query = suchbegriff.trim().toLowerCase();
-    return reels
-      .filter((reel) => reel.teamId === teamId)
+    const teamReels = reels.filter((reel) => reel.teamId === teamId);
+    const saisonReels = filtereReelsNachSaison(teamReels, gewaehlteSaison);
+    return saisonReels
       .filter((reel) => (teamRolle === 'PLAYER' ? reel.visibility !== 'COACHES_ONLY' : true))
       .filter((reel) => (aktiveKategorie === 'ALL' ? true : reel.category === aktiveKategorie))
       .filter((reel) =>
         query ? reel.title.toLowerCase().includes(query) || reel.eventDate.includes(query) : true
       )
       .sort((a, b) => b.eventDate.localeCompare(a.eventDate));
-  }, [reels, teamId, teamRolle, aktiveKategorie, suchbegriff]);
+  }, [reels, teamId, gewaehlteSaison, teamRolle, aktiveKategorie, suchbegriff]);
 
   const teilenReel = reels.find((r) => r.id === teilenReelId) ?? null;
 
@@ -179,6 +186,19 @@ export function DashboardView({
         }`}
       >
         <section aria-label="Videobibliothek" className="min-w-0 space-y-3">
+          {istArchivSaison && (
+            <div className="flex items-center justify-between rounded-md border border-[#F59E0B]/35 bg-[#F59E0B]/10 px-4 py-2.5 text-xs text-[#FDE68A]">
+              <span>
+                Archiv-Saison <strong className="font-mono text-white">{gewaehlteSaison}</strong>:
+                Alle Tapes, Breakdowns und Zeichnungen dieser Spielzeit bleiben vollständig
+                abrufbar.
+              </span>
+              <span className="font-mono text-white tabular-nums">
+                {gefilterteReels.length} Tapes
+              </span>
+            </div>
+          )}
+
           {teamRolle === 'PLAYER' && (
             <div className="flex items-center justify-between rounded-md border border-[#232933] bg-[#13171D] px-4 py-2.5 text-xs text-[#8B949E]">
               <span>
@@ -383,6 +403,7 @@ export function DashboardView({
         {istCoach && (
           <UploadPanel
             teamId={teamId}
+            saison={gewaehlteSaison === 'ALL' ? teamAktiveSaison : gewaehlteSaison}
             hervorgehoben={uploadHervorgehoben}
             onNeuesReelHinzufuegen={onNeuesReel}
           />

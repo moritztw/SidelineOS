@@ -11,10 +11,10 @@ export const INITIALE_TEAMS: TeamKontext[] = [
   {
     id: 'team-stallions-seniors',
     name: 'Munich Stallions',
-    saison: '2026',
     kurzname: 'Seniors',
+    aktiveSaison: '2026',
+    saisons: ['2026', '2025', '2024'],
     primaerFarbe: '#F59E0B',
-    archiviert: false,
     aktivierteModule: ['video-analysis', 'playbook'],
     customProfilFelder: [
       { key: 'passnummer', label: 'Spielerpass-Nr.', typ: 'text', pflicht: false },
@@ -30,13 +30,18 @@ export const INITIALE_TEAMS: TeamKontext[] = [
   {
     id: 'team-stallions-u19',
     name: 'Munich Stallions U19',
-    saison: '2026',
     kurzname: 'U19',
+    aktiveSaison: '2026',
+    saisons: ['2026', '2025'],
     primaerFarbe: '#3B82F6',
-    archiviert: false,
     aktivierteModule: ['video-analysis'],
     customProfilFelder: [
-      { key: 'notfallkontakt', label: 'Erziehungsberechtigte / Notfallkontakt', typ: 'text', pflicht: true },
+      {
+        key: 'notfallkontakt',
+        label: 'Erziehungsberechtigte / Notfallkontakt',
+        typ: 'text',
+        pflicht: true,
+      },
     ],
   },
 ];

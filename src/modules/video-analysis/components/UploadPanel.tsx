@@ -16,6 +16,7 @@ import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 
 interface UploadPanelProps {
   teamId: string;
+  saison: string;
   hervorgehoben: boolean;
   onNeuesReelHinzufuegen: (reel: VideoReel) => void;
 }
@@ -29,6 +30,7 @@ interface UploadProtokoll {
 
 export function UploadPanel({
   teamId,
+  saison,
   hervorgehoben,
   onNeuesReelHinzufuegen,
 }: UploadPanelProps) {
@@ -76,7 +78,10 @@ export function UploadPanel({
           return;
         }
 
-        const neuesReel = bundleZuReel(ergebnis.bundle, teamId, THUMB_SIDELINE);
+        const neuesReel: VideoReel = {
+          ...bundleZuReel(ergebnis.bundle, teamId, THUMB_SIDELINE),
+          saison,
+        };
         onNeuesReelHinzufuegen(neuesReel);
         setHinweisListe([
           `Bundle "${neuesReel.title}" importiert (${neuesReel.playCount} Plays, ${neuesReel.taggedCount} vorgetaggt).`,
@@ -100,6 +105,7 @@ export function UploadPanel({
       const neuesReel: VideoReel = {
         id: `reel-${Date.now()}`,
         teamId,
+        saison,
         title: istEinzeldatei ? basisName : `Clip-Upload (${videoDateien.length} Dateien)`,
         category: 'GAME',
         eventDate: new Date().toISOString().slice(0, 10),
@@ -157,7 +163,10 @@ export function UploadPanel({
       setFehlerListe(validiert.fehler);
       return;
     }
-    const reel = bundleZuReel(validiert.bundle, teamId, THUMB_SIDELINE);
+    const reel: VideoReel = {
+      ...bundleZuReel(validiert.bundle, teamId, THUMB_SIDELINE),
+      saison,
+    };
     onNeuesReelHinzufuegen(reel);
     setHinweisListe([
       `Companion-Demo "${reel.title}" importiert (${reel.playCount} Plays, inkl. Lücke in Endzone & optionalem Offset).`,

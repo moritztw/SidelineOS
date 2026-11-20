@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  Archive,
   Blocks,
   Building2,
   HardDrive,
@@ -60,7 +59,6 @@ interface SysadminPageProps {
   onGlobalModulToggle: (modulId: ModulId) => void;
   onTeamModulToggle: (teamId: string, modulId: ModulId) => void;
   onTeamErstellen: (team: TeamKontext) => void;
-  onTeamArchivToggle: (teamId: string) => void;
   onTeamLoeschen: (teamId: string) => void;
   onBenutzerErstellen: (
     benutzer: BenutzerKonto,
@@ -70,6 +68,7 @@ interface SysadminPageProps {
   onBenutzerLoeschen: (userUuid: string) => void;
   onS3Speichern: (neu: S3Konfiguration) => void;
   onSmtpSpeichern: (neu: SmtpKonfiguration) => void;
+  onZurueck?: () => void;
 }
 
 export function SysadminPage({
@@ -82,13 +81,13 @@ export function SysadminPage({
   onGlobalModulToggle,
   onTeamModulToggle,
   onTeamErstellen,
-  onTeamArchivToggle,
   onTeamLoeschen,
   onBenutzerErstellen,
   onBenutzerSysadminToggle,
   onBenutzerLoeschen,
   onS3Speichern,
   onSmtpSpeichern,
+  onZurueck,
 }: SysadminPageProps) {
   // Neues Team
   const [neuesTeamName, setNeuesTeamName] = useState('');
@@ -138,6 +137,7 @@ export function SysadminPage({
   const handleTeamAnlegen = () => {
     const name = neuesTeamName.trim();
     if (!name) return;
+    const startSaison = neuesTeamSaison.trim() || '2026';
     const slug = name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -145,10 +145,10 @@ export function SysadminPage({
     onTeamErstellen({
       id: `team-${slug || Date.now()}`,
       name,
-      saison: neuesTeamSaison.trim() || '2026',
+      aktiveSaison: startSaison,
+      saisons: [startSaison],
       kurzname: neuesTeamKurz.trim() || name.slice(0, 12),
       primaerFarbe: '#F59E0B',
-      archiviert: false,
       aktivierteModule: [...globalAktivierteModule],
       customProfilFelder: [
         { key: 'notfallkontakt', label: 'Notfallkontakt', typ: 'text', pflicht: true },
@@ -184,11 +184,17 @@ export function SysadminPage({
     setNeuIstSysadmin(false);
   };
 
+  const globalAktiveModuleListe = SIDELINE_MODULE_REGISTRY.filter((m) =>
+    globalAktivierteModule.includes(m.id)
+  );
+
   return (
     <SettingsShell
       titel="Sysadmin · Instanz-Administration"
       untertitel="Strikte Datenschutz-Trennung: Als Instance Admin verwaltest du Module, Mandanten, globale Benutzer, S3-Storage und SMTP – ohne App-Zugriff auf Team-Videos, Breakdowns oder Notizen."
       kategorien={kategorien}
+      zurueckLabel="Alle Einstellungen"
+      onZurueck={onZurueck}
       kopfAktion={
         <div className="inline-flex items-center gap-1.5 rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E]">
           <ShieldAlert className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
@@ -196,21 +202,21 @@ export function SysadminPage({
         </div>
       }
     >
-      {/* 1. Modul-Verwaltung (Instanz & pro Team) */}
+      {/* 1. Modul-Verwaltung (Instanz-Freigabe oben, Matrix nach Team sortiert darunter) */}
       <section
         id="sys-module"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
+        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
           <div className="flex items-center gap-2">
             <Blocks className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
             <div>
               <h2 className="text-sm font-semibold text-white">
-                Modul-Verwaltung (Instanz &amp; pro Team)
+                Modul-Verwaltung (nach Team sortiert)
               </h2>
               <p className="text-[11px] text-[#8B949E]">
-                Deaktivierte Module verschwinden sowohl aus dem SidelineOS-Hub als auch aus allen
-                Einstellungsseiten.
+                Nicht freigeschaltete Dienste werden auf der Startseite und in den Einstellungen
+                vollständig ausgeblendet.
               </p>
             </div>
           </div>
@@ -220,61 +226,95 @@ export function SysadminPage({
           </code>
         </div>
 
-        <div className="space-y-3">
-          {SIDELINE_MODULE_REGISTRY.map((modul) => {
-            const globalAn = globalAktivierteModule.includes(modul.id);
-            return (
-              <div
-                key={modul.id}
-                className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-white">{modul.name}</span>
-                      <span className="font-mono text-[11px] text-[#8B949E]">
-                        ({modul.id} · v{modul.version})
-                      </span>
+        {/* Kompakte Instanz-Schalter (ENABLED_MODULES) */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-[#8B949E]">
+            Instanzweit installierte Module
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {SIDELINE_MODULE_REGISTRY.map((modul) => {
+              const globalAn = globalAktivierteModule.includes(modul.id);
+              return (
+                <label
+                  key={modul.id}
+                  className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
+                    globalAn
+                      ? 'border-[#F59E0B]/50 bg-[#0B0E11] text-white'
+                      : 'border-[#232933] bg-[#0B0E11]/50 text-[#6E7681]'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={globalAn}
+                    onChange={() => onGlobalModulToggle(modul.id)}
+                    className="h-3.5 w-3.5 accent-[#F59E0B]"
+                  />
+                  <span className="font-medium">{modul.name}</span>
+                  <span className="font-mono text-[10px] text-[#6E7681]">v{modul.version}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Team-sortierte Freigabe-Matrix */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium text-[#8B949E]">
+            Freigabe pro Team ({teams.length} Teams)
+          </div>
+
+          {globalAktiveModuleListe.length === 0 ? (
+            <div className="rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-5 text-center text-xs text-[#6E7681]">
+              Aktuell ist kein Modul instanzweit aktiviert.
+            </div>
+          ) : (
+            <div className="divide-y divide-[#232933] rounded-md border border-[#232933] bg-[#0B0E11]">
+              {teams.map((team) => {
+                const aktivAnzahl = globalAktiveModuleListe.filter((m) =>
+                  team.aktivierteModule.includes(m.id)
+                ).length;
+
+                return (
+                  <div
+                    key={team.id}
+                    className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-white">{team.name}</div>
+                      <div className="mt-0.5 font-mono text-[11px] text-[#8B949E]">
+                        Aktuelle Saison {team.aktiveSaison} · {aktivAnzahl}/
+                        {globalAktiveModuleListe.length} Module aktiv
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-[#8B949E]">{modul.kurzbeschreibung}</p>
-                  </div>
 
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 text-xs font-medium text-[#E6EDF3]">
-                    <input
-                      type="checkbox"
-                      checked={globalAn}
-                      onChange={() => onGlobalModulToggle(modul.id)}
-                      className="h-3.5 w-3.5 accent-[#F59E0B]"
-                    />
-                    <span>{globalAn ? 'Instanzweit aktiv' : 'Deaktiviert'}</span>
-                  </label>
-                </div>
-
-                {globalAn && (
-                  <div className="flex flex-wrap items-center gap-3 border-t border-[#232933] pt-2.5 text-xs">
-                    <span className="text-[#6E7681]">Freigabe je Team:</span>
-                    {teams.map((team) => {
-                      const teamAktiv = team.aktivierteModule.includes(modul.id);
-                      return (
-                        <label
-                          key={team.id}
-                          className="inline-flex cursor-pointer items-center gap-1.5 text-[#E6EDF3]"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={teamAktiv}
-                            onChange={() => onTeamModulToggle(team.id, modul.id)}
-                            className="h-3.5 w-3.5 accent-[#F59E0B]"
-                          />
-                          <span>{team.name}</span>
-                        </label>
-                      );
-                    })}
+                    <div className="flex flex-wrap items-center gap-3">
+                      {globalAktiveModuleListe.map((modul) => {
+                        const teamAktiv = team.aktivierteModule.includes(modul.id);
+                        return (
+                          <label
+                            key={modul.id}
+                            className={`inline-flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                              teamAktiv
+                                ? 'border-[#232933] bg-[#13171D] text-[#E6EDF3]'
+                                : 'border-[#232933]/60 bg-transparent text-[#6E7681]'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={teamAktiv}
+                              onChange={() => onTeamModulToggle(team.id, modul.id)}
+                              className="h-3.5 w-3.5 accent-[#F59E0B]"
+                            />
+                            <span>{modul.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
       </section>
 
@@ -288,7 +328,8 @@ export function SysadminPage({
           <div>
             <h2 className="text-sm font-semibold text-white">Teams / Mandanten ({teams.length})</h2>
             <p className="text-[11px] text-[#8B949E]">
-              Mandanten anlegen, vergangene Spielzeiten archivieren oder Teams entfernen.
+              Teams bleiben dauerhaft über Saisons hinweg bestehen. Neue Spielzeiten startet der
+              jeweilige Team Admin direkt im Team, alte Saisons bleiben abrufbar.
             </p>
           </div>
         </div>
@@ -298,6 +339,7 @@ export function SysadminPage({
             const mitgliederZahl = mitgliedschaften.filter(
               (m) => m.teamId === team.id && m.status === 'AKTIV'
             ).length;
+            const alteSaisons = team.saisons.filter((s) => s !== team.aktiveSaison);
             const fragtLoeschung = loeschTeamBestaetigungId === team.id;
 
             return (
@@ -308,26 +350,15 @@ export function SysadminPage({
                 <div>
                   <div className="font-medium text-white">
                     {team.name}{' '}
-                    <span className="font-mono text-[#8B949E]">· {team.saison}</span>
-                    {team.archiviert && (
-                      <span className="ml-2 font-mono text-[10px] text-[#F59E0B]">[ARCHIVIERT]</span>
-                    )}
+                    <span className="font-mono text-[#F59E0B]">· Saison {team.aktiveSaison}</span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-[#8B949E]">
                     {mitgliederZahl} aktive Mitglieder · {team.aktivierteModule.length} Module
+                    {alteSaisons.length > 0 && ` · Archivierte Saisons: ${alteSaisons.join(', ')}`}
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onTeamArchivToggle(team.id)}
-                    className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
-                  >
-                    <Archive className="h-3 w-3" aria-hidden="true" />
-                    {team.archiviert ? 'Reaktivieren' : 'Archivieren'}
-                  </button>
-
                   {teams.length > 1 &&
                     (fragtLoeschung ? (
                       <div className="flex items-center gap-1">

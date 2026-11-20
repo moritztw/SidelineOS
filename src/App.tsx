@@ -3,6 +3,7 @@ import { Eye, RotateCcw } from 'lucide-react';
 import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
 import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
 import { ModulePreviewView } from './core/hub/ModulePreviewView.tsx';
+import { SettingsHubView } from './core/settings/SettingsHubView.tsx';
 import { UserSettingsPage } from './core/settings/UserSettingsPage.tsx';
 import { TeamSettingsPage } from './core/settings/TeamSettingsPage.tsx';
 import { SysadminPage } from './core/settings/SysadminPage.tsx';
@@ -19,6 +20,10 @@ import {
   STANDARD_AKTIVIERTE_MODULE,
   istModulFuerTeamAktiv,
 } from './core/moduleRegistry.ts';
+import {
+  filtereReelsNachSaison,
+  fuegeNeueSaisonHinzu,
+} from './core/seasonUtils.ts';
 import {
   STANDARD_HOTKEYS,
   STANDARD_NUTZER_EINSTELLUNGEN,
@@ -119,6 +124,7 @@ export default function App() {
   );
   const [teams, setTeams] = useState<TeamKontext[]>(INITIALE_TEAMS);
   const [aktivesTeamId, setAktivesTeamId] = useState<string>(INITIALE_TEAMS[0].id);
+  const [gewaehlteSaison, setGewaehlteSaison] = useState<string>(INITIALE_TEAMS[0].aktiveSaison);
   const [benutzerListe, setBenutzerListe] = useState<BenutzerKonto[]>(INITIALE_BENUTZER);
   const [mitgliedschaften, setMitgliedschaften] = useState<TeamMitgliedschaft[]>(
     INITIALE_MITGLIEDSCHAFTEN
@@ -160,10 +166,18 @@ export default function App() {
     aktivesTeam.aktivierteModule
   );
 
-  const sichtbareTeamReels = reels.filter(
-    (r) =>
-      r.teamId === aktivesTeam.id &&
-      (aktiveTeamAnsicht === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
+  const aktiveSaisonAuswahl =
+    gewaehlteSaison === 'ALL' || aktivesTeam.saisons.includes(gewaehlteSaison)
+      ? gewaehlteSaison
+      : aktivesTeam.aktiveSaison;
+
+  const sichtbareTeamReels = filtereReelsNachSaison(
+    reels.filter(
+      (r) =>
+        r.teamId === aktivesTeam.id &&
+        (aktiveTeamAnsicht === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
+    ),
+    aktiveSaisonAuswahl
   );
 
   const ausgewaehltesReel =
@@ -174,8 +188,6 @@ export default function App() {
   const ausstehendeAnfragenAnzahl = mitgliedschaften.filter(
     (m) => m.teamId === aktivesTeam.id && m.status === 'WARTET_AUF_FREIGABE'
   ).length;
-
-  const teamPlayAnzahl = sichtbareTeamReels.reduce((s, r) => s + r.playCount, 0);
 
   const handleNutzerEinstellungenAendern = (neu: NutzerEinstellungen) => {
     setNutzerEinstellungen(neu);
@@ -315,18 +327,34 @@ export default function App() {
     );
   };
 
+  const handleTeamWechseln = (neueTeamId: string) => {
+    setAktivesTeamId(neueTeamId);
+    const ziel = teams.find((t) => t.id === neueTeamId);
+    if (ziel) {
+      setGewaehlteSaison(ziel.aktiveSaison);
+    }
+  };
+
   const handleTeamAktualisieren = (aktualisiert: TeamKontext) => {
     setTeams((alt) => alt.map((t) => (t.id === aktualisiert.id ? aktualisiert : t)));
+    if (aktualisiert.id === aktivesTeamId) {
+      setGewaehlteSaison(aktualisiert.aktiveSaison);
+    }
+  };
+
+  const handleNeueSaisonStarten = (teamId: string, neueSaison: string) => {
+    const bereinigt = neueSaison.trim();
+    if (!bereinigt) return;
+    setTeams((alt) =>
+      alt.map((t) => (t.id === teamId ? fuegeNeueSaisonHinzu(t, bereinigt) : t))
+    );
+    if (teamId === aktivesTeamId) {
+      setGewaehlteSaison(bereinigt);
+    }
   };
 
   const handleTeamErstellen = (neuesTeam: TeamKontext) => {
     setTeams((alt) => [...alt, neuesTeam]);
-  };
-
-  const handleTeamArchivToggle = (teamId: string) => {
-    setTeams((alt) =>
-      alt.map((t) => (t.id === teamId ? { ...t, archiviert: !t.archiviert } : t))
-    );
   };
 
   const handleTeamLoeschen = (teamId: string) => {
@@ -334,6 +362,7 @@ export default function App() {
       const rest = alt.filter((t) => t.id !== teamId);
       if (rest.length > 0 && aktivesTeamId === teamId) {
         setAktivesTeamId(rest[0].id);
+        setGewaehlteSaison(rest[0].aktiveSaison);
       }
       return rest;
     });
@@ -664,27 +693,47 @@ export default function App() {
       {/* Kontext-Leiste: Team-Wahl, produktiver Ansichts-Umschalter (nur bei Rollen unter sich) & Demo-Konto */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {aktiveTeamAnsicht === null || bereich === 'sysadmin' ? (
               <span className="text-xs font-medium text-[#8B949E]">
                 Instanz-Verwaltung · Sysadmin-Bereich (getrennt von Team-Daten)
               </span>
             ) : (
-              <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                <span>Team</span>
-                <select
-                  value={aktivesTeam.id}
-                  onChange={(e) => setAktivesTeamId(e.target.value)}
-                  className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
-                >
-                  {teams.map((team) => (
-                    <option key={team.id} value={team.id} className="bg-[#13171D]">
-                      {team.name} · {team.saison}
-                      {team.archiviert ? ' (Archiv)' : ''}
+              <>
+                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                  <span>Team</span>
+                  <select
+                    value={aktivesTeam.id}
+                    onChange={(e) => handleTeamWechseln(e.target.value)}
+                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                  >
+                    {teams.map((team) => (
+                      <option key={team.id} value={team.id} className="bg-[#13171D]">
+                        {team.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                  <span>Saison</span>
+                  <select
+                    aria-label="Saison auswählen"
+                    value={aktiveSaisonAuswahl}
+                    onChange={(e) => setGewaehlteSaison(e.target.value)}
+                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 font-mono text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                  >
+                    {aktivesTeam.saisons.map((s) => (
+                      <option key={s} value={s} className="bg-[#13171D]">
+                        {s} {s === aktivesTeam.aktiveSaison ? '(Aktuell)' : '(Archiv)'}
+                      </option>
+                    ))}
+                    <option value="ALL" className="bg-[#13171D]">
+                      Alle Saisons
                     </option>
-                  ))}
-                </select>
-              </label>
+                  </select>
+                </label>
+              </>
             )}
           </div>
 
@@ -776,13 +825,17 @@ export default function App() {
             onGlobalModulToggle={handleGlobalModulToggle}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
-            onTeamArchivToggle={handleTeamArchivToggle}
             onTeamLoeschen={handleTeamLoeschen}
             onBenutzerErstellen={handleBenutzerErstellen}
             onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
             onBenutzerLoeschen={handleBenutzerLoeschen}
             onS3Speichern={setS3Konfig}
             onSmtpSpeichern={setSmtpKonfig}
+            onZurueck={
+              aktiveTeamAnsicht !== null
+                ? () => handleBereichWechseln('settings-hub')
+                : undefined
+            }
           />
         ) : aktiveTeamAnsicht === null ? (
           <SysadminPage
@@ -795,7 +848,6 @@ export default function App() {
             onGlobalModulToggle={handleGlobalModulToggle}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
-            onTeamArchivToggle={handleTeamArchivToggle}
             onTeamLoeschen={handleTeamLoeschen}
             onBenutzerErstellen={handleBenutzerErstellen}
             onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
@@ -806,14 +858,19 @@ export default function App() {
         ) : bereich === 'hub' ? (
           <SidelineHubView
             team={aktivesTeam}
+            aktiveTeamAnsicht={aktiveTeamAnsicht}
+            globalAktivierteModule={globalAktivierteModule}
+            ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
+            onModulOeffnen={handleModulOeffnen}
+            onBereichOeffnen={handleBereichWechseln}
+          />
+        ) : bereich === 'settings-hub' ? (
+          <SettingsHubView
+            team={aktivesTeam}
             benutzer={aktuellerBenutzer}
             konto={konto}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
-            globalAktivierteModule={globalAktivierteModule}
-            teamReelAnzahl={sichtbareTeamReels.length}
-            teamPlayAnzahl={teamPlayAnzahl}
             ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
-            onModulOeffnen={handleModulOeffnen}
             onBereichOeffnen={handleBereichWechseln}
           />
         ) : bereich === 'settings' ? (
@@ -826,6 +883,7 @@ export default function App() {
             einstellungen={nutzerEinstellungen}
             onBenutzerAktualisieren={handleBenutzerAktualisieren}
             onEinstellungenAendern={handleNutzerEinstellungenAendern}
+            onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
           <TeamSettingsPage
@@ -836,6 +894,7 @@ export default function App() {
             videoModulAktiv={videoModulAktiv}
             tagSchema={tagSchema}
             onTeamAktualisieren={handleTeamAktualisieren}
+            onNeueSaisonStarten={handleNeueSaisonStarten}
             onMitgliedRolleAendern={handleMitgliedRolleAendern}
             onMitgliedUnitsAendern={handleMitgliedUnitsAendern}
             onMitgliedBestaetigen={handleMitgliedBestaetigen}
@@ -849,11 +908,14 @@ export default function App() {
             onTagDefinitionLoeschen={handleDefinitionLoeschen}
             onTagCustomFeldErstellen={handleCustomFeldErstellen}
             onTagCustomFeldLoeschen={handleCustomFeldLoeschen}
+            onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'modul' && aktivesModulId === 'video-analysis' && videoModulAktiv ? (
           videoTab === 'dashboard' ? (
             <DashboardView
               teamId={aktivesTeam.id}
+              gewaehlteSaison={aktiveSaisonAuswahl}
+              teamAktiveSaison={aktivesTeam.aktiveSaison}
               teamRolle={aktiveTeamAnsicht}
               tagSchema={tagSchema}
               reels={reels}
@@ -908,12 +970,8 @@ export default function App() {
         ) : (
           <SidelineHubView
             team={aktivesTeam}
-            benutzer={aktuellerBenutzer}
-            konto={konto}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
             globalAktivierteModule={globalAktivierteModule}
-            teamReelAnzahl={sichtbareTeamReels.length}
-            teamPlayAnzahl={teamPlayAnzahl}
             ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
             onModulOeffnen={handleModulOeffnen}
             onBereichOeffnen={handleBereichWechseln}

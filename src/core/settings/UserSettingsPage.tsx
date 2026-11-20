@@ -27,6 +27,7 @@ interface UserSettingsPageProps {
   einstellungen: NutzerEinstellungen;
   onBenutzerAktualisieren: (aktualisiert: BenutzerKonto) => void;
   onEinstellungenAendern: (neu: NutzerEinstellungen) => void;
+  onZurueck?: () => void;
 }
 
 const ECKEN_OPTIONEN: Array<{ id: KommentarEcke; label: string }> = [
@@ -47,6 +48,7 @@ export function UserSettingsPage({
   einstellungen,
   onBenutzerAktualisieren,
   onEinstellungenAendern,
+  onZurueck,
 }: UserSettingsPageProps) {
   const istCoach = aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN';
 
@@ -206,6 +208,8 @@ export function UserSettingsPage({
       titel="Persönliche Einstellungen"
       untertitel={`Einstellungen für dein Benutzerkonto (${TEAM_ROLLEN_LABELS[aktiveTeamAnsicht]} · ${team.name}). Aktive Module blenden ihre persönlichen Optionen automatisch unten mit ein.`}
       kategorien={kategorien}
+      zurueckLabel="Alle Einstellungen"
+      onZurueck={onZurueck}
     >
       {/* Sektion 1: Spieler- & Nutzerprofil */}
       <section
