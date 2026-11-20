@@ -1,35 +1,44 @@
 import { Download } from 'lucide-react';
 import type {
-  BenutzerRolle,
-  HashWert,
-  OdkWert,
-  PlayBreakdown,
-  PlayTyp,
+  BreakdownFeldKey,
   Spielzug,
+  TagFeldKonfig,
+  TeamRolle,
 } from '../../../shared/types.ts';
 import { exportiereBreakdownAlsCsv } from '../services/bundleSchema.ts';
+import { leseBreakdownWert } from '../services/taggingEngine.ts';
 
 interface BreakdownGridProps {
   reelTitel: string;
   plays: Spielzug[];
   aktiverPlayIndex: number;
-  rolle: BenutzerRolle;
+  teamRolle: TeamRolle;
+  tagSchema: TagFeldKonfig[];
   onPlayWaehlen: (index: number) => void;
-  onBreakdownAendern: (playNumber: number, patch: Partial<PlayBreakdown>) => void;
+  onFeldAendern: (
+    playNumber: number,
+    feldKey: BreakdownFeldKey,
+    wert: string | number | undefined,
+    istCustom: boolean
+  ) => void;
+  onDefinitionLernen: (feldKey: BreakdownFeldKey, wert: string) => void;
 }
 
 export function BreakdownGrid({
   reelTitel,
   plays,
   aktiverPlayIndex,
-  rolle,
+  teamRolle,
+  tagSchema,
   onPlayWaehlen,
-  onBreakdownAendern,
+  onFeldAendern,
+  onDefinitionLernen,
 }: BreakdownGridProps) {
-  const istCoach = rolle === 'COACH';
+  const istBearbeitbar = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
+  const aktiveFelder = tagSchema.filter((f) => f.aktiv);
 
   const handleCsvExport = () => {
-    const csv = exportiereBreakdownAlsCsv(plays);
+    const csv = exportiereBreakdownAlsCsv(plays, undefined, tagSchema);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -48,11 +57,22 @@ export function BreakdownGrid({
       aria-label="Hudl-konforme Breakdown-Tabelle"
       className="overflow-hidden rounded-lg border border-[#232933] bg-[#13171D]"
     >
+      {/* Datalists für alle aktiven Wörterbuch-Felder */}
+      {aktiveFelder
+        .filter((f) => f.typ === 'combobox' && f.definitionen)
+        .map((feld) => (
+          <datalist key={`grid-dl-${feld.key}`} id={`grid-dl-${feld.key}`}>
+            {feld.definitionen!.map((def) => (
+              <option key={def} value={def} />
+            ))}
+          </datalist>
+        ))}
+
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] px-4 py-2.5">
         <div className="flex items-center gap-3">
           <h2 className="text-xs font-semibold text-white">Breakdown Data Grid</h2>
           <span className="font-mono text-[11px] text-[#8B949E] tabular-nums">
-            {plays.length} Plays · Pfeiltasten ↑/↓ wechseln · Leertaste Play/Pause · A Winkel
+            {plays.length} Plays · {aktiveFelder.length} aktive Spalten · ↑/↓ Play · Leertaste Play/Pause · A Winkel
           </span>
         </div>
 
@@ -71,35 +91,33 @@ export function BreakdownGrid({
           Dieses Reel enthält noch keine geschnittenen Plays.
         </div>
       ) : (
-        <div className="max-h-[300px] overflow-auto">
+        <div className="max-h-[320px] overflow-auto">
           <table className="w-full border-collapse text-left text-xs">
             <thead className="sticky top-0 z-10 border-b border-[#232933] bg-[#0F1318] text-[11px] font-medium text-[#8B949E]">
               <tr>
-                <th className="px-3 py-2 font-mono">#</th>
-                <th className="px-2 py-2">ODK</th>
-                <th className="px-2 py-2 text-right">DN</th>
-                <th className="px-2 py-2 text-right">DIST</th>
-                <th className="px-2 py-2 text-right">YD LN</th>
-                <th className="px-2 py-2">HASH</th>
-                <th className="px-2 py-2">PLAY TYPE</th>
-                <th className="px-2 py-2">OFF FORM</th>
-                <th className="px-2 py-2">DEF FRONT</th>
-                <th className="px-2 py-2">COVERAGE</th>
-                <th className="px-2 py-2">RESULT</th>
-                <th className="px-2 py-2 text-right">GN/LS</th>
-                <th className="px-3 py-2 text-right">WINKEL</th>
+                <th className="sticky left-0 z-20 bg-[#0F1318] px-3 py-2 font-mono">#</th>
+                {aktiveFelder.map((feld) => (
+                  <th
+                    key={feld.key}
+                    className={`px-2 py-2 whitespace-nowrap ${
+                      feld.typ === 'number' ? 'text-right' : ''
+                    }`}
+                  >
+                    {feld.kurz}
+                  </th>
+                ))}
+                <th className="px-3 py-2 text-right whitespace-nowrap">WINKEL</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#232933]">
               {plays.map((play, idx) => {
                 const istAktiv = idx === aktiverPlayIndex;
-                const b = play.breakdown ?? {};
                 const vorhandeneWinkel = Object.entries(play.sources)
                   .filter(([, q]) => q !== null)
                   .map(([k]) => (k === 'SIDELINE' ? 'SL' : k === 'ENDZONE' ? 'EZ' : k.slice(0, 2)));
 
                 const sichtbareNotizen = (play.notes ?? []).filter((n) =>
-                  rolle === 'PLAYER' ? n.status === 'PUBLISHED' : true
+                  teamRolle === 'PLAYER' ? n.status === 'PUBLISHED' : true
                 ).length;
 
                 return (
@@ -110,152 +128,128 @@ export function BreakdownGrid({
                       istAktiv ? 'bg-[#F59E0B]/12 text-white' : 'text-[#E6EDF3] hover:bg-[#191F27]'
                     }`}
                   >
-                    <td className="px-3 py-1.5 font-mono tabular-nums whitespace-nowrap">
+                    <td
+                      className={`sticky left-0 z-10 px-3 py-1.5 font-mono tabular-nums whitespace-nowrap ${
+                        istAktiv ? 'bg-[#262014]' : 'bg-[#13171D]'
+                      }`}
+                    >
                       <span className={istAktiv ? 'font-semibold text-[#F59E0B]' : 'text-[#8B949E]'}>
                         #{play.play_number}
                       </span>
                       {sichtbareNotizen > 0 && (
-                        <span className="ml-1.5 text-[10px] text-[#8B949E]">
+                        <span className="ml-1 text-[10px] text-[#8B949E]">
                           ({sichtbareNotizen})
                         </span>
                       )}
                     </td>
 
-                    <td className="px-2 py-1">
-                      {istAktiv && istCoach ? (
-                        <select
-                          aria-label={`ODK Play ${play.play_number}`}
-                          value={b.odk ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            onBreakdownAendern(play.play_number, {
-                              odk: (e.target.value || undefined) as OdkWert | undefined,
-                            })
-                          }
-                          className="w-12 rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                    {aktiveFelder.map((feld) => {
+                      const wert = leseBreakdownWert(play.breakdown, feld);
+                      const istNummer = feld.typ === 'number';
+                      const istGnLs = feld.key === 'gn_ls';
+
+                      return (
+                        <td
+                          key={feld.key}
+                          className={`px-2 py-1 whitespace-nowrap ${
+                            istNummer ? 'text-right font-mono tabular-nums' : ''
+                          }`}
                         >
-                          <option value="">–</option>
-                          <option value="O">O</option>
-                          <option value="D">D</option>
-                          <option value="K">K</option>
-                        </select>
-                      ) : (
-                        <span className="font-mono">{b.odk ?? '–'}</span>
-                      )}
-                    </td>
-
-                    <td className="px-2 py-1 text-right font-mono tabular-nums">
-                      {istAktiv && istCoach ? (
-                        <select
-                          aria-label={`Down Play ${play.play_number}`}
-                          value={b.down ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            onBreakdownAendern(play.play_number, {
-                              down: e.target.value
-                                ? (Number(e.target.value) as 1 | 2 | 3 | 4)
-                                : undefined,
-                            })
-                          }
-                          className="w-12 rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 text-right font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
-                        >
-                          <option value="">–</option>
-                          <option value="1">1</option>
-                          <option value="2">2</option>
-                          <option value="3">3</option>
-                          <option value="4">4</option>
-                        </select>
-                      ) : (
-                        b.down ?? '–'
-                      )}
-                    </td>
-
-                    <td className="px-2 py-1 text-right font-mono tabular-nums">
-                      {istAktiv && istCoach ? (
-                        <input
-                          type="number"
-                          aria-label={`Distance Play ${play.play_number}`}
-                          value={b.distance ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            onBreakdownAendern(play.play_number, {
-                              distance: e.target.value === '' ? undefined : Number(e.target.value),
-                            })
-                          }
-                          className="w-12 rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 text-right font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
-                        />
-                      ) : (
-                        b.distance ?? '–'
-                      )}
-                    </td>
-
-                    <td className="px-2 py-1 text-right font-mono tabular-nums">
-                      {b.yard_line ?? '–'}
-                    </td>
-
-                    <td className="px-2 py-1 font-mono">
-                      {istAktiv && istCoach ? (
-                        <select
-                          aria-label={`Hash Play ${play.play_number}`}
-                          value={b.hash ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            onBreakdownAendern(play.play_number, {
-                              hash: (e.target.value || undefined) as HashWert | undefined,
-                            })
-                          }
-                          className="w-12 rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
-                        >
-                          <option value="">–</option>
-                          <option value="L">L</option>
-                          <option value="M">M</option>
-                          <option value="R">R</option>
-                        </select>
-                      ) : (
-                        b.hash ?? '–'
-                      )}
-                    </td>
-
-                    <td className="px-2 py-1">
-                      {istAktiv && istCoach ? (
-                        <select
-                          aria-label={`Play Type Play ${play.play_number}`}
-                          value={b.play_type ?? ''}
-                          onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            onBreakdownAendern(play.play_number, {
-                              play_type: (e.target.value || undefined) as PlayTyp | undefined,
-                            })
-                          }
-                          className="w-20 rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
-                        >
-                          <option value="">–</option>
-                          <option value="RUN">RUN</option>
-                          <option value="PASS">PASS</option>
-                          <option value="SPECIAL">SPECIAL</option>
-                          <option value="PENALTY">PENALTY</option>
-                        </select>
-                      ) : (
-                        b.play_type ?? '–'
-                      )}
-                    </td>
-
-                    <td className="px-2 py-1 whitespace-nowrap">{b.off_form || '–'}</td>
-                    <td className="px-2 py-1 whitespace-nowrap">{b.def_front || '–'}</td>
-                    <td className="px-2 py-1 whitespace-nowrap">{b.coverage || '–'}</td>
-                    <td className="px-2 py-1 whitespace-nowrap">{b.result || '–'}</td>
-
-                    <td
-                      className={`px-2 py-1 text-right font-mono tabular-nums ${
-                        b.gn_ls !== undefined && b.gn_ls > 0
-                          ? 'text-[#4ADE80]'
-                          : b.gn_ls !== undefined && b.gn_ls < 0
-                            ? 'text-[#FCA5A5]'
-                            : 'text-[#8B949E]'
-                      }`}
-                    >
-                      {b.gn_ls !== undefined ? (b.gn_ls > 0 ? `+${b.gn_ls}` : b.gn_ls) : '–'}
-                    </td>
+                          {istAktiv && istBearbeitbar ? (
+                            feld.typ === 'select' ? (
+                              <select
+                                aria-label={`${feld.label} Play ${play.play_number}`}
+                                value={wert ?? ''}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const konvertiert =
+                                    feld.key === 'down'
+                                      ? raw
+                                        ? Number(raw)
+                                        : undefined
+                                      : raw || undefined;
+                                  onFeldAendern(
+                                    play.play_number,
+                                    feld.key,
+                                    konvertiert,
+                                    Boolean(feld.istCustom)
+                                  );
+                                }}
+                                className="min-w-[56px] rounded border border-[#36404F] bg-[#0B0E11] px-1 py-0.5 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                              >
+                                <option value="">–</option>
+                                {(feld.definitionen ?? []).map((opt) => (
+                                  <option key={opt} value={opt}>
+                                    {opt}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : feld.typ === 'number' ? (
+                              <input
+                                type="number"
+                                aria-label={`${feld.label} Play ${play.play_number}`}
+                                min={feld.key === 'yard_line' ? -50 : undefined}
+                                max={feld.key === 'yard_line' ? 50 : undefined}
+                                value={wert ?? ''}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) =>
+                                  onFeldAendern(
+                                    play.play_number,
+                                    feld.key,
+                                    e.target.value === '' ? undefined : Number(e.target.value),
+                                    Boolean(feld.istCustom)
+                                  )
+                                }
+                                className="w-16 rounded border border-[#36404F] bg-[#0B0E11] px-1.5 py-0.5 text-right font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                              />
+                            ) : (
+                              <input
+                                type="text"
+                                list={feld.typ === 'combobox' ? `grid-dl-${feld.key}` : undefined}
+                                aria-label={`${feld.label} Play ${play.play_number}`}
+                                value={wert ?? ''}
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) =>
+                                  onFeldAendern(
+                                    play.play_number,
+                                    feld.key,
+                                    e.target.value || undefined,
+                                    Boolean(feld.istCustom)
+                                  )
+                                }
+                                onBlur={(e) => {
+                                  if (feld.typ === 'combobox' && e.target.value.trim()) {
+                                    onDefinitionLernen(feld.key, e.target.value);
+                                  }
+                                }}
+                                className="w-24 rounded border border-[#36404F] bg-[#0B0E11] px-1.5 py-0.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                              />
+                            )
+                          ) : (
+                            <span
+                              className={
+                                istGnLs && typeof wert === 'number'
+                                  ? wert > 0
+                                    ? 'text-[#4ADE80]'
+                                    : wert < 0
+                                      ? 'text-[#FCA5A5]'
+                                      : 'text-[#8B949E]'
+                                  : feld.key === 'result' && wert === 'FLAG'
+                                    ? 'font-mono text-[#F59E0B]'
+                                    : ''
+                              }
+                            >
+                              {wert === undefined || wert === ''
+                                ? '–'
+                                : istGnLs && typeof wert === 'number' && wert > 0
+                                  ? `+${wert}`
+                                  : wert}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
 
                     <td className="px-3 py-1 text-right font-mono text-[11px] text-[#8B949E] whitespace-nowrap">
                       {vorhandeneWinkel.join(' / ')}

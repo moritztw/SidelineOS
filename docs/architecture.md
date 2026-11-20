@@ -21,7 +21,7 @@ Dieses Dokument beschreibt die verbindliche Zielarchitektur von **SidelineOS** (
 | **Coordinator / Position Coach** | Upload, Cut & Sync, Breakdown, Telestration, `DRAFT`-Notizen, `Publish Session`, Spieler-Freigaben | Schreibzugriff im eigenen Team |
 | **Player** | Wiedergabe freigegebener Reels & Smart Playlists, eigene Notizen (optional) | Nur **explizit freigegebene** Reels/Units und `PUBLISHED`-Coach-Notizen |
 
-> **Hinweis zum Datenschutz:** Die Trennung des Instance Admins wirkt auf Applikations- und API-Ebene (RBAC). Sie ersetzt keine physische Ende-zu-Ende-Verschlüsselung gegenüber einem Server-Root-Nutzer, verhindert aber zuverlässig unbeabsichtigte Einsicht im Betrieb.
+> **Multi-Rollen & Datenschutz:** Benutzer können mehrere Rollen gleichzeitig tragen (z. B. *Sysadmin + Team Admin + Coach*). Sämtliche Instanz-Funktionen liegen deshalb in einem eigenen **`Sysadmin`-Tab**, strikt getrennt von Team-Ansichten. Besitzt ein Konto ausschließlich die Rolle `Instance Admin` (ohne Team-Rolle), besteht auf Applikations- und API-Ebene keinerlei Einsicht in Team-Videos, Breakdowns oder Notizen.
 
 ---
 

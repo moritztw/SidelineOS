@@ -9,9 +9,11 @@ import type {
   SidelineBundleV1,
   SpielerFreigabe,
   Spielzug,
+  TagFeldKonfig,
   ValidierungsErgebnis,
   VideoReel,
 } from '../../../shared/types.ts';
+import { STANDARD_TAG_SCHEMA, leseBreakdownWert } from './taggingEngine.ts';
 
 const GUELTIGE_KATEGORIEN = new Set<ReelKategorie>([
   'GAME',
@@ -363,13 +365,26 @@ export function filtereBundleFuerFreigabe(
     angles: [...reel.angles],
     plays: reel.plays.map((play) => {
       const gefiltertesBreakdown: PlayBreakdown = {};
+      const gefilterteCustom: Record<string, string | number | undefined> = {};
+
       if (play.breakdown && erlaubteFelder.size > 0) {
         for (const feld of erlaubteFelder) {
-          const wert = play.breakdown[feld];
-          if (wert !== undefined) {
-            (gefiltertesBreakdown as Record<string, unknown>)[feld] = wert;
+          if (feld in play.breakdown) {
+            const wert = (play.breakdown as Record<string, unknown>)[feld];
+            if (wert !== undefined) {
+              (gefiltertesBreakdown as Record<string, unknown>)[feld] = wert;
+            }
+          } else if (play.breakdown.custom && feld in play.breakdown.custom) {
+            const wert = play.breakdown.custom[feld];
+            if (wert !== undefined) {
+              gefilterteCustom[feld] = wert;
+            }
           }
         }
+      }
+
+      if (Object.keys(gefilterteCustom).length > 0) {
+        gefiltertesBreakdown.custom = gefilterteCustom;
       }
 
       return {
@@ -383,9 +398,6 @@ export function filtereBundleFuerFreigabe(
   };
 }
 
-/**
- * Prüft, ob ein /share/-Download-Link aktiv und noch nicht abgelaufen ist.
- */
 export function istShareLinkGueltig(
   link: ShareDownloadLink,
   jetzt: Date = new Date()
@@ -396,9 +408,6 @@ export function istShareLinkGueltig(
   return ablauf > jetzt.getTime();
 }
 
-/**
- * Erzeugt einen zufälligen /share/<token>-Pfad.
- */
 export function generiereShareLinkPfad(): { token: string; pfad: string } {
   const zeichen = 'abcdefghjkmnpqrstuvwxyz23456789';
   let token = 'sl-';
@@ -409,29 +418,17 @@ export function generiereShareLinkPfad(): { token: string; pfad: string } {
 }
 
 /**
- * Exportiert Spielzüge als Hudl-kompatible CSV-Tabelle (optional auf bestimmte Felder eingeschränkt).
+ * Exportiert Spielzüge als Hudl-kompatible CSV-Tabelle auf Basis des aktiven Tagging-Schemas
+ * (optional eingeschränkt auf freigegebene Spalten).
  */
 export function exportiereBreakdownAlsCsv(
   plays: Spielzug[],
-  felder?: BreakdownFeldKey[]
+  felder?: BreakdownFeldKey[],
+  schema: TagFeldKonfig[] = STANDARD_TAG_SCHEMA
 ): string {
-  const spalten: Array<{ key: BreakdownFeldKey; header: string }> = [
-    { key: 'odk', header: 'ODK' },
-    { key: 'down', header: 'DN' },
-    { key: 'distance', header: 'DIST' },
-    { key: 'yard_line', header: 'YARD LN' },
-    { key: 'hash', header: 'HASH' },
-    { key: 'play_type', header: 'PLAY TYPE' },
-    { key: 'off_form', header: 'OFF FORM' },
-    { key: 'def_front', header: 'DEF FRONT' },
-    { key: 'coverage', header: 'COVERAGE' },
-    { key: 'result', header: 'RESULT' },
-    { key: 'gn_ls', header: 'GN/LS' },
-  ];
-
-  const aktiveSpalten = felder
-    ? spalten.filter((s) => felder.includes(s.key))
-    : spalten;
+  const spalten = felder
+    ? schema.filter((f) => felder.includes(f.key))
+    : schema.filter((f) => f.aktiv);
 
   const escapeCsv = (wert: unknown): string => {
     if (wert === undefined || wert === null) return '';
@@ -442,9 +439,9 @@ export function exportiereBreakdownAlsCsv(
     return text;
   };
 
-  const kopfzeile = ['PLAY #', ...aktiveSpalten.map((s) => s.header)].join(',');
+  const kopfzeile = ['PLAY #', ...spalten.map((s) => s.kurz)].join(',');
   const zeilen = plays.map((play) => {
-    const werte = aktiveSpalten.map((s) => escapeCsv(play.breakdown?.[s.key]));
+    const werte = spalten.map((s) => escapeCsv(leseBreakdownWert(play.breakdown, s)));
     return [play.play_number, ...werte].join(',');
   });
 
@@ -481,11 +478,21 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
           yard_line: -25,
           hash: 'L',
           play_type: 'RUN',
-          off_form: 'Trips Left',
-          def_front: '4-3',
-          coverage: 'Cover 3',
-          result: 'Gain',
+          off_pers: '11',
+          off_form: 'Trips',
+          off_strg: 'L',
+          backfield: 'Gun Right',
+          motion: 'None',
+          off_play: 'Inside Zone',
+          rpo: 'Bubble',
+          play_dir: 'R',
           gn_ls: 7,
+          def_str: 'L',
+          def_front: '4-3',
+          def_pers: 'Base',
+          coverage: 'Cover 3',
+          stunt: 'None',
+          blitz: 'None',
         },
         notes: [
           {
@@ -510,11 +517,22 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
           yard_line: -32,
           hash: 'L',
           play_type: 'PASS',
+          off_pers: '11',
           off_form: 'Doubles',
-          def_front: 'Nickel',
-          coverage: 'Cover 2',
-          result: 'Complete',
+          off_strg: 'R',
+          backfield: 'Gun Left',
+          motion: 'Jet',
+          off_play: 'Mesh',
+          rpo: 'None',
+          play_dir: 'M',
+          result: 'COMPLETE',
           gn_ls: 14,
+          def_str: 'R',
+          def_front: '4-2-5',
+          def_pers: 'Nickel',
+          coverage: 'Cover 2',
+          stunt: 'None',
+          blitz: 'None',
         },
       },
       {
@@ -530,11 +548,22 @@ export function erstelleBeispielBundle(): SidelineBundleV1 {
           yard_line: -46,
           hash: 'R',
           play_type: 'PASS',
+          off_pers: '10',
           off_form: 'Empty',
-          def_front: 'Nickel',
-          coverage: 'Man Free',
-          result: 'Incomplete',
+          off_strg: 'L',
+          backfield: 'Empty',
+          motion: 'None',
+          off_play: 'Four Verts',
+          rpo: 'None',
+          play_dir: 'L',
+          result: 'INCOMPLETE',
           gn_ls: 0,
+          def_str: 'L',
+          def_front: '4-2-5',
+          def_pers: 'Nickel',
+          coverage: 'Man Free',
+          stunt: 'T/E',
+          blitz: 'Mike',
         },
       },
     ],

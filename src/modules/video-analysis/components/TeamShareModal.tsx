@@ -14,14 +14,11 @@ import {
 import type {
   BreakdownFeldKey,
   ShareDownloadLink,
+  TagFeldKonfig,
   TeamFreigabeEintrag,
   VideoReel,
 } from '../../../shared/types.ts';
-import {
-  ALLE_TAGGING_FELDER,
-  BASIS_TAGGING_FELDER,
-  BREAKDOWN_FELD_META,
-} from '../../../shared/types.ts';
+import { BASIS_TAGGING_FELDER } from '../../../shared/types.ts';
 import { VERFUEGBARE_TAUSCH_TEAMS } from '../data/demoReels.ts';
 import {
   exportiereBreakdownAlsCsv,
@@ -32,6 +29,7 @@ import {
 
 interface TeamShareModalProps {
   reel: VideoReel;
+  tagSchema: TagFeldKonfig[];
   onSchliessen: () => void;
   onTeamFreigabenAendern: (reelId: string, freigaben: TeamFreigabeEintrag[]) => void;
   onShareLinksAendern: (reelId: string, links: ShareDownloadLink[]) => void;
@@ -63,12 +61,17 @@ function formatiereAblaufDatum(iso: string): string {
 }
 
 function TaggingFeldAuswahl({
+  felder,
   ausgewaehlt,
   onAendern,
 }: {
+  felder: TagFeldKonfig[];
   ausgewaehlt: BreakdownFeldKey[];
   onAendern: (felder: BreakdownFeldKey[]) => void;
 }) {
+  const alleKeys = felder.map((f) => f.key);
+  const basisKeys = BASIS_TAGGING_FELDER.filter((k) => alleKeys.includes(k));
+
   const toggleFeld = (key: BreakdownFeldKey) => {
     const neu = ausgewaehlt.includes(key)
       ? ausgewaehlt.filter((f) => f !== key)
@@ -80,7 +83,7 @@ function TaggingFeldAuswahl({
     <div className="space-y-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-[#8B949E]">
-          Freigegebene Tagging-Spalten ({ausgewaehlt.length}/{ALLE_TAGGING_FELDER.length})
+          Freigegebene Tagging-Spalten ({ausgewaehlt.length}/{felder.length})
         </span>
         <div className="flex items-center gap-1.5 text-[11px]">
           <button
@@ -92,14 +95,14 @@ function TaggingFeldAuswahl({
           </button>
           <button
             type="button"
-            onClick={() => onAendern([...BASIS_TAGGING_FELDER])}
+            onClick={() => onAendern([...basisKeys])}
             className="rounded border border-[#232933] px-2 py-0.5 text-[#8B949E] hover:border-[#36404F] hover:text-white"
           >
             Basis
           </button>
           <button
             type="button"
-            onClick={() => onAendern([...ALLE_TAGGING_FELDER])}
+            onClick={() => onAendern([...alleKeys])}
             className="rounded border border-[#232933] px-2 py-0.5 text-[#8B949E] hover:border-[#36404F] hover:text-white"
           >
             Alle Spalten
@@ -107,8 +110,8 @@ function TaggingFeldAuswahl({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-        {BREAKDOWN_FELD_META.map((feld) => {
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+        {felder.map((feld) => {
           const aktiv = ausgewaehlt.includes(feld.key);
           return (
             <button
@@ -133,10 +136,12 @@ function TaggingFeldAuswahl({
 
 export function TeamShareModal({
   reel,
+  tagSchema,
   onSchliessen,
   onTeamFreigabenAendern,
   onShareLinksAendern,
 }: TeamShareModalProps) {
+  const aktiveFelder = tagSchema.filter((f) => f.aktiv);
   const [aktiverTab, setAktiverTab] = useState<ShareTab>('teams');
   const [aufgeklapptesTeam, setAufgeklapptesTeam] = useState<string | null>(
     reel.teamFreigaben[0]?.teamName ?? null
@@ -227,7 +232,7 @@ export function TeamShareModal({
     const inhalt =
       format === 'json'
         ? JSON.stringify(filtereBundleFuerFreigabe(reel, felder), null, 2)
-        : exportiereBreakdownAlsCsv(reel.plays, felder);
+        : exportiereBreakdownAlsCsv(reel.plays, felder, tagSchema);
     const mime = format === 'json' ? 'application/json' : 'text/csv;charset=utf-8';
     const blob = new Blob([inhalt], { type: mime });
     const url = URL.createObjectURL(blob);
@@ -360,6 +365,7 @@ export function TeamShareModal({
                     {offen && freigabe && (
                       <div className="border-t border-[#232933] bg-[#13171D]/60 px-3.5 py-3">
                         <TaggingFeldAuswahl
+                          felder={aktiveFelder}
                           ausgewaehlt={freigabe.freigegebeneFelder}
                           onAendern={(felder) => aktualisiereTeamFelder(teamName, felder)}
                         />
@@ -415,7 +421,11 @@ export function TeamShareModal({
                   </label>
                 </div>
 
-                <TaggingFeldAuswahl ausgewaehlt={linkFelder} onAendern={setLinkFelder} />
+                <TaggingFeldAuswahl
+                  felder={aktiveFelder}
+                  ausgewaehlt={linkFelder}
+                  onAendern={setLinkFelder}
+                />
 
                 <div className="flex justify-end">
                   <button

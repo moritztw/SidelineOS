@@ -3,13 +3,13 @@ import type { NavigationsAnsicht, VideoReel } from '../shared/types.ts';
 import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../shared/types.ts';
 
 interface ModulePlaceholderViewProps {
-  ansicht: Exclude<NavigationsAnsicht, 'dashboard'>;
+  ansicht: Exclude<NavigationsAnsicht, 'dashboard' | 'sysadmin'>;
   ausgewaehltesReel: VideoReel | null;
   onZurueckZumDashboard: () => void;
 }
 
 const ANSICHT_META: Record<
-  Exclude<NavigationsAnsicht, 'dashboard'>,
+  Exclude<NavigationsAnsicht, 'dashboard' | 'sysadmin'>,
   { titel: string; paket: string; beschreibung: string }
 > = {
   'film-room': {

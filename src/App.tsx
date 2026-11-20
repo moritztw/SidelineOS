@@ -4,31 +4,39 @@ import { SysadminIsolationView } from './core/SysadminIsolationView.tsx';
 import { ModulePlaceholderView } from './core/ModulePlaceholderView.tsx';
 import { DashboardView } from './modules/video-analysis/components/DashboardView.tsx';
 import { FilmRoomView } from './modules/video-analysis/components/FilmRoomView.tsx';
+import { TaggingSchemaSettings } from './modules/video-analysis/components/TaggingSchemaSettings.tsx';
 import { DEMO_TEAMS, INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
+import {
+  STANDARD_TAG_SCHEMA,
+  registriereDefinitionWennNeu,
+  wendeBreakdownUpdateMitAutoCalcAn,
+} from './modules/video-analysis/services/taggingEngine.ts';
 import type {
-  BenutzerRolle,
+  BenutzerProfil,
+  BreakdownFeldKey,
   CanvasZeichnung,
   CoachNotiz,
   NavigationsAnsicht,
-  PlayBreakdown,
+  NormPunkt,
   ShareDownloadLink,
   SpielerFreigabe,
+  TagFeldKonfig,
   TeamFreigabeEintrag,
   VideoReel,
 } from './shared/types.ts';
-
-const ROLLEN_TABS: Array<{ id: BenutzerRolle; label: string }> = [
-  { id: 'COACH', label: 'Coach' },
-  { id: 'PLAYER', label: 'Spieler' },
-  { id: 'SYSADMIN', label: 'Sysadmin' },
-];
+import { DEMO_PROFILE } from './shared/types.ts';
 
 function zaehleGetaggtePlays(reel: VideoReel): number {
-  return reel.plays.filter(
-    (play) =>
-      play.breakdown &&
-      Object.values(play.breakdown).some((v) => v !== undefined && v !== '')
-  ).length;
+  return reel.plays.filter((play) => {
+    if (!play.breakdown) return false;
+    const hatStandard = Object.entries(play.breakdown).some(
+      ([k, v]) => k !== 'custom' && v !== undefined && v !== ''
+    );
+    const hatCustom =
+      play.breakdown.custom !== undefined &&
+      Object.values(play.breakdown.custom).some((v) => v !== undefined && v !== '');
+    return hatStandard || hatCustom;
+  }).length;
 }
 
 function zaehleEntwuerfe(reel: VideoReel): number {
@@ -41,18 +49,22 @@ function zaehleEntwuerfe(reel: VideoReel): number {
 
 export default function App() {
   const [aktiveAnsicht, setAktiveAnsicht] = useState<NavigationsAnsicht>('dashboard');
-  const [rolle, setRolle] = useState<BenutzerRolle>('COACH');
+  const [profilId, setProfilId] = useState<string>(DEMO_PROFILE[0].id);
   const [aktivesTeamId, setAktivesTeamId] = useState<string>(DEMO_TEAMS[0].id);
   const [reels, setReels] = useState<VideoReel[]>(INITIALE_DEMO_REELS);
+  const [tagSchema, setTagSchema] = useState<TagFeldKonfig[]>(STANDARD_TAG_SCHEMA);
   const [ausgewaehltesReelId, setAusgewaehltesReelId] = useState<string>(
     INITIALE_DEMO_REELS[0].id
   );
   const [uploadHervorgehoben, setUploadHervorgehoben] = useState(false);
 
+  const profil: BenutzerProfil =
+    DEMO_PROFILE.find((p) => p.id === profilId) ?? DEMO_PROFILE[0];
+
   const sichtbareTeamReels = reels.filter(
     (r) =>
       r.teamId === aktivesTeamId &&
-      (rolle === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
+      (profil.teamRolle === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
   );
 
   const ausgewaehltesReel =
@@ -75,28 +87,39 @@ export default function App() {
     );
   };
 
-  const handleRolleWechseln = (neueRolle: BenutzerRolle) => {
-    setRolle(neueRolle);
-    if (neueRolle === 'SYSADMIN' && aktiveAnsicht !== 'dashboard' && aktiveAnsicht !== 'settings') {
-      setAktiveAnsicht('dashboard');
+  const handleProfilWechseln = (neueId: string) => {
+    const neu = DEMO_PROFILE.find((p) => p.id === neueId);
+    if (!neu) return;
+    setProfilId(neueId);
+
+    if (neu.teamRolle === null) {
+      setAktiveAnsicht('sysadmin');
+      return;
     }
-    if (neueRolle === 'PLAYER' && (aktiveAnsicht === 'cut-sync' || aktiveAnsicht === 'settings')) {
+    if (!neu.istSysadmin && aktiveAnsicht === 'sysadmin') {
+      setAktiveAnsicht('dashboard');
+      return;
+    }
+    if (
+      neu.teamRolle === 'PLAYER' &&
+      (aktiveAnsicht === 'cut-sync' || aktiveAnsicht === 'settings' || aktiveAnsicht === 'sysadmin')
+    ) {
       setAktiveAnsicht('dashboard');
     }
   };
 
   const handlePrimaerAktion = () => {
-    if (rolle === 'COACH') {
+    if (profil.teamRolle === 'COACH' || profil.teamRolle === 'TEAM_ADMIN') {
       setAktiveAnsicht('dashboard');
       setUploadHervorgehoben(true);
       setTimeout(() => {
         document.getElementById('upload-panel')?.scrollIntoView({ behavior: 'smooth' });
       }, 50);
       setTimeout(() => setUploadHervorgehoben(false), 1800);
-    } else if (rolle === 'PLAYER') {
+    } else if (profil.teamRolle === 'PLAYER') {
       setAktiveAnsicht('film-room');
     } else {
-      setAktiveAnsicht('dashboard');
+      setAktiveAnsicht('sysadmin');
     }
   };
 
@@ -117,21 +140,51 @@ export default function App() {
     aktualisiereReel(reelId, (reel) => ({ ...reel, shareLinks }));
   };
 
-  const handleBreakdownAendern = (
+  // Breakdown-Feld aktualisieren inkl. automatischer YD LN <-> GN/LS Berechnung (außer FLAG)
+  const handleFeldAendern = (
     reelId: string,
     playNumber: number,
-    patch: Partial<PlayBreakdown>
+    feldKey: BreakdownFeldKey,
+    wert: string | number | undefined,
+    istCustom: boolean
   ) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? { ...play, breakdown: { ...(play.breakdown ?? {}), ...patch } }
-          : play
-      ),
+      plays: wendeBreakdownUpdateMitAutoCalcAn(reel.plays, playNumber, feldKey, wert, istCustom),
     }));
   };
 
+  // Einmal eingegebene Definition dauerhaft im Team-Wörterbuch speichern
+  const handleDefinitionLernen = (feldKey: BreakdownFeldKey, begriff: string) => {
+    setTagSchema((alt) => registriereDefinitionWennNeu(alt, feldKey, begriff));
+  };
+
+  // Team-Admin Schema-Aktionen
+  const handleFeldToggle = (feldKey: BreakdownFeldKey) => {
+    setTagSchema((alt) =>
+      alt.map((f) => (f.key === feldKey ? { ...f, aktiv: !f.aktiv } : f))
+    );
+  };
+
+  const handleDefinitionLoeschen = (feldKey: BreakdownFeldKey, begriff: string) => {
+    setTagSchema((alt) =>
+      alt.map((f) =>
+        f.key === feldKey
+          ? { ...f, definitionen: (f.definitionen ?? []).filter((d) => d !== begriff) }
+          : f
+      )
+    );
+  };
+
+  const handleCustomFeldErstellen = (neuesFeld: TagFeldKonfig) => {
+    setTagSchema((alt) => [...alt, neuesFeld]);
+  };
+
+  const handleCustomFeldLoeschen = (feldKey: BreakdownFeldKey) => {
+    setTagSchema((alt) => alt.filter((f) => f.key !== feldKey));
+  };
+
+  // Notizen & Canvas-Zeichnungen
   const handleNotizHinzufuegen = (reelId: string, playNumber: number, notiz: CoachNotiz) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
@@ -158,22 +211,66 @@ export default function App() {
     }));
   };
 
-  const handleLetzteZeichnungEntfernen = (reelId: string, playNumber: number) => {
+  const handleZeichnungAktualisieren = (
+    reelId: string,
+    playNumber: number,
+    zeichnungId: string,
+    punkte: NormPunkt[]
+  ) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
       plays: reel.plays.map((play) =>
         play.play_number === playNumber
-          ? { ...play, drawings: (play.drawings ?? []).slice(0, -1) }
+          ? {
+              ...play,
+              drawings: (play.drawings ?? []).map((d) =>
+                d.id === zeichnungId ? { ...d, punkte } : d
+              ),
+            }
           : play
       ),
     }));
   };
 
-  const handleAlleZeichnungenLeeren = (reelId: string, playNumber: number) => {
+  const handleZeichnungEntfernen = (
+    reelId: string,
+    playNumber: number,
+    zeichnungId: string
+  ) => {
     aktualisiereReel(reelId, (reel) => ({
       ...reel,
       plays: reel.plays.map((play) =>
-        play.play_number === playNumber ? { ...play, drawings: [] } : play
+        play.play_number === playNumber
+          ? { ...play, drawings: (play.drawings ?? []).filter((d) => d.id !== zeichnungId) }
+          : play
+      ),
+    }));
+  };
+
+  const handleLetzteZeichnungEntfernen = (reelId: string, playNumber: number, angle: string) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) => {
+        if (play.play_number !== playNumber) return play;
+        const liste = [...(play.drawings ?? [])];
+        for (let i = liste.length - 1; i >= 0; i -= 1) {
+          if (liste[i].angle === angle) {
+            liste.splice(i, 1);
+            break;
+          }
+        }
+        return { ...play, drawings: liste };
+      }),
+    }));
+  };
+
+  const handleAlleZeichnungenLeeren = (reelId: string, playNumber: number, angle: string) => {
+    aktualisiereReel(reelId, (reel) => ({
+      ...reel,
+      plays: reel.plays.map((play) =>
+        play.play_number === playNumber
+          ? { ...play, drawings: (play.drawings ?? []).filter((d) => d.angle !== angle) }
+          : play
       ),
     }));
   };
@@ -198,18 +295,18 @@ export default function App() {
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
       <TopNavBar
         aktiveAnsicht={aktiveAnsicht}
-        rolle={rolle}
+        profil={profil}
         onAnsichtWechseln={setAktiveAnsicht}
         onPrimaerAktion={handlePrimaerAktion}
       />
 
-      {/* Kontext-Leiste: Team-Wahl & Rollen-Umschalter */}
+      {/* Kontext-Leiste: Team-Wahl & Multi-Rollen-Profil-Umschalter */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex items-center gap-3">
-            {rolle === 'SYSADMIN' ? (
+            {profil.teamRolle === null || aktiveAnsicht === 'sysadmin' ? (
               <span className="text-xs font-medium text-[#8B949E]">
-                Globale Instanz-Verwaltung · SidelineOS Core
+                Instanz-Verwaltung · Sysadmin-Bereich (getrennt von Team-Daten)
               </span>
             ) : (
               <label className="flex items-center gap-2 text-xs text-[#8B949E]">
@@ -229,25 +326,25 @@ export default function App() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-[#8B949E]">Ansicht testen als</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-[#8B949E]">Profil testen</span>
             <div
               role="group"
-              aria-label="Rollen-Vorschau wechseln"
-              className="flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
+              aria-label="Rollen-Profil wechseln"
+              className="flex flex-wrap items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
             >
-              {ROLLEN_TABS.map((tab) => {
-                const aktiv = rolle === tab.id;
+              {DEMO_PROFILE.map((p) => {
+                const aktiv = p.id === profil.id;
                 return (
                   <button
-                    key={tab.id}
+                    key={p.id}
                     type="button"
-                    onClick={() => handleRolleWechseln(tab.id)}
+                    onClick={() => handleProfilWechseln(p.id)}
                     className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
                       aktiv ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
                     }`}
                   >
-                    {tab.label}
+                    {p.label}
                   </button>
                 );
               })}
@@ -258,12 +355,15 @@ export default function App() {
 
       {/* Hauptinhalt */}
       <main className="mx-auto max-w-[1440px] px-6 py-6">
-        {rolle === 'SYSADMIN' && aktiveAnsicht === 'dashboard' ? (
+        {aktiveAnsicht === 'sysadmin' && profil.istSysadmin ? (
+          <SysadminIsolationView />
+        ) : profil.teamRolle === null ? (
           <SysadminIsolationView />
         ) : aktiveAnsicht === 'dashboard' ? (
           <DashboardView
             teamId={aktivesTeamId}
-            rolle={rolle}
+            teamRolle={profil.teamRolle}
+            tagSchema={tagSchema}
             reels={reels}
             uploadHervorgehoben={uploadHervorgehoben}
             onNeuesReel={handleNeuesReel}
@@ -276,19 +376,34 @@ export default function App() {
           <FilmRoomView
             key={ausgewaehltesReel.id}
             reel={ausgewaehltesReel}
-            rolle={rolle}
+            teamRolle={profil.teamRolle}
+            tagSchema={tagSchema}
             onZurueck={() => setAktiveAnsicht('dashboard')}
+            onSchemaSettingsOeffnen={() => setAktiveAnsicht('settings')}
             onFreigabeAendern={handleFreigabeAendern}
-            onBreakdownAendern={handleBreakdownAendern}
+            onFeldAendern={handleFeldAendern}
+            onDefinitionLernen={handleDefinitionLernen}
             onNotizHinzufuegen={handleNotizHinzufuegen}
             onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
+            onZeichnungAktualisieren={handleZeichnungAktualisieren}
+            onZeichnungEntfernen={handleZeichnungEntfernen}
             onLetzteZeichnungEntfernen={handleLetzteZeichnungEntfernen}
             onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
             onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
           />
+        ) : aktiveAnsicht === 'settings' ? (
+          <TaggingSchemaSettings
+            teamRolle={profil.teamRolle}
+            tagSchema={tagSchema}
+            onFeldToggle={handleFeldToggle}
+            onDefinitionHinzufuegen={handleDefinitionLernen}
+            onDefinitionLoeschen={handleDefinitionLoeschen}
+            onCustomFeldErstellen={handleCustomFeldErstellen}
+            onCustomFeldLoeschen={handleCustomFeldLoeschen}
+          />
         ) : (
           <ModulePlaceholderView
-            ansicht={aktiveAnsicht}
+            ansicht={aktiveAnsicht as 'cut-sync' | 'playlists' | 'film-room' | 'settings'}
             ausgewaehltesReel={ausgewaehltesReel}
             onZurueckZumDashboard={() => setAktiveAnsicht('dashboard')}
           />

@@ -1,43 +1,53 @@
-import type { BenutzerRolle, NavigationsAnsicht } from '../shared/types.ts';
+import type { BenutzerProfil, NavigationsAnsicht } from '../shared/types.ts';
 
 interface TopNavBarProps {
   aktiveAnsicht: NavigationsAnsicht;
-  rolle: BenutzerRolle;
+  profil: BenutzerProfil;
   onAnsichtWechseln: (ansicht: NavigationsAnsicht) => void;
   onPrimaerAktion: () => void;
 }
 
-const NAV_EINTRAEGE: Array<{ id: NavigationsAnsicht; label: string; fuerRollen: BenutzerRolle[] }> =
-  [
-    { id: 'dashboard', label: 'Dashboard', fuerRollen: ['COACH', 'PLAYER', 'SYSADMIN'] },
-    { id: 'cut-sync', label: 'Cut & Sync', fuerRollen: ['COACH'] },
-    { id: 'film-room', label: 'Film Room', fuerRollen: ['COACH', 'PLAYER'] },
-    { id: 'playlists', label: 'Playlists', fuerRollen: ['COACH', 'PLAYER'] },
-    { id: 'settings', label: 'Einstellungen', fuerRollen: ['COACH', 'SYSADMIN'] },
-  ];
-
 export function TopNavBar({
   aktiveAnsicht,
-  rolle,
+  profil,
   onAnsichtWechseln,
   onPrimaerAktion,
 }: TopNavBarProps) {
-  const sichtbareLinks = NAV_EINTRAEGE.filter((eintrag) => eintrag.fuerRollen.includes(rolle));
+  const hatTeamZugriff = profil.teamRolle !== null;
+  const istCoach = profil.teamRolle === 'COACH' || profil.teamRolle === 'TEAM_ADMIN';
 
-  const primaerLabel =
-    rolle === 'COACH'
-      ? 'Tapes hochladen'
-      : rolle === 'PLAYER'
-        ? 'Film Room öffnen'
-        : 'Cleanup prüfen';
+  const sichtbareLinks: Array<{ id: NavigationsAnsicht; label: string }> = [];
+
+  if (hatTeamZugriff) {
+    sichtbareLinks.push({ id: 'dashboard', label: 'Dashboard' });
+    if (istCoach) {
+      sichtbareLinks.push({ id: 'cut-sync', label: 'Cut & Sync' });
+    }
+    sichtbareLinks.push({ id: 'film-room', label: 'Film Room' });
+    sichtbareLinks.push({ id: 'playlists', label: 'Playlists' });
+    if (istCoach) {
+      sichtbareLinks.push({ id: 'settings', label: 'Einstellungen' });
+    }
+  }
+
+  // Eigener Sysadmin-Tab – auch wenn jemand gleichzeitig Team Admin / Coach ist
+  if (profil.istSysadmin) {
+    sichtbareLinks.push({ id: 'sysadmin', label: 'Sysadmin' });
+  }
+
+  const primaerLabel = istCoach
+    ? 'Tapes hochladen'
+    : profil.teamRolle === 'PLAYER'
+      ? 'Film Room öffnen'
+      : 'Cleanup prüfen';
 
   return (
     <header className="sticky top-0 z-30 border-b border-[#232933] bg-[#0B0E11]/95 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-8 px-6">
-        {/* Zone 1: Wortmarke (einzeilig, ohne Zusatz-Badges) */}
+        {/* Zone 1: Wortmarke */}
         <button
           type="button"
-          onClick={() => onAnsichtWechseln('dashboard')}
+          onClick={() => onAnsichtWechseln(hatTeamZugriff ? 'dashboard' : 'sysadmin')}
           className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#F59E0B]"
         >
           Sideline<span className="text-[#F59E0B]">OS</span>

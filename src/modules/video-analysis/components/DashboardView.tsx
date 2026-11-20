@@ -11,11 +11,12 @@ import {
   Users,
 } from 'lucide-react';
 import type {
-  BenutzerRolle,
   ReelKategorie,
   ShareDownloadLink,
   SpielerFreigabe,
+  TagFeldKonfig,
   TeamFreigabeEintrag,
+  TeamRolle,
   VideoReel,
 } from '../../../shared/types.ts';
 import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../../../shared/types.ts';
@@ -25,7 +26,8 @@ import { UploadPanel } from './UploadPanel.tsx';
 
 interface DashboardViewProps {
   teamId: string;
-  rolle: BenutzerRolle;
+  teamRolle: TeamRolle;
+  tagSchema: TagFeldKonfig[];
   reels: VideoReel[];
   uploadHervorgehoben: boolean;
   onNeuesReel: (reel: VideoReel) => void;
@@ -84,7 +86,8 @@ function ReelThumbnail({ src, titel }: { src: string; titel: string }) {
 
 export function DashboardView({
   teamId,
-  rolle,
+  teamRolle,
+  tagSchema,
   reels,
   uploadHervorgehoben,
   onNeuesReel,
@@ -93,6 +96,7 @@ export function DashboardView({
   onShareLinksAendern,
   onReelOeffnen,
 }: DashboardViewProps) {
+  const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const [aktiveKategorie, setAktiveKategorie] = useState<'ALL' | ReelKategorie>('ALL');
   const [suchbegriff, setSuchbegriff] = useState('');
   const [teilenReelId, setTeilenReelId] = useState<string | null>(null);
@@ -101,13 +105,13 @@ export function DashboardView({
     const query = suchbegriff.trim().toLowerCase();
     return reels
       .filter((reel) => reel.teamId === teamId)
-      .filter((reel) => (rolle === 'PLAYER' ? reel.visibility !== 'COACHES_ONLY' : true))
+      .filter((reel) => (teamRolle === 'PLAYER' ? reel.visibility !== 'COACHES_ONLY' : true))
       .filter((reel) => (aktiveKategorie === 'ALL' ? true : reel.category === aktiveKategorie))
       .filter((reel) =>
         query ? reel.title.toLowerCase().includes(query) || reel.eventDate.includes(query) : true
       )
       .sort((a, b) => b.eventDate.localeCompare(a.eventDate));
-  }, [reels, teamId, rolle, aktiveKategorie, suchbegriff]);
+  }, [reels, teamId, teamRolle, aktiveKategorie, suchbegriff]);
 
   const teilenReel = reels.find((r) => r.id === teilenReelId) ?? null;
 
@@ -128,7 +132,6 @@ export function DashboardView({
 
   return (
     <div className="space-y-5">
-      {/* Filter- & Suchleiste */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div
           role="tablist"
@@ -170,14 +173,13 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Hauptbereich */}
       <div
         className={`grid grid-cols-1 gap-6 ${
-          rolle === 'COACH' ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
+          istCoach ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
         }`}
       >
         <section aria-label="Videobibliothek" className="min-w-0 space-y-3">
-          {rolle === 'PLAYER' && (
+          {teamRolle === 'PLAYER' && (
             <div className="flex items-center justify-between rounded-md border border-[#232933] bg-[#13171D] px-4 py-2.5 text-xs text-[#8B949E]">
               <span>
                 Spieler-Ansicht aktiv: Du siehst ausschließlich Reels, die vom Coaching Staff
@@ -195,7 +197,7 @@ export function DashboardView({
                 Keine Videos für diese Auswahl gefunden.
               </p>
               <p className="mt-1 text-xs text-[#8B949E]">
-                {rolle === 'COACH'
+                {istCoach
                   ? 'Lade rechts Einzelclips, ein Raw-Tape oder ein sideline-bundle.json hoch.'
                   : 'Aktuell sind in dieser Kategorie keine Tapes für Spieler freigegeben.'}
               </p>
@@ -280,7 +282,7 @@ export function DashboardView({
                             </span>
                           )}
 
-                          {aktiveLinks > 0 && rolle === 'COACH' && (
+                          {aktiveLinks > 0 && istCoach && (
                             <span className="inline-flex items-center gap-1 text-[#8B949E]">
                               <Link2 className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
                               {aktiveLinks} /share/-Link{aktiveLinks > 1 ? 's' : ''}
@@ -297,7 +299,7 @@ export function DashboardView({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#232933] pt-3 xl:justify-end xl:border-t-0 xl:pt-0">
-                      {rolle === 'COACH' ? (
+                      {istCoach ? (
                         <label className="flex items-center gap-2 text-xs text-[#8B949E]">
                           {istNurCoaches ? (
                             <Lock className="h-3.5 w-3.5 text-[#8B949E]" aria-hidden="true" />
@@ -335,7 +337,7 @@ export function DashboardView({
                       )}
 
                       <div className="flex items-center gap-1.5">
-                        {rolle === 'COACH' && (
+                        {istCoach && (
                           <>
                             <button
                               type="button"
@@ -378,7 +380,7 @@ export function DashboardView({
           )}
         </section>
 
-        {rolle === 'COACH' && (
+        {istCoach && (
           <UploadPanel
             teamId={teamId}
             hervorgehoben={uploadHervorgehoben}
@@ -390,6 +392,7 @@ export function DashboardView({
       {teilenReel && (
         <TeamShareModal
           reel={teilenReel}
+          tagSchema={tagSchema}
           onSchliessen={() => setTeilenReelId(null)}
           onTeamFreigabenAendern={onTeamFreigabenAendern}
           onShareLinksAendern={onShareLinksAendern}

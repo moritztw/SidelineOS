@@ -5,50 +5,67 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
-  Eraser,
   Lock,
+  Maximize2,
+  MessageSquare,
+  Minimize2,
+  MousePointer2,
   Pause,
   Pencil,
   Play,
   Send,
   SkipBack,
   SkipForward,
+  SlidersHorizontal,
   Trash2,
   Type,
   Undo2,
   Users,
 } from 'lucide-react';
 import type {
-  BenutzerRolle,
+  BreakdownFeldKey,
   CanvasZeichnung,
   CoachNotiz,
-  HashWert,
-  OdkWert,
-  PlayBreakdown,
-  PlayTyp,
+  KommentarEcke,
+  NormPunkt,
   SpielerFreigabe,
+  TagFeldKonfig,
+  TeamRolle,
   VideoReel,
   ZeichenWerkzeug,
 } from '../../../shared/types.ts';
 import { FREIGABE_LABELS } from '../../../shared/types.ts';
 import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
+import { leseBreakdownWert } from '../services/taggingEngine.ts';
 import { BreakdownGrid } from './BreakdownGrid.tsx';
 import { TelestrationCanvas } from './TelestrationCanvas.tsx';
 
 interface FilmRoomViewProps {
   reel: VideoReel;
-  rolle: BenutzerRolle;
+  teamRolle: TeamRolle;
+  tagSchema: TagFeldKonfig[];
   onZurueck: () => void;
+  onSchemaSettingsOeffnen: () => void;
   onFreigabeAendern: (reelId: string, freigabe: SpielerFreigabe) => void;
-  onBreakdownAendern: (
+  onFeldAendern: (
     reelId: string,
     playNumber: number,
-    patch: Partial<PlayBreakdown>
+    feldKey: BreakdownFeldKey,
+    wert: string | number | undefined,
+    istCustom: boolean
   ) => void;
+  onDefinitionLernen: (feldKey: BreakdownFeldKey, wert: string) => void;
   onNotizHinzufuegen: (reelId: string, playNumber: number, notiz: CoachNotiz) => void;
   onZeichnungHinzufuegen: (reelId: string, playNumber: number, zeichnung: CanvasZeichnung) => void;
-  onLetzteZeichnungEntfernen: (reelId: string, playNumber: number) => void;
-  onAlleZeichnungenLeeren: (reelId: string, playNumber: number) => void;
+  onZeichnungAktualisieren: (
+    reelId: string,
+    playNumber: number,
+    zeichnungId: string,
+    punkte: NormPunkt[]
+  ) => void;
+  onZeichnungEntfernen: (reelId: string, playNumber: number, zeichnungId: string) => void;
+  onLetzteZeichnungEntfernen: (reelId: string, playNumber: number, angle: string) => void;
+  onAlleZeichnungenLeeren: (reelId: string, playNumber: number, angle: string) => void;
   onSessionVeroeffentlichen: (reelId: string) => void;
 }
 
@@ -68,6 +85,20 @@ const FREIGABE_OPTIONEN: SpielerFreigabe[] = [
   'UNIT_SPECIAL_TEAMS',
 ];
 
+const ECKEN_POSITION_KLASSEN: Record<KommentarEcke, string> = {
+  'top-left': 'top-3 left-3',
+  'top-right': 'top-3 right-3',
+  'bottom-left': 'bottom-16 left-3',
+  'bottom-right': 'bottom-16 right-3',
+};
+
+const ECKEN_BUTTONS: Array<{ id: KommentarEcke; titel: string; kurz: string }> = [
+  { id: 'top-left', titel: 'Oben links', kurz: '↖' },
+  { id: 'top-right', titel: 'Oben rechts', kurz: '↗' },
+  { id: 'bottom-left', titel: 'Unten links', kurz: '↙' },
+  { id: 'bottom-right', titel: 'Unten rechts', kurz: '↘' },
+];
+
 function formatiereZeit(ms: number): string {
   const geklemmt = Math.max(0, ms);
   const sekundenGesamt = Math.floor(geklemmt / 1000);
@@ -79,17 +110,27 @@ function formatiereZeit(ms: number): string {
 
 export function FilmRoomView({
   reel,
-  rolle,
+  teamRolle,
+  tagSchema,
   onZurueck,
+  onSchemaSettingsOeffnen,
   onFreigabeAendern,
-  onBreakdownAendern,
+  onFeldAendern,
+  onDefinitionLernen,
   onNotizHinzufuegen,
   onZeichnungHinzufuegen,
+  onZeichnungAktualisieren,
+  onZeichnungEntfernen,
   onLetzteZeichnungEntfernen,
   onAlleZeichnungenLeeren,
   onSessionVeroeffentlichen,
 }: FilmRoomViewProps) {
-  const istCoach = rolle === 'COACH';
+  const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
+  const istTeamAdmin = teamRolle === 'TEAM_ADMIN';
+
+  const playerContainerRef = useRef<HTMLDivElement | null>(null);
+  const gestoppteTimestampsRef = useRef<Set<number>>(new Set());
+
   const [aktiverPlayIndex, setAktiverPlayIndex] = useState(0);
   const [aktiverWinkel, setAktiverWinkel] = useState<string>(reel.angles[0] ?? 'SIDELINE');
   const [laeuft, setLaeuft] = useState(false);
@@ -99,11 +140,19 @@ export function FilmRoomView({
   const [autoStopMeldung, setAutoStopMeldung] = useState<string | null>(null);
   const [publishBestaetigung, setPublishBestaetigung] = useState<string | null>(null);
 
-  const [werkzeug, setWerkzeug] = useState<ZeichenWerkzeug | null>('arrow');
-  const [farbe, setFarbe] = useState<string>('#F59E0B');
-  const [notizText, setNotizText] = useState('');
+  // Vollbild & Overlays über dem Video
+  const [vollbildAktiv, setVollbildAktiv] = useState(false);
+  const [zeichenOverlaySichtbar, setZeichenOverlaySichtbar] = useState(true);
+  const [kommentarOverlaySichtbar, setKommentarOverlaySichtbar] = useState(true);
+  const [kommentarEcke, setKommentarEcke] = useState<KommentarEcke>('top-right');
 
-  const gestoppteTimestampsRef = useRef<Set<number>>(new Set());
+  const [werkzeug, setWerkzeug] = useState<ZeichenWerkzeug | null>('select');
+  const [farbe, setFarbe] = useState<string>('#F59E0B');
+  const [ausgewaehlteZeichnungId, setAusgewaehlteZeichnungId] = useState<string | null>(null);
+  const [notizText, setNotizText] = useState('');
+  const [tagGruppeTab, setTagGruppeTab] = useState<'ALLE' | 'SITUATION' | 'OFFENSE' | 'DEFENSE'>(
+    'ALLE'
+  );
 
   const sichererIndex = Math.min(aktiverPlayIndex, Math.max(0, reel.plays.length - 1));
   const aktiverPlay = reel.plays[sichererIndex] ?? null;
@@ -119,23 +168,29 @@ export function FilmRoomView({
     return Math.max(1000, aktuelleQuelle.end_ms - aktuelleQuelle.start_ms);
   }, [aktuelleQuelle, aktiverPlay]);
 
-  // Sichtbare Zeichnungen und Notizen nach Rolle filtern
-  const playZeichnungen = useMemo(() => {
-    const alle = aktiverPlay?.drawings ?? [];
+  // Zeichnungen strikt gefiltert nach dem AKTIVEN Video/Kamerawinkel + Rolle!
+  const winkelZeichnungen = useMemo(() => {
+    const alle = (aktiverPlay?.drawings ?? []).filter((z) => z.angle === aktiverWinkel);
     return istCoach ? alle : alle.filter((z) => z.status === 'PUBLISHED');
-  }, [aktiverPlay, istCoach]);
+  }, [aktiverPlay, aktiverWinkel, istCoach]);
 
   const sichtbareZeichnungenJetzt = useMemo(
-    () => playZeichnungen.filter((z) => Math.abs(z.timestamp_ms - zeitMs) <= 1300),
-    [playZeichnungen, zeitMs]
+    () => winkelZeichnungen.filter((z) => Math.abs(z.timestamp_ms - zeitMs) <= 1400),
+    [winkelZeichnungen, zeitMs]
   );
 
   const playNotizen = useMemo(() => {
     const alle = aktiverPlay?.notes ?? [];
-    return istCoach ? alle : alle.filter((n) => n.status === 'PUBLISHED' || n.autorRolle === 'PLAYER');
+    return istCoach
+      ? alle
+      : alle.filter((n) => n.status === 'PUBLISHED' || n.autorRolle === 'PLAYER');
   }, [aktiverPlay, istCoach]);
 
-  // Anzahl unveröffentlichter Entwürfe (Notizen + Zeichnungen) im gesamten Reel
+  const aktiveOverlayNotizen = useMemo(() => {
+    const zeitnah = playNotizen.filter((n) => Math.abs(n.timestamp_ms - zeitMs) <= 2200);
+    return zeitnah.length > 0 ? zeitnah : playNotizen.slice(0, 2);
+  }, [playNotizen, zeitMs]);
+
   const gesamtEntwuerfe = useMemo(
     () =>
       reel.plays.reduce((summe, play) => {
@@ -146,17 +201,61 @@ export function FilmRoomView({
     [reel.plays]
   );
 
-  // Bei Play-Wechsel Zeit zurücksetzen & ersten verfügbaren Winkel wählen
+  const aktiveTagFelder = useMemo(() => {
+    const aktiv = tagSchema.filter((f) => f.aktiv);
+    if (tagGruppeTab === 'ALLE') return aktiv;
+    if (tagGruppeTab === 'SITUATION') {
+      return aktiv.filter((f) => f.gruppe === 'SITUATION' || f.gruppe === 'RESULT' || f.gruppe === 'CUSTOM');
+    }
+    return aktiv.filter((f) => f.gruppe === tagGruppeTab || f.gruppe === 'CUSTOM');
+  }, [tagSchema, tagGruppeTab]);
+
+  // Native Fullscreen-Events abgleichen
+  useEffect(() => {
+    const onFsChange = () => {
+      if (!document.fullscreenElement) {
+        setVollbildAktiv(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    return () => document.removeEventListener('fullscreenchange', onFsChange);
+  }, []);
+
+  const toggleVollbild = async () => {
+    if (!vollbildAktiv) {
+      setVollbildAktiv(true);
+      try {
+        if (playerContainerRef.current?.requestFullscreen) {
+          await playerContainerRef.current.requestFullscreen();
+        }
+      } catch {
+        // Fallback: CSS-Vollbild greift automatisch über vollbildAktiv
+      }
+    } else {
+      setVollbildAktiv(false);
+      try {
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        }
+      } catch {
+        // ignorieren
+      }
+    }
+  };
+
   const wechslePlay = (neuerIndex: number) => {
     if (neuerIndex < 0 || neuerIndex >= reel.plays.length) return;
     setAktiverPlayIndex(neuerIndex);
     setLaeuft(false);
     setAutoStopMeldung(null);
+    setAusgewaehlteZeichnungId(null);
     gestoppteTimestampsRef.current.clear();
 
     const zielPlay = reel.plays[neuerIndex];
     const ersteMarkierung =
-      zielPlay.drawings?.[0]?.timestamp_ms ?? zielPlay.notes?.[0]?.timestamp_ms ?? 0;
+      zielPlay.drawings?.find((d) => d.angle === aktiverWinkel)?.timestamp_ms ??
+      zielPlay.notes?.[0]?.timestamp_ms ??
+      0;
     setZeitMs(ersteMarkierung);
 
     if (zielPlay && !zielPlay.sources[aktiverWinkel]) {
@@ -165,7 +264,7 @@ export function FilmRoomView({
     }
   };
 
-  // Playback-Loop mit Auto-Stop bei Zeichnungs-Timestamps
+  // Playback-Loop mit Auto-Stop bei Zeichnungen im AKTIVEN Winkel
   useEffect(() => {
     if (!laeuft) return;
     let letzterFrame = performance.now();
@@ -179,19 +278,19 @@ export function FilmRoomView({
         const neu = alt + delta;
 
         if (autoStop) {
-          const getroffeneZeichnung = playZeichnungen.find(
+          const getroffene = winkelZeichnungen.find(
             (z) =>
               z.timestamp_ms >= alt &&
               z.timestamp_ms <= neu + 40 &&
               !gestoppteTimestampsRef.current.has(z.timestamp_ms)
           );
-          if (getroffeneZeichnung) {
-            gestoppteTimestampsRef.current.add(getroffeneZeichnung.timestamp_ms);
+          if (getroffene) {
+            gestoppteTimestampsRef.current.add(getroffene.timestamp_ms);
             setLaeuft(false);
             setAutoStopMeldung(
-              `Auto-Stop bei ${formatiereZeit(getroffeneZeichnung.timestamp_ms)} · Zeichnung erreicht`
+              `Auto-Stop bei ${formatiereZeit(getroffene.timestamp_ms)} · Zeichnung erreicht`
             );
-            return getroffeneZeichnung.timestamp_ms;
+            return getroffene.timestamp_ms;
           }
         }
 
@@ -208,9 +307,9 @@ export function FilmRoomView({
 
     rafId = requestAnimationFrame(schritt);
     return () => cancelAnimationFrame(rafId);
-  }, [laeuft, geschwindigkeit, dauerMs, autoStop, playZeichnungen]);
+  }, [laeuft, geschwindigkeit, dauerMs, autoStop, winkelZeichnungen]);
 
-  // Tastaturkürzel im Film Room (Leertaste, ↑/↓, ←/→, A)
+  // Tastaturkürzel im Film Room
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const ziel = e.target as HTMLElement | null;
@@ -218,6 +317,23 @@ export function FilmRoomView({
         ziel &&
         (ziel.tagName === 'INPUT' || ziel.tagName === 'TEXTAREA' || ziel.tagName === 'SELECT')
       ) {
+        return;
+      }
+
+      if (e.key === 'Escape' && vollbildAktiv) {
+        setVollbildAktiv(false);
+        return;
+      }
+
+      if (
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        ausgewaehlteZeichnungId &&
+        aktiverPlay &&
+        istCoach
+      ) {
+        e.preventDefault();
+        onZeichnungEntfernen(reel.id, aktiverPlay.play_number, ausgewaehlteZeichnungId);
+        setAusgewaehlteZeichnungId(null);
         return;
       }
 
@@ -250,6 +366,7 @@ export function FilmRoomView({
         const naechster = reel.angles[(idx + 1) % reel.angles.length];
         if (aktiverPlay.sources[naechster]) {
           setAktiverWinkel(naechster);
+          setAusgewaehlteZeichnungId(null);
         }
       }
     };
@@ -285,15 +402,25 @@ export function FilmRoomView({
   const optionalerOffsetMs = aktuelleQuelle?.offset_ms;
   const zeigeOffset = optionalerOffsetMs !== undefined && optionalerOffsetMs !== 0;
 
-  // Sanfte Kamerabewegung beim Abspielen zur Simulation eines laufenden Spielzugs
   const simulierterScale = 1 + (fortschrittProzent / 100) * 0.04;
-  const simulierterShiftX = ((fortschrittProzent / 100) - 0.5) * -1.8;
+  const simulierterShiftX = (fortschrittProzent / 100 - 0.5) * -1.8;
 
-  const b = aktiverPlay?.breakdown ?? {};
+  const istFlagPlay = aktiverPlay?.breakdown?.result?.toUpperCase() === 'FLAG';
 
   return (
     <div className="space-y-4">
-      {/* Film Room Kopfzeile: Zurück, Titel, Spieler-Freigabe & Publish Session */}
+      {/* Datalists für Quick-Tag Comboboxen */}
+      {tagSchema
+        .filter((f) => f.aktiv && f.typ === 'combobox' && f.definitionen)
+        .map((feld) => (
+          <datalist key={`qt-dl-${feld.key}`} id={`qt-dl-${feld.key}`}>
+            {feld.definitionen!.map((def) => (
+              <option key={def} value={def} />
+            ))}
+          </datalist>
+        ))}
+
+      {/* Film Room Kopfzeile */}
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[#232933] bg-[#13171D] px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <button
@@ -308,7 +435,7 @@ export function FilmRoomView({
             <h1 className="truncate text-sm font-semibold text-white">{reel.title}</h1>
             <div className="text-[11px] text-[#8B949E]">
               {aktiverPlay
-                ? `Play #${aktiverPlay.play_number} von ${reel.plays.length} · ${aktuelleQuelle?.file ?? 'Keine Quelle im Winkel'}`
+                ? `Play #${aktiverPlay.play_number} von ${reel.plays.length} · ${aktuelleQuelle?.file ?? 'Kein Clip im Winkel'} · Zeichnungen nur für ${aktiverWinkel}`
                 : 'Keine Plays vorhanden'}
             </div>
           </div>
@@ -366,11 +493,22 @@ export function FilmRoomView({
         </div>
       )}
 
-      {/* Oberer Arbeitsbereich: Links 68% Video + Canvas | Rechts 32% Quick Tags & Notizen */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        {/* Video-Player + Vektor-Canvas */}
-        <section className="overflow-hidden rounded-lg border border-[#232933] bg-[#13171D]">
-          <div className="relative aspect-video w-full overflow-hidden bg-black">
+      {/* Oberer Arbeitsbereich: Links Video + Overlays | Rechts Quick Tags & Notizen */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        {/* Video-Player Container (unterstützt Vollbildmodus inkl. Zeichen- & Kommentar-Overlays) */}
+        <section
+          ref={playerContainerRef}
+          className={
+            vollbildAktiv
+              ? 'fixed inset-0 z-50 flex flex-col bg-[#0B0E11]'
+              : 'overflow-hidden rounded-lg border border-[#232933] bg-[#13171D]'
+          }
+        >
+          <div
+            className={`relative w-full overflow-hidden bg-black ${
+              vollbildAktiv ? 'flex-1' : 'aspect-video'
+            }`}
+          >
             {aktuelleQuelle ? (
               <img
                 src={hintergrundBild}
@@ -393,35 +531,198 @@ export function FilmRoomView({
               </div>
             )}
 
-            {/* Vektor-Telestration direkt auf der 16:9-Videofläche */}
+            {/* Winkel-gebundenes, editierbares Vektor-Canvas */}
             {aktiverPlay && aktuelleQuelle && (
               <TelestrationCanvas
                 zeichnungen={sichtbareZeichnungenJetzt}
                 aktivesWerkzeug={istCoach ? werkzeug : null}
                 aktiveFarbe={farbe}
                 bearbeitbar={istCoach}
+                ausgewaehlteId={ausgewaehlteZeichnungId}
+                onAuswaehlen={setAusgewaehlteZeichnungId}
                 onZeichnungHinzufuegen={(teil) => {
                   setLaeuft(false);
-                  onZeichnungHinzufuegen(reel.id, aktiverPlay.play_number, {
+                  const neu: CanvasZeichnung = {
                     ...teil,
                     id: `draw-${Date.now()}`,
+                    angle: aktiverWinkel,
                     timestamp_ms: Math.round(zeitMs),
                     status: 'DRAFT',
-                  });
+                  };
+                  onZeichnungHinzufuegen(reel.id, aktiverPlay.play_number, neu);
+                  if (teil.werkzeug !== 'pen') {
+                    setAusgewaehlteZeichnungId(neu.id);
+                  }
                 }}
+                onZeichnungAktualisieren={(id, punkte) =>
+                  onZeichnungAktualisieren(reel.id, aktiverPlay.play_number, id, punkte)
+                }
               />
             )}
 
-            {/* Auto-Stop Hinweis-Banner */}
+            {/* Verschiebbares Kommentar-Overlay in wählbarer Ecke über dem Video */}
+            {kommentarOverlaySichtbar && aktiveOverlayNotizen.length > 0 && (
+              <div
+                className={`absolute z-20 max-w-xs rounded-md border border-[#232933] bg-[#0B0E11]/88 p-2.5 backdrop-blur-sm ${ECKEN_POSITION_KLASSEN[kommentarEcke]}`}
+              >
+                <div className="flex items-center justify-between gap-3 border-b border-[#232933] pb-1.5">
+                  <span className="text-[10px] font-semibold text-[#F59E0B]">
+                    Kommentare · P#{aktiverPlay?.play_number}
+                  </span>
+                  <div className="flex items-center gap-0.5" title="Overlay-Ecke wechseln">
+                    {ECKEN_BUTTONS.map((btn) => (
+                      <button
+                        key={btn.id}
+                        type="button"
+                        title={btn.titel}
+                        aria-label={`Kommentare nach ${btn.titel} verschieben`}
+                        onClick={() => setKommentarEcke(btn.id)}
+                        className={`rounded px-1 text-[10px] leading-4 transition-colors ${
+                          kommentarEcke === btn.id
+                            ? 'bg-[#F59E0B] font-semibold text-[#0B0E11]'
+                            : 'text-[#8B949E] hover:bg-[#232933] hover:text-white'
+                        }`}
+                      >
+                        {btn.kurz}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ul className="mt-1.5 space-y-1.5">
+                  {aktiveOverlayNotizen.map((n, idx) => (
+                    <li key={n.id ?? idx} className="text-[11px] leading-snug text-[#E6EDF3]">
+                      <span className="mr-1.5 font-mono text-[10px] text-[#8B949E] tabular-nums">
+                        {formatiereZeit(n.timestamp_ms)}
+                      </span>
+                      {n.status === 'DRAFT' && (
+                        <span className="mr-1.5 font-mono text-[10px] text-[#F59E0B]">[DRAFT]</span>
+                      )}
+                      <span>{n.text}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Auto-Stop Hinweis */}
             {autoStopMeldung && (
-              <div className="absolute bottom-3 left-3 rounded border border-[#F59E0B]/50 bg-[#0B0E11]/90 px-3 py-1.5 font-mono text-[11px] text-[#FBBF24]">
+              <div className="absolute top-3 left-1/2 z-20 -translate-x-1/2 rounded border border-[#F59E0B]/60 bg-[#0B0E11]/92 px-3 py-1 font-mono text-[11px] text-[#FBBF24]">
                 {autoStopMeldung}
+              </div>
+            )}
+
+            {/* Schwebende Zeichenwerkzeug-Leiste direkt unten über dem Video (auch im Vollbild!) */}
+            {istCoach && aktiverPlay && aktuelleQuelle && zeichenOverlaySichtbar && (
+              <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center gap-1.5 rounded-md border border-[#303846] bg-[#0B0E11]/92 px-2.5 py-1.5 backdrop-blur-sm">
+                {(
+                  [
+                    { id: 'select', label: 'Bearbeiten', Icon: MousePointer2 },
+                    { id: 'pen', label: 'Stift', Icon: Pencil },
+                    { id: 'arrow', label: 'Pfeil', Icon: ArrowUpRight },
+                    { id: 'spotlight', label: 'Spot', Icon: CircleDot },
+                    { id: 'text', label: 'Text', Icon: Type },
+                  ] as const
+                ).map(({ id, label, Icon }) => {
+                  const aktiv = werkzeug === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setWerkzeug(aktiv ? null : id)}
+                      title={
+                        id === 'select'
+                          ? 'Pfeile, Spotlights und Text verschieben oder skalieren'
+                          : label
+                      }
+                      className={`inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                        aktiv
+                          ? 'bg-[#F59E0B] text-[#0B0E11]'
+                          : 'text-[#E6EDF3] hover:bg-[#1E2530]'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span className="hidden sm:inline">{label}</span>
+                    </button>
+                  );
+                })}
+
+                <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[#232933]" />
+
+                {/* Farbpalette */}
+                <div className="flex items-center gap-1">
+                  {TEAM_FARBEN.map((swatch) => (
+                    <button
+                      key={swatch.id}
+                      type="button"
+                      title={swatch.label}
+                      aria-label={swatch.label}
+                      onClick={() => setFarbe(swatch.hex)}
+                      style={{ backgroundColor: swatch.hex }}
+                      className={`h-4 w-4 rounded border transition-transform ${
+                        farbe === swatch.hex
+                          ? 'scale-115 border-white ring-1 ring-white'
+                          : 'border-[#232933]'
+                      }`}
+                    />
+                  ))}
+                </div>
+
+                <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[#232933]" />
+
+                {ausgewaehlteZeichnungId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onZeichnungEntfernen(reel.id, aktiverPlay.play_number, ausgewaehlteZeichnungId);
+                      setAusgewaehlteZeichnungId(null);
+                    }}
+                    title="Ausgewähltes Objekt löschen (Entf)"
+                    className="inline-flex items-center gap-1 rounded border border-[#DC2626]/40 bg-[#DC2626]/15 px-2 py-1 text-[11px] text-[#FCA5A5] hover:bg-[#DC2626]/25"
+                  >
+                    <Trash2 className="h-3 w-3" aria-hidden="true" />
+                    Objekt
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  disabled={winkelZeichnungen.length === 0}
+                  onClick={() =>
+                    onLetzteZeichnungEntfernen(reel.id, aktiverPlay.play_number, aktiverWinkel)
+                  }
+                  title="Letzte Zeichnung in diesem Winkel rückgängig"
+                  className="rounded p-1 text-[#8B949E] hover:bg-[#1E2530] hover:text-white disabled:opacity-35"
+                >
+                  <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  disabled={winkelZeichnungen.length === 0}
+                  onClick={() => {
+                    onAlleZeichnungenLeeren(reel.id, aktiverPlay.play_number, aktiverWinkel);
+                    setAusgewaehlteZeichnungId(null);
+                  }}
+                  title="Alle Zeichnungen dieses Winkels leeren"
+                  className="rounded p-1 text-[#8B949E] hover:bg-[#1E2530] hover:text-[#FCA5A5] disabled:opacity-35"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+
+                <label className="ml-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-[#8B949E]">
+                  <input
+                    type="checkbox"
+                    checked={autoStop}
+                    onChange={(e) => setAutoStop(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-[#F59E0B]"
+                  />
+                  <span>Auto-Stop</span>
+                </label>
               </div>
             )}
           </div>
 
-          {/* Timeline Scrub-Bar mit Markierungen für Zeichnungen & Notizen */}
-          <div className="border-t border-[#232933] bg-[#0F1318] px-4 pt-3 pb-1">
+          {/* Timeline Scrub-Bar */}
+          <div className="border-t border-[#232933] bg-[#0F1318] px-4 pt-2.5 pb-1">
             <div className="relative flex h-5 items-center">
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#232933]">
                 <div
@@ -430,14 +731,13 @@ export function FilmRoomView({
                 />
               </div>
 
-              {/* Marker-Ticks für Zeichnungen */}
-              {playZeichnungen.map((z) => {
+              {winkelZeichnungen.map((z) => {
                 const pos = Math.min(100, Math.max(0, (z.timestamp_ms / dauerMs) * 100));
                 return (
                   <button
                     key={z.id}
                     type="button"
-                    title={`Zeichnung bei ${formatiereZeit(z.timestamp_ms)}`}
+                    title={`Zeichnung (${z.angle}) bei ${formatiereZeit(z.timestamp_ms)}`}
                     onClick={() => {
                       setLaeuft(false);
                       setZeitMs(z.timestamp_ms);
@@ -465,9 +765,9 @@ export function FilmRoomView({
             </div>
           </div>
 
-          {/* Transport-Leiste & Angle-Switcher */}
-          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0F1318] px-4 py-2.5">
-            <div className="flex items-center gap-1.5">
+          {/* Transport-Leiste + Overlays + Winkel + Vollbild */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-[#0F1318] px-4 py-2">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
                 disabled={sichererIndex === 0}
@@ -534,8 +834,7 @@ export function FilmRoomView({
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Geschwindigkeit */}
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() =>
@@ -560,9 +859,11 @@ export function FilmRoomView({
                       key={winkel}
                       type="button"
                       disabled={!verfuegbar}
-                      onClick={() => setAktiverWinkel(winkel)}
-                      title={verfuegbar ? winkel : `${winkel} für dieses Play nicht vorhanden`}
-                      className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
+                      onClick={() => {
+                        setAktiverWinkel(winkel);
+                        setAusgewaehlteZeichnungId(null);
+                      }}
+                      className={`rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
                         aktiv
                           ? 'bg-[#232933] text-white'
                           : verfuegbar
@@ -576,283 +877,205 @@ export function FilmRoomView({
                 })}
               </div>
 
-              {/* Optionaler Offset nur anzeigen, wenn explizit gesetzt & ungleich 0 */}
               {zeigeOffset && (
                 <span className="font-mono text-[11px] text-[#8B949E] tabular-nums">
                   Offset {optionalerOffsetMs! > 0 ? '+' : ''}
                   {(optionalerOffsetMs! / 1000).toFixed(2)}s
                 </span>
               )}
+
+              {/* Overlay-Toggles */}
+              {istCoach && (
+                <button
+                  type="button"
+                  onClick={() => setZeichenOverlaySichtbar((v) => !v)}
+                  title="Zeichenwerkzeuge über dem Video ein-/ausblenden"
+                  className={`rounded border p-1.5 transition-colors ${
+                    zeichenOverlaySichtbar
+                      ? 'border-[#F59E0B]/60 bg-[#F59E0B]/10 text-[#F59E0B]'
+                      : 'border-[#232933] bg-[#13171D] text-[#8B949E] hover:text-white'
+                  }`}
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setKommentarOverlaySichtbar((v) => !v)}
+                title="Kommentar-Overlay über dem Video ein-/ausblenden"
+                className={`rounded border p-1.5 transition-colors ${
+                  kommentarOverlaySichtbar
+                    ? 'border-[#F59E0B]/60 bg-[#F59E0B]/10 text-[#F59E0B]'
+                    : 'border-[#232933] bg-[#13171D] text-[#8B949E] hover:text-white'
+                }`}
+              >
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+              </button>
+
+              {/* Vollbildmodus */}
+              <button
+                type="button"
+                onClick={() => void toggleVollbild()}
+                title={vollbildAktiv ? 'Vollbild beenden (Esc)' : 'Vollbildmodus aktivieren'}
+                aria-label={vollbildAktiv ? 'Vollbild beenden' : 'Vollbildmodus aktivieren'}
+                className="rounded border border-[#232933] bg-[#13171D] p-1.5 text-[#E6EDF3] hover:border-[#F59E0B] hover:text-white"
+              >
+                {vollbildAktiv ? (
+                  <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </button>
             </div>
           </div>
         </section>
 
-        {/* Rechte Spalte: Quick Tags + Canvas-Werkzeuge + Coach-Notizen */}
+        {/* Rechte Spalte: Dynamische Quick-Tags + Notizen-Liste */}
         <aside className="flex flex-col gap-4">
-          {/* Quick Tags */}
           <section className="rounded-lg border border-[#232933] bg-[#13171D] p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-xs font-semibold text-white">
-                Play #{aktiverPlay?.play_number ?? '–'} · Quick Tags
+                Play #{aktiverPlay?.play_number ?? '–'} · Tagging
               </h2>
-              {!istCoach && <span className="text-[11px] text-[#8B949E]">Leseansicht</span>}
+              {istTeamAdmin && (
+                <button
+                  type="button"
+                  onClick={onSchemaSettingsOeffnen}
+                  className="inline-flex items-center gap-1 text-[11px] text-[#8B949E] hover:text-[#F59E0B]"
+                >
+                  <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
+                  Felder verwalten
+                </button>
+              )}
             </div>
 
+            {/* Kompakte Gruppen-Filter für schnelles Tagging */}
+            <div className="mt-2.5 flex items-center gap-1 rounded border border-[#232933] bg-[#0B0E11] p-0.5 text-[11px]">
+              {(
+                [
+                  { id: 'ALLE', label: 'Alle' },
+                  { id: 'SITUATION', label: 'Situation' },
+                  { id: 'OFFENSE', label: 'Offense' },
+                  { id: 'DEFENSE', label: 'Defense' },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setTagGruppeTab(tab.id)}
+                  className={`flex-1 rounded py-1 font-medium transition-colors ${
+                    tagGruppeTab === tab.id
+                      ? 'bg-[#232933] text-white'
+                      : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {istFlagPlay && (
+              <p className="mt-2 text-[11px] text-[#F59E0B]">
+                FLAG aktiv: Automatische YD LN ↔ GN/LS Berechnung ist für dieses Play pausiert.
+              </p>
+            )}
+
             {aktiverPlay && (
-              <div className="mt-3 grid grid-cols-4 gap-2">
-                <label className="space-y-1 text-[11px] text-[#8B949E]">
-                  <span>ODK</span>
-                  <select
-                    disabled={!istCoach}
-                    value={b.odk ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        odk: (e.target.value || undefined) as OdkWert | undefined,
-                      })
-                    }
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  >
-                    <option value="">–</option>
-                    <option value="O">O</option>
-                    <option value="D">D</option>
-                    <option value="K">K</option>
-                  </select>
-                </label>
+              <div className="mt-3 grid max-h-[270px] grid-cols-2 gap-2 overflow-y-auto pr-1">
+                {aktiveTagFelder.map((feld) => {
+                  const wert = leseBreakdownWert(aktiverPlay.breakdown, feld);
+                  return (
+                    <label key={feld.key} className="space-y-1 text-[11px] text-[#8B949E]">
+                      <span className="block truncate" title={feld.label}>
+                        {feld.kurz}
+                      </span>
 
-                <label className="space-y-1 text-[11px] text-[#8B949E]">
-                  <span>DN</span>
-                  <select
-                    disabled={!istCoach}
-                    value={b.down ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        down: e.target.value
-                          ? (Number(e.target.value) as 1 | 2 | 3 | 4)
-                          : undefined,
-                      })
-                    }
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  >
-                    <option value="">–</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                  </select>
-                </label>
-
-                <label className="space-y-1 text-[11px] text-[#8B949E]">
-                  <span>DIST</span>
-                  <input
-                    type="number"
-                    disabled={!istCoach}
-                    value={b.distance ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        distance: e.target.value === '' ? undefined : Number(e.target.value),
-                      })
-                    }
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label className="space-y-1 text-[11px] text-[#8B949E]">
-                  <span>HASH</span>
-                  <select
-                    disabled={!istCoach}
-                    value={b.hash ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        hash: (e.target.value || undefined) as HashWert | undefined,
-                      })
-                    }
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  >
-                    <option value="">–</option>
-                    <option value="L">L</option>
-                    <option value="M">M</option>
-                    <option value="R">R</option>
-                  </select>
-                </label>
-
-                <label className="col-span-2 space-y-1 text-[11px] text-[#8B949E]">
-                  <span>PLAY TYPE</span>
-                  <select
-                    disabled={!istCoach}
-                    value={b.play_type ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        play_type: (e.target.value || undefined) as PlayTyp | undefined,
-                      })
-                    }
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  >
-                    <option value="">–</option>
-                    <option value="RUN">Run</option>
-                    <option value="PASS">Pass</option>
-                    <option value="SPECIAL">Special</option>
-                    <option value="PENALTY">Penalty</option>
-                  </select>
-                </label>
-
-                <label className="col-span-2 space-y-1 text-[11px] text-[#8B949E]">
-                  <span>OFF FORM</span>
-                  <input
-                    type="text"
-                    disabled={!istCoach}
-                    value={b.off_form ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        off_form: e.target.value,
-                      })
-                    }
-                    placeholder="z. B. Trips Left"
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label className="col-span-2 space-y-1 text-[11px] text-[#8B949E]">
-                  <span>DEF FRONT</span>
-                  <input
-                    type="text"
-                    disabled={!istCoach}
-                    value={b.def_front ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        def_front: e.target.value,
-                      })
-                    }
-                    placeholder="z. B. 4-3"
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
-
-                <label className="col-span-2 space-y-1 text-[11px] text-[#8B949E]">
-                  <span>COVERAGE</span>
-                  <input
-                    type="text"
-                    disabled={!istCoach}
-                    value={b.coverage ?? ''}
-                    onChange={(e) =>
-                      onBreakdownAendern(reel.id, aktiverPlay.play_number, {
-                        coverage: e.target.value,
-                      })
-                    }
-                    placeholder="z. B. Cover 3"
-                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
-                  />
-                </label>
+                      {feld.typ === 'select' ? (
+                        <select
+                          disabled={!istCoach}
+                          value={wert ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            const konvertiert =
+                              feld.key === 'down' ? (raw ? Number(raw) : undefined) : raw || undefined;
+                            onFeldAendern(
+                              reel.id,
+                              aktiverPlay.play_number,
+                              feld.key,
+                              konvertiert,
+                              Boolean(feld.istCustom)
+                            );
+                          }}
+                          className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
+                        >
+                          <option value="">–</option>
+                          {(feld.definitionen ?? []).map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      ) : feld.typ === 'number' ? (
+                        <input
+                          type="number"
+                          disabled={!istCoach}
+                          min={feld.key === 'yard_line' ? -50 : undefined}
+                          max={feld.key === 'yard_line' ? 50 : undefined}
+                          value={wert ?? ''}
+                          onChange={(e) =>
+                            onFeldAendern(
+                              reel.id,
+                              aktiverPlay.play_number,
+                              feld.key,
+                              e.target.value === '' ? undefined : Number(e.target.value),
+                              Boolean(feld.istCustom)
+                            )
+                          }
+                          placeholder={feld.key === 'yard_line' ? '-25 / +20' : '0'}
+                          className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
+                        />
+                      ) : (
+                        <input
+                          type="text"
+                          disabled={!istCoach}
+                          list={feld.typ === 'combobox' ? `qt-dl-${feld.key}` : undefined}
+                          value={wert ?? ''}
+                          onChange={(e) =>
+                            onFeldAendern(
+                              reel.id,
+                              aktiverPlay.play_number,
+                              feld.key,
+                              e.target.value || undefined,
+                              Boolean(feld.istCustom)
+                            )
+                          }
+                          onBlur={(e) => {
+                            if (feld.typ === 'combobox' && e.target.value.trim()) {
+                              onDefinitionLernen(feld.key, e.target.value);
+                            }
+                          }}
+                          placeholder="Wählen oder neu..."
+                          className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
+                        />
+                      )}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </section>
 
-          {/* Canvas & Coach-Notizen */}
+          {/* Notizen & Kommentare */}
           <section className="flex flex-1 flex-col rounded-lg border border-[#232933] bg-[#13171D] p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-white">Canvas &amp; Notizen</h2>
-              <label className="flex cursor-pointer items-center gap-2 text-[11px] text-[#8B949E]">
-                <span>Auto-Stop</span>
-                <input
-                  type="checkbox"
-                  checked={autoStop}
-                  onChange={(e) => setAutoStop(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-[#F59E0B]"
-                />
-              </label>
+              <h2 className="text-xs font-semibold text-white">Notizen &amp; Kommentare</h2>
+              <span className="font-mono text-[11px] text-[#8B949E] tabular-nums">
+                {playNotizen.length} Einträge
+              </span>
             </div>
 
-            {istCoach && aktiverPlay && (
-              <div className="mt-3 space-y-2.5 border-b border-[#232933] pb-3">
-                {/* Zeichenwerkzeuge */}
-                <div className="grid grid-cols-5 gap-1">
-                  {(
-                    [
-                      { id: 'pen', label: 'Stift', Icon: Pencil },
-                      { id: 'arrow', label: 'Pfeil', Icon: ArrowUpRight },
-                      { id: 'spotlight', label: 'Spot', Icon: CircleDot },
-                      { id: 'text', label: 'Text', Icon: Type },
-                    ] as const
-                  ).map(({ id, label, Icon }) => {
-                    const aktiv = werkzeug === id;
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        onClick={() => setWerkzeug(aktiv ? null : id)}
-                        className={`flex flex-col items-center gap-1 rounded border py-1.5 text-[10px] font-medium transition-colors ${
-                          aktiv
-                            ? 'border-[#F59E0B] bg-[#F59E0B]/15 text-white'
-                            : 'border-[#232933] bg-[#0B0E11] text-[#8B949E] hover:text-white'
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>{label}</span>
-                      </button>
-                    );
-                  })}
-
-                  <button
-                    type="button"
-                    onClick={() => setWerkzeug(null)}
-                    className={`flex flex-col items-center gap-1 rounded border py-1.5 text-[10px] font-medium transition-colors ${
-                      werkzeug === null
-                        ? 'border-[#36404F] bg-[#1E2530] text-white'
-                        : 'border-[#232933] bg-[#0B0E11] text-[#8B949E] hover:text-white'
-                    }`}
-                  >
-                    <Eraser className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Aus</span>
-                  </button>
-                </div>
-
-                {/* Team-Farben & Undo/Clear */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    {TEAM_FARBEN.map((swatch) => (
-                      <button
-                        key={swatch.id}
-                        type="button"
-                        title={swatch.label}
-                        aria-label={swatch.label}
-                        onClick={() => setFarbe(swatch.hex)}
-                        style={{ backgroundColor: swatch.hex }}
-                        className={`h-5 w-5 rounded border transition-transform ${
-                          farbe === swatch.hex
-                            ? 'scale-110 border-white ring-1 ring-white'
-                            : 'border-[#232933]'
-                        }`}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={playZeichnungen.length === 0}
-                      onClick={() =>
-                        onLetzteZeichnungEntfernen(reel.id, aktiverPlay.play_number)
-                      }
-                      title="Letzte Zeichnung rückgängig"
-                      className="rounded border border-[#232933] bg-[#0B0E11] p-1 text-[#8B949E] hover:text-white disabled:opacity-35"
-                    >
-                      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={playZeichnungen.length === 0}
-                      onClick={() => onAlleZeichnungenLeeren(reel.id, aktiverPlay.play_number)}
-                      title="Alle Zeichnungen dieses Plays löschen"
-                      className="rounded border border-[#232933] bg-[#0B0E11] p-1 text-[#8B949E] hover:text-[#FCA5A5] disabled:opacity-35"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Notizen-Liste */}
-            <div className="mt-3 flex-1 space-y-2 overflow-y-auto max-h-40">
+            <div className="mt-2.5 max-h-36 flex-1 space-y-2 overflow-y-auto">
               {playNotizen.length === 0 ? (
                 <p className="py-3 text-center text-xs text-[#6E7681]">
                   Noch keine Notizen für Play #{aktiverPlay?.play_number ?? '–'}.
@@ -873,9 +1096,7 @@ export function FilmRoomView({
                         {formatiereZeit(notiz.timestamp_ms)}
                       </span>
                       <span
-                        className={
-                          notiz.status === 'DRAFT' ? 'text-[#F59E0B]' : 'text-[#4ADE80]'
-                        }
+                        className={notiz.status === 'DRAFT' ? 'text-[#F59E0B]' : 'text-[#4ADE80]'}
                       >
                         {notiz.status === 'DRAFT'
                           ? 'DRAFT (Nur Coach)'
@@ -890,7 +1111,6 @@ export function FilmRoomView({
               )}
             </div>
 
-            {/* Neue Notiz erfassen */}
             {aktiverPlay && (
               <div className="mt-3 flex gap-1.5 border-t border-[#232933] pt-3">
                 <input
@@ -902,7 +1122,7 @@ export function FilmRoomView({
                   }}
                   placeholder={
                     istCoach
-                      ? `Coach-Notiz bei ${formatiereZeit(zeitMs)} (Draft)...`
+                      ? `Kommentar bei ${formatiereZeit(zeitMs)} (Draft)...`
                       : `Eigene Notiz bei ${formatiereZeit(zeitMs)}...`
                   }
                   className="min-w-0 flex-1 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
@@ -920,16 +1140,18 @@ export function FilmRoomView({
         </aside>
       </div>
 
-      {/* Unterer Arbeitsbereich: Hudl-kompatible Breakdown-Tabelle */}
+      {/* Unterer Arbeitsbereich: Dynamisches Breakdown Data Grid */}
       <BreakdownGrid
         reelTitel={reel.title}
         plays={reel.plays}
         aktiverPlayIndex={sichererIndex}
-        rolle={rolle}
+        teamRolle={teamRolle}
+        tagSchema={tagSchema}
         onPlayWaehlen={wechslePlay}
-        onBreakdownAendern={(playNumber, patch) =>
-          onBreakdownAendern(reel.id, playNumber, patch)
+        onFeldAendern={(playNumber, feldKey, wert, istCustom) =>
+          onFeldAendern(reel.id, playNumber, feldKey, wert, istCustom)
         }
+        onDefinitionLernen={onDefinitionLernen}
       />
     </div>
   );
