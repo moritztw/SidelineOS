@@ -40,6 +40,7 @@ import type {
 import { FREIGABE_LABELS } from '../../../shared/types.ts';
 import {
   FRAME_MS,
+  findeNaechstenAutoStopFrame,
   frameZuZeit,
   istGleicherFrame,
   zeitZuFrame,
@@ -160,6 +161,7 @@ export function FilmRoomView({
     const ersteZeichnung = reel.plays[0]?.drawings?.find((d) => d.angle === startWinkel);
     return ersteZeichnung ? frameZuZeit(zeitZuFrame(ersteZeichnung.timestamp_ms)) : 0;
   });
+  const zeitMsRef = useRef<number>(zeitMs);
   const [geschwindigkeit, setGeschwindigkeit] = useState<0.5 | 1 | 1.5>(
     nutzerEinstellungen.standardGeschwindigkeit
   );
@@ -309,6 +311,34 @@ export function FilmRoomView({
     }
   };
 
+  const setzeZeitExakt = (zielMs: number, resetAutoStop = true) => {
+    const geklemmt = Math.min(dauerMs, Math.max(0, zielMs));
+    const quantisiert = frameZuZeit(zeitZuFrame(geklemmt));
+    zeitMsRef.current = quantisiert;
+    if (resetAutoStop) {
+      gestoppteFramesRef.current.clear();
+    }
+    setZeitMs(quantisiert);
+  };
+
+  const toggleAbspielen = () => {
+    setAutoStopMeldung(null);
+    if (laeuft) {
+      setLaeuft(false);
+      // Beim manuellen Pausieren auf exakten Frame einrasten
+      const gerastet = frameZuZeit(zeitZuFrame(zeitMsRef.current));
+      zeitMsRef.current = gerastet;
+      setZeitMs(gerastet);
+      return;
+    }
+    if (zeitMsRef.current >= dauerMs - FRAME_MS) {
+      zeitMsRef.current = 0;
+      setZeitMs(0);
+      gestoppteFramesRef.current.clear();
+    }
+    setLaeuft(true);
+  };
+
   const wechslePlay = (neuerIndex: number) => {
     if (neuerIndex < 0 || neuerIndex >= reel.plays.length) return;
     setAktiverPlayIndex(neuerIndex);
@@ -323,7 +353,9 @@ export function FilmRoomView({
       zielPlay.drawings?.find((d) => d.angle === aktiverWinkel)?.timestamp_ms ??
       zielPlay.notes?.[0]?.timestamp_ms ??
       0;
-    setZeitMs(frameZuZeit(zeitZuFrame(ersteMarkierung)));
+    const zielQuantisiert = frameZuZeit(zeitZuFrame(ersteMarkierung));
+    zeitMsRef.current = zielQuantisiert;
+    setZeitMs(zielQuantisiert);
 
     if (zielPlay && !zielPlay.sources[aktiverWinkel]) {
       const ersatz = reel.angles.find((w) => zielPlay.sources[w] !== null);
@@ -331,54 +363,61 @@ export function FilmRoomView({
     }
   };
 
-  // Playback-Loop mit exaktem Frame-Auto-Stop bei Zeichnungen im AKTIVEN Winkel
+  // Race-freier Playback-Loop: stoppt exakt auf dem Ziel-Frame ohne Nachlauf-Tick
   useEffect(() => {
     if (!laeuft) return;
-    let letzterFrame = performance.now();
+    let aktiv = true;
+    let letzterTick = performance.now();
     let rafId = 0;
 
     const schritt = (jetzt: number) => {
-      const delta = (jetzt - letzterFrame) * geschwindigkeit;
-      letzterFrame = jetzt;
+      if (!aktiv) return;
+      const delta = Math.max(0, (jetzt - letzterTick) * geschwindigkeit);
+      letzterTick = jetzt;
 
-      setZeitMs((alt) => {
-        const neu = alt + delta;
+      const alt = zeitMsRef.current;
+      const neu = alt + delta;
 
-        if (autoStop) {
-          const getroffene = winkelZeichnungen.find((z) => {
-            const zielMs = frameZuZeit(zeitZuFrame(z.timestamp_ms));
-            const zielFrame = zeitZuFrame(zielMs);
-            return (
-              zielMs >= alt &&
-              zielMs <= neu + FRAME_MS &&
-              !gestoppteFramesRef.current.has(zielFrame)
-            );
-          });
-          if (getroffene) {
-            const zielMs = frameZuZeit(zeitZuFrame(getroffene.timestamp_ms));
-            const zielFrame = zeitZuFrame(zielMs);
-            gestoppteFramesRef.current.add(zielFrame);
-            setLaeuft(false);
-            setAutoStopMeldung(
-              `Auto-Stop · Frame ${zielFrame} (${formatiereZeit(zielMs)})`
-            );
-            return zielMs;
-          }
-        }
-
-        if (neu >= dauerMs) {
+      if (autoStop) {
+        const treffer = findeNaechstenAutoStopFrame(
+          alt,
+          neu,
+          winkelZeichnungen.map((z) => z.timestamp_ms),
+          gestoppteFramesRef.current
+        );
+        if (treffer) {
+          aktiv = false;
+          gestoppteFramesRef.current.add(treffer.zielFrame);
+          zeitMsRef.current = treffer.zielMs;
+          setZeitMs(treffer.zielMs);
           setLaeuft(false);
-          gestoppteFramesRef.current.clear();
-          return frameZuZeit(zeitZuFrame(dauerMs));
+          setAutoStopMeldung(
+            `Auto-Stop · Frame ${treffer.zielFrame} (${formatiereZeit(treffer.zielMs)})`
+          );
+          return;
         }
-        return neu;
-      });
+      }
 
+      if (neu >= dauerMs) {
+        aktiv = false;
+        const endeMs = frameZuZeit(zeitZuFrame(dauerMs));
+        zeitMsRef.current = endeMs;
+        setZeitMs(endeMs);
+        setLaeuft(false);
+        gestoppteFramesRef.current.clear();
+        return;
+      }
+
+      zeitMsRef.current = neu;
+      setZeitMs(neu);
       rafId = requestAnimationFrame(schritt);
     };
 
     rafId = requestAnimationFrame(schritt);
-    return () => cancelAnimationFrame(rafId);
+    return () => {
+      aktiv = false;
+      cancelAnimationFrame(rafId);
+    };
   }, [laeuft, geschwindigkeit, dauerMs, autoStop, winkelZeichnungen]);
 
   // Konfigurierbare Benutzer-Hotkeys + feste Transport-Tasten im Film Room
@@ -415,14 +454,7 @@ export function FilmRoomView({
 
       if (e.code === 'Space') {
         e.preventDefault();
-        setAutoStopMeldung(null);
-        setLaeuft((aktiv) => {
-          if (!aktiv && zeitMs >= dauerMs - FRAME_MS) {
-            setZeitMs(0);
-            gestoppteFramesRef.current.clear();
-          }
-          return !aktiv;
-        });
+        toggleAbspielen();
         return;
       }
 
@@ -440,14 +472,14 @@ export function FilmRoomView({
         e.preventDefault();
         setLaeuft(false);
         setAutoStopMeldung(null);
-        setZeitMs((t) => Math.min(dauerMs, frameZuZeit(zeitZuFrame(t) + 1)));
+        setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) + 1));
         return;
       }
       if (e.key === 'ArrowLeft') {
         e.preventDefault();
         setLaeuft(false);
         setAutoStopMeldung(null);
-        setZeitMs((t) => Math.max(0, frameZuZeit(zeitZuFrame(t) - 1)));
+        setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) - 1));
         return;
       }
 
@@ -670,9 +702,9 @@ export function FilmRoomView({
                 ausgewaehlteId={ausgewaehlteZeichnungId}
                 onAuswaehlen={setAusgewaehlteZeichnungId}
                 onZeichnungHinzufuegen={(teil) => {
-                  const frameZeit = frameZuZeit(zeitZuFrame(zeitMs));
+                  const frameZeit = frameZuZeit(zeitZuFrame(zeitMsRef.current));
                   setLaeuft(false);
-                  setZeitMs(frameZeit);
+                  setzeZeitExakt(frameZeit, false);
                   const neu: CanvasZeichnung = {
                     ...teil,
                     id: `draw-${Date.now()}`,
@@ -919,28 +951,6 @@ export function FilmRoomView({
                 />
               </div>
 
-              {winkelZeichnungen.map((z) => {
-                const pos = Math.min(100, Math.max(0, (z.timestamp_ms / dauerMs) * 100));
-                const zeichnungsFrame = zeitZuFrame(z.timestamp_ms);
-                const istAktiverFrame = istGleicherFrame(z.timestamp_ms, zeitMs);
-                return (
-                  <button
-                    key={z.id}
-                    type="button"
-                    title={`Zeichnung (${z.angle}) · Frame ${zeichnungsFrame} (${formatiereZeit(z.timestamp_ms)})`}
-                    onClick={() => {
-                      setLaeuft(false);
-                      setAutoStopMeldung(null);
-                      setZeitMs(frameZuZeit(zeichnungsFrame));
-                    }}
-                    style={{ left: `${pos}%` }}
-                    className={`absolute top-0.5 h-4 w-1.5 -translate-x-1/2 rounded-sm transition-colors ${
-                      istAktiverFrame ? 'bg-[#F59E0B] ring-1 ring-white' : 'bg-[#3B82F6] hover:bg-white'
-                    }`}
-                  />
-                );
-              })}
-
               <input
                 type="range"
                 aria-label="Videoposition"
@@ -951,10 +961,40 @@ export function FilmRoomView({
                 onChange={(e) => {
                   setLaeuft(false);
                   setAutoStopMeldung(null);
-                  setZeitMs(frameZuZeit(zeitZuFrame(Number(e.target.value))));
+                  setzeZeitExakt(Number(e.target.value));
                 }}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
               />
+
+              {/* Marker liegen über dem Range-Slider (z-20), damit Klicks exakt auf den Frame springen */}
+              {winkelZeichnungen.map((z) => {
+                const pos = Math.min(100, Math.max(0, (z.timestamp_ms / dauerMs) * 100));
+                const zeichnungsFrame = zeitZuFrame(z.timestamp_ms);
+                const istAktiverFrame = istGleicherFrame(z.timestamp_ms, zeitMs);
+                return (
+                  <button
+                    key={z.id}
+                    type="button"
+                    title={`Zeichnung (${z.angle}) · Frame ${zeichnungsFrame} (${formatiereZeit(z.timestamp_ms)})`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setLaeuft(false);
+                      setAutoStopMeldung(null);
+                      setzeZeitExakt(frameZuZeit(zeichnungsFrame));
+                    }}
+                    style={{ left: `${pos}%` }}
+                    className="group absolute top-0 z-20 flex h-5 w-4 -translate-x-1/2 cursor-pointer items-center justify-center"
+                  >
+                    <span
+                      className={`h-4 w-1.5 rounded-sm transition-colors ${
+                        istAktiverFrame
+                          ? 'bg-[#F59E0B] ring-1 ring-white'
+                          : 'bg-[#3B82F6] group-hover:bg-white'
+                      }`}
+                    />
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -975,7 +1015,7 @@ export function FilmRoomView({
                 onClick={() => {
                   setLaeuft(false);
                   setAutoStopMeldung(null);
-                  setZeitMs((t) => Math.max(0, frameZuZeit(zeitZuFrame(t) - 1)));
+                  setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) - 1));
                 }}
                 aria-label="Exakt 1 Frame zurück"
                 title="Exakt 1 Frame zurück (←)"
@@ -985,14 +1025,7 @@ export function FilmRoomView({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setAutoStopMeldung(null);
-                  if (!laeuft && zeitMs >= dauerMs - FRAME_MS) {
-                    setZeitMs(0);
-                    gestoppteFramesRef.current.clear();
-                  }
-                  setLaeuft((v) => !v);
-                }}
+                onClick={toggleAbspielen}
                 aria-label={laeuft ? 'Pause' : 'Abspielen'}
                 className="rounded-md bg-[#F59E0B] p-1.5 text-[#0B0E11] hover:bg-[#FBBF24]"
               >
@@ -1007,7 +1040,7 @@ export function FilmRoomView({
                 onClick={() => {
                   setLaeuft(false);
                   setAutoStopMeldung(null);
-                  setZeitMs((t) => Math.min(dauerMs, frameZuZeit(zeitZuFrame(t) + 1)));
+                  setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) + 1));
                 }}
                 aria-label="Exakt 1 Frame vor"
                 title="Exakt 1 Frame vor (→)"
@@ -1299,7 +1332,7 @@ export function FilmRoomView({
                           onClick={() => {
                             setLaeuft(false);
                             setAutoStopMeldung(null);
-                            setZeitMs(frameZuZeit(zeitZuFrame(notiz.timestamp_ms)));
+                            setzeZeitExakt(notiz.timestamp_ms);
                           }}
                           title="Zu diesem Zeitpunkt springen"
                           className="text-[#8B949E] hover:text-white tabular-nums"
@@ -1385,7 +1418,7 @@ export function FilmRoomView({
                           onClick={() => {
                             setLaeuft(false);
                             setAutoStopMeldung(null);
-                            setZeitMs(frameZuZeit(zeitZuFrame(notiz.timestamp_ms)));
+                            setzeZeitExakt(notiz.timestamp_ms);
                           }}
                           className="mt-1 block w-full text-left text-xs leading-snug text-[#E6EDF3]"
                         >

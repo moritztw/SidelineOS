@@ -6,6 +6,7 @@ import {
   aktualisiereBenutzerHotkey,
   darfAnsichtWechseln,
   ermittleWaehlbareTeamAnsichten,
+  findeNaechstenAutoStopFrame,
   frameZuZeit,
   istGleicherFrame,
   zeitZuFrame,
@@ -42,7 +43,7 @@ describe('Rollen-Hierarchie & Ansichts-Umschalter', () => {
   });
 });
 
-describe('Exakte Frame-Bindung für Canvas-Zeichnungen', () => {
+describe('Exakte Frame-Bindung & Auto-Stop für Canvas-Zeichnungen', () => {
   it('rechnet Millisekunden deterministisch in 25fps-Frames (40 ms) um', () => {
     assert.equal(FRAME_MS, 40);
     assert.equal(zeitZuFrame(2400), 60);
@@ -54,6 +55,17 @@ describe('Exakte Frame-Bindung für Canvas-Zeichnungen', () => {
     assert.equal(istGleicherFrame(2400, 2410), true);
     assert.equal(istGleicherFrame(2400, 2440), false);
     assert.equal(istGleicherFrame(2400, 2360), false);
+  });
+
+  it('trifft beim Auto-Stop exakt den gezeichneten Frame und überspringt bereits gestoppte Frames', () => {
+    const gestoppt = new Set<number>();
+    const treffer = findeNaechstenAutoStopFrame(2385, 2405, [2400, 3200], gestoppt);
+    assert.deepEqual(treffer, { zielFrame: 60, zielMs: 2400 });
+
+    // Nach erneutem Play ab genau 2400 ms darf derselbe Frame nicht erneut blockieren
+    gestoppt.add(60);
+    const naechster = findeNaechstenAutoStopFrame(2400, 2420, [2400, 3200], gestoppt);
+    assert.equal(naechster, null);
   });
 });
 

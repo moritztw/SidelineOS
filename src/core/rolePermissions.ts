@@ -22,6 +22,30 @@ export function istGleicherFrame(msA: number, msB: number): boolean {
 }
 
 /**
+ * Findet den frühesten gezeichneten Frame im Playback-Intervall (altMs, neuMs],
+ * der noch nicht per Auto-Stop pausiert wurde.
+ */
+export function findeNaechstenAutoStopFrame(
+  altMs: number,
+  neuMs: number,
+  zeichnungsTimestampsMs: number[],
+  gestoppteFrames: ReadonlySet<number>
+): { zielMs: number; zielFrame: number } | null {
+  const kandidaten = zeichnungsTimestampsMs
+    .map((ts) => {
+      const zielFrame = zeitZuFrame(ts);
+      return { zielFrame, zielMs: frameZuZeit(zielFrame) };
+    })
+    .filter(
+      ({ zielMs, zielFrame }) =>
+        zielMs > altMs && zielMs <= neuMs && !gestoppteFrames.has(zielFrame)
+    )
+    .sort((a, b) => a.zielMs - b.zielMs);
+
+  return kandidaten[0] ?? null;
+}
+
+/**
  * Liefert alle Team-Ansichten, in die ein angemeldetes Konto wechseln darf:
  * - Team Admin -> Team Admin, Coach, Spieler
  * - Coach      -> Coach, Spieler
