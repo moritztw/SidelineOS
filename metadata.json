@@ -1,6 +1,6 @@
 {
-  "name": "SidelineOS",
-  "description": "Modulare, selbstgehostete Videoanalyse- und Teamplattform für Coaches.",
+  "name": "SidelineOS-Core",
+  "description": "Modulare, selbstgehostete Plattform für Coaches mit Plugin-SDK und Plugin Store.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

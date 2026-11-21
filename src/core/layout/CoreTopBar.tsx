@@ -72,10 +72,11 @@ export function CoreTopBar({
           <button
             type="button"
             onClick={onLogoKlick}
-            title="Zurück zur SidelineOS-Startseite"
+            title="Zurück zur SidelineOS-Core-Startseite"
             className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#F59E0B]"
           >
             Sideline<span className="text-[#F59E0B]">OS</span>
+            <span className="font-medium text-[#8B949E]">-Core</span>
           </button>
 
           {imPlugin && aktivesPlugin && (

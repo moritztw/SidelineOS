@@ -3,6 +3,7 @@ import {
   Calendar,
   Check,
   Copy,
+  ExternalLink,
   Link2,
   Mail,
   Plus,
@@ -44,6 +45,7 @@ interface TeamSettingsPageProps {
   onEinladungWiderrufen: (einladungId: string) => void;
   onProfilCustomFeldHinzufuegen: (teamId: string, feld: ProfilCustomFeld) => void;
   onProfilCustomFeldLoeschen: (teamId: string, key: string) => void;
+  onEinladungTesten?: (token: string) => void;
   onZurueck?: () => void;
 }
 
@@ -68,6 +70,7 @@ export function TeamSettingsPage({
   onEinladungWiderrufen,
   onProfilCustomFeldHinzufuegen,
   onProfilCustomFeldLoeschen,
+  onEinladungTesten,
   onZurueck,
 }: TeamSettingsPageProps) {
   const [teamName, setTeamName] = useState(team.name);
@@ -712,6 +715,17 @@ export function TeamSettingsPage({
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {onEinladungTesten && (
+                      <button
+                        type="button"
+                        onClick={() => onEinladungTesten(inv.token)}
+                        title="Registrierungsseite /invite/<token> testen"
+                        className="inline-flex items-center gap-1 rounded border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2.5 py-1 text-[11px] font-medium text-[#F59E0B] hover:bg-[#F59E0B]/20"
+                      >
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                        Öffnen
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => void handleLinkKopieren(inv)}

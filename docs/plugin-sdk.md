@@ -1,9 +1,9 @@
-# SidelineOS Plugin SDK — Strukturelle Voraussetzungen für externe Module
+# SidelineOS-Core Plugin SDK — Strukturelle Voraussetzungen für externe Module
 
-Dieses Dokument definiert alle verbindlichen technischen, strukturellen und sicherheitsrelevanten Vorgaben für **eigenständige SidelineOS-Plugins in separaten GitHub-Repositories**.
+Dieses Dokument definiert alle verbindlichen technischen, strukturellen und sicherheitsrelevanten Vorgaben für **eigenständige SidelineOS-Core-Plugins in separaten GitHub-Repositories**.
 
 Ziel dieser Architektur (**Core + Plugin Store**) ist es, dass:
-* **SidelineOS Core** dauerhaft schlank bleibt (Auth, Konten, Multi-Tenancy, dauerhafte Multi-Saison-Teams, S3-Broker, SMTP, Hub, Einstellungs-Shell und Plugin Store),
+* **SidelineOS-Core** dauerhaft schlank bleibt (Auth, Einladungen, Konten, Multi-Tenancy, dauerhafte Multi-Saison-Teams, S3-Broker, SMTP, Hub, Einstellungs-Shell und Plugin Store),
 * jedes Fachmodul (z. B. `video-analysis`, `playbook`, `roster-attendance`, eigene Vereins-Tools) als **unabhängiges GitHub-Repository** entwickelt, versioniert und über den **Sysadmin Plugin Store** installiert werden kann.
 
 ---
@@ -26,7 +26,7 @@ sidelineos-plugin-<slug>/
 │   ├── types.ts               # Plugin-interne Domain-Typen
 │   ├── services/              # Headless Business-Logik (ohne Browser-DOM für Mobile/Desktop!)
 │   ├── components/            # UI-Komponenten (Tailwind Dark-Slate/Amber Design Tokens)
-│   └── backend/               # (Ab Paket 4) Express-Router + DB-Migrationen
+│   └── backend/               # (Ab Core-Backend) Express-Router + DB-Migrationen
 └── tests/
     └── unit/                  # Automatisierte Tests für alle Services
 ```
@@ -92,7 +92,8 @@ Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
 | `defaultTab` | Ja | Standard-Tab beim Öffnen der Kachel auf der Startseite |
 | `getTabs({ teamRolle })` | Ja | Liefert rollenabhängige TopBar-Tabs für Zone 2 |
 | `PrimaerAktion` | Nein | React-Komponente für den rechten Action-Button in Zone 3 der TopBar |
-| `renderMainView(ctx)` | Ja | Hauptfläche des Plugins inkl. Team-, Saison-, Rollen- und Tab-Kontext |
+| `renderMainView(ctx)` | Ja | Hauptfläche des Plugins inkl. Team-, Saison-, Rollen- und Tab-Kontext (inkl. `onPublicShareOeffnen`) |
+| `renderPublicShareView({ token, onSchliessen })` | Nein | Öffentliche Empfänger-Ansicht für `/share/<token>` ohne Anmeldung – der Core delegiert direkt an diese Methode, sodass er keine Plugin-Typen kennen muss |
 | `settingsPanels` | Nein | Optionale UI-Panels `{ user, team, sysadmin }`, die automatisch in die Core-Einstellungen eingeblendet werden |
 
 ### Strikte Entkopplungsregel
@@ -104,7 +105,7 @@ Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
 
 ## 4. Berechtigungsmodell (`permissions`) & Datensicherheit
 
-Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. Im Backend (Paket 4) werden folgende Scopes durch den Core-Broker erzwungen:
+Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. Im Core-Backend werden folgende Scopes durch den Core-Broker erzwungen:
 
 | Scope | Erlaubter Zugriff | Verboten |
 | :--- | :--- | :--- |
@@ -117,7 +118,7 @@ Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. I
 
 ---
 
-## 5. Sicherheits- & Build-Anforderungen für Store-Releases (Paket 4)
+## 5. Sicherheits- & Build-Anforderungen für Store-Releases
 
 1. **Keine unkontrollierte Code-Ausführung im Server-Prozess:** Backend-Routen eines Plugins dürfen niemals über unsichere `eval()`/`Function()`-Konstrukte oder rohes SQL ohne Parameterbindung laufen. Externe Plugins werden als signiertes Release-Artefakt (`sideline-plugin-v1.tar.gz` + SHA256-Prüfsumme + `plugin.manifest.json`) über GitHub Releases verteilt.
 2. **Kein Cross-Site-Scripting (XSS):** UI-Komponenten verwenden ausschließlich sicheres React-Binding (`{wert}` statt `dangerouslySetInnerHTML`) und validieren JSON/CSV-Imports strikt vor der Übernahme.

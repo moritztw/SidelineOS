@@ -2,17 +2,17 @@
   <img src="docs/assets/sidelineos-logo.svg" alt="SidelineOS Logo" width="280" />
 </p>
 
-# SidelineOS
+# SidelineOS-Core
 
-**SidelineOS** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Der schlanke **SidelineOS Core** übernimmt Benutzerkonten, Teams/Saisons, S3-Infrastruktur und einen **Plugin Store**, über den eigenständige GitHub-Module (wie die Videoanalyse) unabhängig entwickelt und installiert werden.
+**SidelineOS-Core** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Der schlanke **SidelineOS-Core** übernimmt Benutzerkonten, Teams/Saisons, Auth/Einladungen, S3-Infrastruktur und einen **Plugin Store**, über den eigenständige GitHub-Module (wie die Videoanalyse) unabhängig entwickelt und installiert werden.
 
-> **Projektstatus:** Aktiver UI-Prototyp (**Option C abgeschlossen** – vollständige Entkopplung in **SidelineOS Core + `@sidelineos/plugin-sdk` + Plugin Store**, gekapseltes Videoanalyse-Plugin inkl. `AI_HANDOFF.md` für die Auslagerung ins eigene GitHub-Repo sowie zentrale Einstellungsseiten mit dynamischen Plugin-Sektionen). Als nächstes folgen Login/Invite/Share-Screens (Paket 2b-B) sowie Cut & Sync / Smart Playlists (Paket 3).
+> **Projektstatus:** Aktiver Core-Prototyp (**Core-UI & `@sidelineos/plugin-sdk` v1.0 vollständig entkoppelt** – inkl. Hub, Einstellungs-Shell, Plugin Store, `/login`, `/invite/<token>` sowie delegierter `/share/<token>`-Route). Ab sofort wird in diesem Repository **ausschließlich der SidelineOS-Core** weiterentwickelt; fachliche Module (wie die Videoanalyse unter `src/plugins/video-analysis/`) werden in eigenen Plugin-Repositories gepflegt. Als nächstes folgt die **Core-Backend-Umsetzung** (PostgreSQL, Auth, S3-Broker, SMTP & GitHub-Plugin-Installer).
 
 ---
 
 ## Kernfunktionen
 
-* **Schlanker Core & GitHub Plugin Store:** Der SidelineOS Core enthält nur Authentifizierung, Mandanten/Teams, S3/SMTP, Hub, Einstellungs-Hub und den **Plugin Store**. Fachmodule implementieren das verbindliche `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`), werden über den Store (inkl. eigener GitHub-URLs) installiert und pro Team freigeschaltet.
+* **Schlanker Core & GitHub Plugin Store:** SidelineOS-Core enthält nur Authentifizierung, Einladungen, Mandanten/Teams, S3/SMTP, Hub, Einstellungs-Hub und den **Plugin Store**. Fachmodule implementieren das verbindliche `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`), werden über den Store (inkl. eigener GitHub-URLs) installiert und pro Team freigeschaltet.
 * **Aufgeräumte Startseite & Einstellungs-Hub:** Die Startseite zeigt ausschließlich Kacheln für die freigeschalteten Plugins des Teams sowie eine Kachel `Einstellungen`. Aktive Plugins klinken eigene Einstellungs-Kategorien dynamisch in die drei zentralen Einstellungsbereiche (`Persönliche Einstellungen`, `Team-Einstellungen`, `Sysadmin`) ein.
 * **Dauerhafte Multi-Saison-Teams:** Teams bleiben saisonübergreifend bestehen (`2026`, `2025`, `2024`, …). Alte Spielzeiten bleiben abrufbar, ohne Kader oder Einstellungen neu anzulegen.
 * **Deployment-unabhängige Ersteinrichtung per `.env`:** Kein unsicherer UI-Installations-Wizard – Initial-Sysadmin, `ENABLED_MODULES`, Datenbank, S3 und SMTP werden einheitlich über Umgebungsvariablen konfiguriert.
@@ -66,16 +66,16 @@ sidelineos/
 ├── src/
 │   ├── sdk/
 │   │   └── plugin.ts                  # Verbindlicher Plugin-Vertrag (@sidelineos/plugin-sdk)
-│   ├── core/                          # Core-Hub, Plugin Store, Registry, SettingsShell, RBAC
+│   ├── core/                          # Core-Hub, Auth/Invite, Plugin Store, SettingsShell, RBAC
 │   ├── plugins/
 │   │   ├── pluginLoader.ts            # Lädt installierte Store-Plugins in den Core
 │   │   ├── previewPlugins.tsx         # Vorschau-/Drittanbieter-Adapter für GitHub-Plugins
 │   │   └── video-analysis/            # In sich gekapselt (bereit für eigenes GitHub-Repo)
 │   │       ├── plugin.manifest.json   # Deklaratives Store-Manifest
 │   │       ├── AI_HANDOFF.md          # Übergabe-Dokumentation für die Videoanalyse-Weiterentwicklung
-│   │       ├── index.tsx              # SidelinePlugin-Einstiegspunkt
+│   │       ├── index.tsx              # SidelinePlugin-Einstiegspunkt (inkl. renderPublicShareView)
 │   │       ├── VideoAnalysisContext.tsx
-│   │       ├── components/            # Dashboard, Film Room, Canvas, Breakdown, SettingsPanels
+│   │       ├── components/            # Dashboard, Film Room, Canvas, Breakdown, PublicShare, Settings
 │   │       └── services/              # Tagging-Engine, Bundle-Schema, Frame-Math & Hotkeys
 │   └── shared/                        # Übergreifende Core-Typen (Benutzer, Team, S3, SMTP)
 └── tests/
@@ -92,14 +92,20 @@ sidelineos/
 
 ---
 
-## Roadmap
+## Roadmap (SidelineOS-Core)
 
-- [x] **Paket 1 & 2:** Videoanalyse-Dashboard, Film Room, Frame-Canvas, Breakdown-Tagging, `/share/`-Links
-- [x] **Paket 2b-A:** SidelineOS Core-Hub, Plugin Store & `@sidelineos/plugin-sdk` Entkopplung, Multi-Saison-Teams, Einstellungs-Hub mit offenem Seitenmenü, Multi-Unit & Einladungen
-- [ ] **Paket 2b-B:** Login-Maske, Einladungs-Registrierung (`/invite/<token>`) & öffentliche `/share/<token>`-Empfänger-Ansicht
-- [ ] **Paket 3:** Cut & Multi-Angle Sync Editor (`Einzelclip-Sync` + `Fast-Cut Raw Tape`) & Smart Playlists (im Videoanalyse-Plugin)
-- [ ] **Paket 4:** Stateless Backend (Express + PostgreSQL + S3-Broker + SMTP + ENV-Bootstrap + GitHub Plugin-Release-Installer + Docker Compose)
-- [ ] **Später:** Portabler Konto-Umzug (Export/Migration eines Benutzerkontos auf einen anderen SidelineOS-Server)
+> **Hinweis zur Modultrennung:** In diesem Repository wird **ausschließlich der Core** (Auth, Mandanten, Infrastruktur, `@sidelineos/plugin-sdk`, Plugin Store) weiterentwickelt. Fachliche Modul-Features (z. B. Cut & Multi-Angle Sync oder Smart Playlists in der Videoanalyse) liegen in der Roadmap der jeweiligen Plugin-Repositories (siehe [`src/plugins/video-analysis/AI_HANDOFF.md`](src/plugins/video-analysis/AI_HANDOFF.md)).
+
+### Abgeschlossen (UI- & SDK-Architektur)
+- [x] **Core-Grundstruktur & Entkopplung:** SidelineOS-Core-Hub, Einstellungs-Hub mit offenem Seitenmenü, dauerhafte Multi-Saison-Teams, Multi-Unit-Kader, Einladungsmanagement & `@sidelineos/plugin-sdk` (`v1.0`) inkl. GitHub Plugin Store
+- [x] **Core-Auth & Öffentliche Routen:** Login-Maske (`/login`), Einladungs-Registrierung (`/invite/<token>` inkl. Bestätigungs-Warteliste) sowie SDK-Delegation für öffentliche Plugin-Routen (`/share/<token>`)
+- [x] **Plugin-Migration vorbereitet:** Bisheriger Videoanalyse-Prototyp vollständig in `src/plugins/video-analysis/` gekapselt und für die Auslagerung nach `sidelineos-plugin-video` dokumentiert
+
+### Nächste Core-Meilensteine
+- [ ] **Core-Phase 1 – Backend-Fundament & `.env`-Bootstrap:** Stateless Node.js/Express-API (`/api/v1/*`), PostgreSQL-Schema für Core-Tabellen (Konten, Teams, Saisons, Mitgliedschaften, Einladungen), Passwort-Hashing & Session-Auth sowie deployment-unabhängige Ersteinrichtung per `.env` (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`)
+- [ ] **Core-Phase 2 – S3-Broker & SMTP-Service:** Serverseitig signierte Presigned-URLs auf Team-/Plugin-Präfixe (`teams/{teamId}/plugins/{slug}/`), anonymisierte Sysadmin-S3-Cleanup-Queue mit Schonfrist sowie E-Mail-Versand für Einladungen und Passwort-Zurücksetzungen
+- [ ] **Core-Phase 3 – Eigenständiges SDK & GitHub Plugin-Installer:** Auskopplung von `@sidelineos/plugin-sdk` als eigenständiges Paket, Verifikation & Installation externer `sideline-plugin-v1`-Releases aus GitHub (Manifest-Prüfung, SHA256, isolierte `dbPrefix`-Migrationen, `403`-Scope-Enforcement) sowie `Docker Compose`-Setup
+- [ ] **Später – Konto-Portabilität & Native Wrapper:** Export-/Migrations-Token für den Umzug globaler Benutzerkonten auf andere SidelineOS-Core-Instanzen sowie Capacitor-/Tauri-Builds für Mobile & Desktop
 
 ---
 

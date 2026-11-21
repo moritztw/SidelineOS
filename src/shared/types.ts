@@ -13,6 +13,12 @@ export type CoreBereich =
   | 'team-settings'
   | 'sysadmin';
 
+export type AppRouteModus =
+  | { art: 'app' }
+  | { art: 'login' }
+  | { art: 'invite'; token: string }
+  | { art: 'share'; token: string };
+
 /**
  * Angemeldetes Benutzerkonto (echte Berechtigungen).
  * Ein Konto kann mehrere Rollen gleichzeitig besitzen (z. B. Sysadmin + Team Admin).

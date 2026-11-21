@@ -1,11 +1,18 @@
-import { useMemo, useState, type ReactNode } from 'react';
-import { Eye, RotateCcw } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { ArrowLeft, Eye, LogOut, RotateCcw } from 'lucide-react';
 import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
 import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
 import { SettingsHubView } from './core/settings/SettingsHubView.tsx';
 import { UserSettingsPage } from './core/settings/UserSettingsPage.tsx';
 import { TeamSettingsPage } from './core/settings/TeamSettingsPage.tsx';
 import { SysadminPage } from './core/settings/SysadminPage.tsx';
+import { LoginView } from './core/auth/LoginView.tsx';
+import { InviteRegisterView } from './core/auth/InviteRegisterView.tsx';
+import {
+  DEMO_STANDARD_PASSWORT,
+  ermittleProfilAusKonto,
+  parseAppRouteAusPfad,
+} from './core/authService.ts';
 import {
   INITIALE_BENUTZER,
   INITIALE_EINLADUNGEN,
@@ -36,6 +43,7 @@ import type {
   SidelinePlugin,
 } from './sdk/plugin.ts';
 import type {
+  AppRouteModus,
   BenutzerKonto,
   BenutzerProfil,
   CoreBereich,
@@ -89,16 +97,22 @@ function SidelineCoreShell({
   onCustomGitHubPluginHinzufuegen,
   onGlobalModulToggle,
 }: SidelineShellProps) {
+  // Routen-Modus (`/`, `/login`, `/invite/<token>`, `/share/<token>`)
+  const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
+    parseAppRouteAusPfad(typeof window !== 'undefined' ? window.location.pathname : '/')
+  );
+
   // Core-Navigation (Startseite, aktives Plugin, Plugin-Tab, zentrale Einstellungen)
   const [bereich, setBereich] = useState<CoreBereich>('hub');
   const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(null);
   const [aktiverPluginTab, setAktiverPluginTab] = useState<string>('');
 
-  // Konto & produktiver Rollen-Ansichtsumschalter
-  const [kontoId, setKontoId] = useState<string>(DEMO_PROFILE[0].id);
+  // Sitzung, Passwort-Store (Prototyp) & produktiver Rollen-Ansichtsumschalter
+  const [aktuellesProfil, setAktuellesProfil] = useState<BenutzerProfil | null>(DEMO_PROFILE[0]);
   const [aktiveTeamAnsicht, setAktiveTeamAnsicht] = useState<TeamRolle | null>(
     DEMO_PROFILE[0].teamRolle
   );
+  const [passwoerter, setPasswoerter] = useState<Map<string, string>>(() => new Map());
 
   // Core-Plattform-Zustand (Teams, Benutzer, Mitgliedschaften, Einladungen, S3 & SMTP)
   const [teams, setTeams] = useState<TeamKontext[]>(INITIALE_TEAMS);
@@ -112,8 +126,36 @@ function SidelineCoreShell({
   const [s3Konfig, setS3Konfig] = useState<S3Konfiguration>(INITIALE_S3_KONFIG);
   const [smtpKonfig, setSmtpKonfig] = useState<SmtpKonfiguration>(INITIALE_SMTP_KONFIG);
 
-  const konto: BenutzerProfil = DEMO_PROFILE.find((p) => p.id === kontoId) ?? DEMO_PROFILE[0];
+  useEffect(() => {
+    const onPopState = () => {
+      setRouteModus(parseAppRouteAusPfad(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigiereZuRoute = (ziel: AppRouteModus) => {
+    setRouteModus(ziel);
+    if (typeof window === 'undefined') return;
+    const zielPfad =
+      ziel.art === 'app'
+        ? '/'
+        : ziel.art === 'login'
+          ? '/login'
+          : ziel.art === 'invite'
+            ? `/invite/${encodeURIComponent(ziel.token)}`
+            : `/share/${encodeURIComponent(ziel.token)}`;
+    try {
+      if (window.location.pathname !== zielPfad) {
+        window.history.pushState(null, '', zielPfad);
+      }
+    } catch {
+      // Ignorieren in restriktiven Sandbox-Umgebungen
+    }
+  };
+
   const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0];
+  const konto: BenutzerProfil = aktuellesProfil ?? DEMO_PROFILE[0];
   const aktuellerBenutzer =
     benutzerListe.find((b) => b.uuid === konto.userUuid) ?? benutzerListe[0];
   const aktuelleMitgliedschaft =
@@ -150,8 +192,7 @@ function SidelineCoreShell({
   );
 
   const aktivesPlugin = useMemo(
-    () =>
-      findePlugin(aktiveTeamPlugins, aktivesPluginId) ?? null,
+    () => findePlugin(aktiveTeamPlugins, aktivesPluginId) ?? null,
     [aktiveTeamPlugins, aktivesPluginId]
   );
 
@@ -163,6 +204,111 @@ function SidelineCoreShell({
   const ausstehendeAnfragenAnzahl = mitgliedschaften.filter(
     (m) => m.teamId === aktivesTeam.id && m.status === 'WARTET_AUF_FREIGABE'
   ).length;
+
+  // --- Auth & Einladungs-Handler ---
+  const handleErfolgreicherLogin = (benutzer: BenutzerKonto, demoProfil?: BenutzerProfil) => {
+    let zielTeamId = aktivesTeamId;
+    if (!demoProfil) {
+      const aktivImAktuellenTeam = mitgliedschaften.some(
+        (m) => m.userUuid === benutzer.uuid && m.teamId === aktivesTeamId && m.status === 'AKTIV'
+      );
+      if (!aktivImAktuellenTeam) {
+        const ersteAktive = mitgliedschaften.find(
+          (m) => m.userUuid === benutzer.uuid && m.status === 'AKTIV'
+        );
+        if (ersteAktive) {
+          zielTeamId = ersteAktive.teamId;
+          setAktivesTeamId(ersteAktive.teamId);
+          const zielTeam = teams.find((t) => t.id === ersteAktive.teamId);
+          if (zielTeam) setGewaehlteSaison(zielTeam.aktiveSaison);
+        }
+      }
+    }
+
+    const profil = demoProfil ?? ermittleProfilAusKonto(benutzer, zielTeamId, mitgliedschaften);
+    setAktuellesProfil(profil);
+    setAktiveTeamAnsicht(profil.teamRolle);
+    setAktivesPluginId(null);
+    setBereich(profil.teamRolle === null ? 'sysadmin' : 'hub');
+    navigiereZuRoute({ art: 'app' });
+  };
+
+  const handleRegistrierenUndBeitreten = ({
+    benutzer,
+    passwort,
+    mitgliedschaft,
+    istNeuesKonto,
+  }: {
+    benutzer: BenutzerKonto;
+    passwort: string;
+    mitgliedschaft: TeamMitgliedschaft;
+    istNeuesKonto: boolean;
+  }) => {
+    if (istNeuesKonto) {
+      setBenutzerListe((alt) => [...alt, benutzer]);
+      setPasswoerter((alt) => {
+        const neu = new Map(alt);
+        neu.set(benutzer.uuid, passwort);
+        return neu;
+      });
+    }
+
+    setMitgliedschaften((alt) => {
+      const existiert = alt.some(
+        (m) => m.userUuid === mitgliedschaft.userUuid && m.teamId === mitgliedschaft.teamId
+      );
+      if (existiert) {
+        return alt.map((m) =>
+          m.userUuid === mitgliedschaft.userUuid && m.teamId === mitgliedschaft.teamId
+            ? mitgliedschaft
+            : m
+        );
+      }
+      return [...alt, mitgliedschaft];
+    });
+
+    if (mitgliedschaft.status === 'AKTIV') {
+      setAktivesTeamId(mitgliedschaft.teamId);
+      const zielTeam = teams.find((t) => t.id === mitgliedschaft.teamId);
+      if (zielTeam) setGewaehlteSaison(zielTeam.aktiveSaison);
+
+      const profil: BenutzerProfil = {
+        id: `auth-${benutzer.uuid}`,
+        userUuid: benutzer.uuid,
+        label: benutzer.vollerName,
+        teamRolle: mitgliedschaft.rolle,
+        istSysadmin: benutzer.istSysadmin,
+      };
+      setAktuellesProfil(profil);
+      setAktiveTeamAnsicht(profil.teamRolle);
+      setAktivesPluginId(null);
+      setBereich('hub');
+      navigiereZuRoute({ art: 'app' });
+    }
+  };
+
+  const handleAbmelden = () => {
+    setAktuellesProfil(null);
+    setAktivesPluginId(null);
+    navigiereZuRoute({ art: 'login' });
+  };
+
+  const handlePasswortAendern = (
+    userUuid: string,
+    aktuellesPasswort: string,
+    neuesPasswort: string
+  ): boolean => {
+    const erwartet = passwoerter.get(userUuid) ?? DEMO_STANDARD_PASSWORT;
+    if (aktuellesPasswort !== erwartet) {
+      return false;
+    }
+    setPasswoerter((alt) => {
+      const neu = new Map(alt);
+      neu.set(userUuid, neuesPasswort);
+      return neu;
+    });
+    return true;
+  };
 
   // --- Navigation ---
   const handleLogoKlick = () => {
@@ -188,7 +334,7 @@ function SidelineCoreShell({
   const handleKontoWechseln = (neueId: string) => {
     const neu = DEMO_PROFILE.find((p) => p.id === neueId);
     if (!neu) return;
-    setKontoId(neueId);
+    setAktuellesProfil(neu);
     setAktiveTeamAnsicht(neu.teamRolle);
 
     if (neu.teamRolle === null) {
@@ -399,6 +545,62 @@ function SidelineCoreShell({
     onGlobalModulToggle(pluginId);
   };
 
+  // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
+  if (routeModus.art === 'share') {
+    const sharePlugin = installiertePlugins.find((p) => typeof p.renderPublicShareView === 'function');
+    if (sharePlugin?.renderPublicShareView) {
+      return sharePlugin.renderPublicShareView({
+        token: routeModus.token,
+        onSchliessen: () => navigiereZuRoute({ art: 'app' }),
+      });
+    }
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
+        <div className="w-full max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4 text-center">
+          <h1 className="text-base font-semibold text-white">Kein Video-Plugin aktiv</h1>
+          <p className="text-xs text-[#8B949E]">
+            Für öffentliche <code className="font-mono">/share/</code>-Links muss ein
+            unterstützendes Plugin im Core installiert sein.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigiereZuRoute({ art: 'app' })}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            Zurück zu SidelineOS-Core
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (routeModus.art === 'invite') {
+    return (
+      <InviteRegisterView
+        token={routeModus.token}
+        einladungen={einladungen}
+        teams={teams}
+        benutzerListe={benutzerListe}
+        passwoerter={passwoerter}
+        onRegistrierenUndBeitreten={handleRegistrierenUndBeitreten}
+        onZurueckZumLogin={() => navigiereZuRoute({ art: 'login' })}
+      />
+    );
+  }
+
+  if (routeModus.art === 'login' || !aktuellesProfil) {
+    return (
+      <LoginView
+        benutzerListe={benutzerListe}
+        passwoerter={passwoerter}
+        onErfolgreicherLogin={handleErfolgreicherLogin}
+        onInviteOeffnen={(token) => navigiereZuRoute({ art: 'invite', token })}
+        onShareOeffnen={(token) => navigiereZuRoute({ art: 'share', token })}
+      />
+    );
+  }
+
   // Plugin-Laufzeitkontext nur konstruieren, wenn ein Plugin aktiv angezeigt werden kann
   const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
     bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null
@@ -414,6 +616,7 @@ function SidelineCoreShell({
             setBereich('team-settings');
           },
           onZurueckZurStartseite: handleLogoKlick,
+          onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
         }
       : null;
 
@@ -421,6 +624,8 @@ function SidelineCoreShell({
     pluginLaufzeitKontext && aktivesPlugin
       ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht })
       : [];
+
+  const istDemoProfil = DEMO_PROFILE.some((p) => p.id === konto.id);
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
@@ -438,7 +643,7 @@ function SidelineCoreShell({
         onPluginTabWechseln={setAktiverPluginTab}
       />
 
-      {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter & Demo-Konto */}
+      {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter, Demo-Konto & Abmelden */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex flex-wrap items-center gap-3">
@@ -485,7 +690,7 @@ function SidelineCoreShell({
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             {kannAnsichtWechseln && (
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
@@ -518,7 +723,7 @@ function SidelineCoreShell({
               </div>
             )}
 
-            <label className="flex items-center gap-2 border-l border-[#232933] pl-4 text-xs text-[#6E7681]">
+            <label className="flex items-center gap-2 border-l border-[#232933] pl-3 text-xs text-[#6E7681]">
               <span>Demo-Konto</span>
               <select
                 aria-label="Angemeldetes Demo-Konto wechseln"
@@ -526,6 +731,11 @@ function SidelineCoreShell({
                 onChange={(e) => handleKontoWechseln(e.target.value)}
                 className="rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-xs text-[#E6EDF3] focus:border-[#F59E0B] focus:outline-none"
               >
+                {!istDemoProfil && (
+                  <option value={konto.id} className="bg-[#13171D]">
+                    {konto.label} (Angemeldet)
+                  </option>
+                )}
                 {DEMO_PROFILE.map((p) => (
                   <option key={p.id} value={p.id} className="bg-[#13171D]">
                     {p.label}
@@ -533,6 +743,16 @@ function SidelineCoreShell({
                 ))}
               </select>
             </label>
+
+            <button
+              type="button"
+              onClick={handleAbmelden}
+              title="Zum Login-Fenster abmelden"
+              className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs text-[#8B949E] transition-colors hover:border-[#F59E0B] hover:text-white"
+            >
+              <LogOut className="h-3 w-3" aria-hidden="true" />
+              Abmelden
+            </button>
           </div>
         </div>
       </div>
@@ -641,6 +861,7 @@ function SidelineCoreShell({
             s3Konfig={s3Konfig}
             aktivePlugins={aktiveTeamPlugins}
             onBenutzerAktualisieren={handleBenutzerAktualisieren}
+            onPasswortAendern={handlePasswortAendern}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
@@ -662,6 +883,7 @@ function SidelineCoreShell({
             onEinladungWiderrufen={handleEinladungWiderrufen}
             onProfilCustomFeldHinzufuegen={handleProfilCustomFeldHinzufuegen}
             onProfilCustomFeldLoeschen={handleProfilCustomFeldLoeschen}
+            onEinladungTesten={(token) => navigiereZuRoute({ art: 'invite', token })}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'modul' && aktivesPlugin && pluginLaufzeitKontext ? (

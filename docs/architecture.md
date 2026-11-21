@@ -1,12 +1,12 @@
-# SidelineOS — System- & Architektur-Dokumentation
+# SidelineOS-Core — System- & Architektur-Dokumentation
 
-Dieses Dokument beschreibt die verbindliche Architektur von **SidelineOS**: ein schlanker, mandantenfähiger **Core** (Auth, Teams/Saisons, S3-Broker, Plugin Store) kombiniert mit **unabhängigen GitHub-Plugins** über das `@sidelineos/plugin-sdk`.
+Dieses Dokument beschreibt die verbindliche Architektur von **SidelineOS-Core**: ein schlanker, mandantenfähiger **Core** (Auth, Einladungen, Teams/Saisons, S3-Broker, Plugin Store) kombiniert mit **unabhängigen GitHub-Plugins** über das `@sidelineos/plugin-sdk`.
 
 ---
 
 ## 1. Architekturprinzipien (KISS & Core/Plugin-Trennung)
 
-1. **Schlanker Core statt fachlichem Monolith:** Der SidelineOS Core stellt ausschließlich Startseite, Authentifizierung, globale Benutzerkonten, dauerhafte Multi-Saison-Teams (Multi-Unit), zentrale Einstellungsseiten (`User`, `Team`, `Sysadmin`), S3-/SMTP-Infrastruktur sowie den **Plugin Store** bereit.
+1. **Schlanker Core statt fachlichem Monolith:** SidelineOS-Core stellt ausschließlich Startseite, Authentifizierung (`/login`), Einladungs-Registrierung (`/invite/<token>`), globale Benutzerkonten, dauerhafte Multi-Saison-Teams (Multi-Unit), zentrale Einstellungsseiten (`User`, `Team`, `Sysadmin`), S3-/SMTP-Infrastruktur sowie den **Plugin Store** bereit.
 2. **Entkoppelte GitHub-Plugins (`@sidelineos/plugin-sdk`):** Fachmodule wie `video-analysis`, `playbook` oder `roster-attendance` werden als eigenständige Plugins gegen `src/sdk/plugin.ts` entwickelt. Sie können jeweils in eigenen GitHub-Repositories gepflegt, unabhängig versioniert und im Sysadmin-Plugin-Store installiert oder deinstalliert werden (Details siehe [Plugin SDK Spezifikation](plugin-sdk.md)).
 3. **Zweistufige Freigabe & ENV-Bootstrap:** Die Ersteinrichtung erfolgt deployment-unabhängig ausschließlich über `.env` (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`, S3, SMTP) ohne Browser-Wizard. Installierte Plugins können vom Sysadmin zusätzlich pro Mandant/Team freigeschaltet oder ausgeblendet werden.
 4. **Stateless Anwendungscontainer & S3 Object Storage:** Keine lokale Medienspeicherung im Container. Alle Dateien liegen in einem S3-kompatiblen Object Storage (MinIO, Hetzner Object Storage, Ceph, AWS S3) unter strikten team- und plugin-isolierten Präfixen (`teams/{teamId}/plugins/{pluginSlug}/`).
@@ -28,7 +28,7 @@ Dieses Dokument beschreibt die verbindliche Architektur von **SidelineOS**: ein 
 > * **Team-sortierte Modulverwaltung:** Im Sysadmin-Bereich werden GitHub-Plugins über den **Plugin Store** verwaltet und die Mandanten-Freigaben darunter übersichtlich **nach Team sortiert** zugewiesen.
 > * **Dauerhafte Multi-Saison-Teams:** Teams werden bei einem Saisonwechsel nicht neu angelegt. Jedes Team führt eine `aktiveSaison` und eine Liste aller bisherigen `saisons` (`2026`, `2025`, `2024`, …). Kader, Units, Custom-Felder und Plugin-Stammdaten bleiben erhalten, während ältere Spielzeiten direkt über den Saison-Umschalter abrufbar bleiben.
 > * **Produktiver Ansichts-Umschalter:** Konten mit untergeordneten Rollen können gezielt in deren Ansicht wechseln (`Team Admin` → `Coach` / `Spieler`; `Coach` → `Spieler`). Für reine `Spieler` ist der Umschalter ausgeblendet.
-> * **Konto-Erhalt & spätere Migration:** Globale Benutzerkonten (`user_uuid`) sind strikt von `team_memberships` getrennt. Ein Entfernen aus einem Team löscht das Konto nicht – das bereitet einen späteren **Konto-Umzug zwischen Teams oder SidelineOS-Servern** vor.
+> * **Konto-Erhalt & spätere Migration:** Globale Benutzerkonten (`user_uuid`) sind strikt von `team_memberships` getrennt. Ein Entfernen aus einem Team löscht das Konto nicht – das bereitet einen späteren **Konto-Umzug zwischen Teams oder SidelineOS-Core-Servern** vor.
 
 ---
 
@@ -68,5 +68,5 @@ mod_video_media_reels (physisches Asset-Container-Objekt)
 ## 6. Cross-Platform & App-Architektur (Android, iOS, Linux, Windows, macOS)
 
 1. **Headless TypeScript Logik (`src/core/*`, `src/sdk/*`, `src/plugins/*/services/*`):** Alle Fachregeln (RBAC, Saisonfilter, Tagging-Auto-Calc, Frame-Quantisierung, Bundle-Validierung, GitHub-Store-Parser) sind frei von Browser-DOM-Abhängigkeiten.
-2. **Strikte API-Grenze (Paket 4):** Auth, Presigned S3-URLs (`206 Partial Content`), Plugin-Manifeste und Metadaten laufen ausschließlich über `/api/v1/*`.
+2. **Strikte API-Grenze (Core-Backend):** Auth, Presigned S3-URLs (`206 Partial Content`), Plugin-Manifeste und Metadaten laufen ausschließlich über `/api/v1/*`.
 3. **Mobile & Desktop:** **Capacitor** (Android/iOS) und **Tauri v2** (Linux/Windows/macOS) können direkt auf derselben Web-App + REST-API aufsetzen.

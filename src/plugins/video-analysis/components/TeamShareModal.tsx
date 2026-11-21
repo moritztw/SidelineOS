@@ -4,6 +4,7 @@ import {
   Clock,
   Copy,
   Download,
+  ExternalLink,
   Link2,
   Plus,
   Share2,
@@ -33,6 +34,7 @@ interface TeamShareModalProps {
   onSchliessen: () => void;
   onTeamFreigabenAendern: (reelId: string, freigaben: TeamFreigabeEintrag[]) => void;
   onShareLinksAendern: (reelId: string, links: ShareDownloadLink[]) => void;
+  onShareVorschau?: (token: string) => void;
 }
 
 type ShareTab = 'teams' | 'links';
@@ -140,6 +142,7 @@ export function TeamShareModal({
   onSchliessen,
   onTeamFreigabenAendern,
   onShareLinksAendern,
+  onShareVorschau,
 }: TeamShareModalProps) {
   const aktiveFelder = tagSchema.filter((f) => f.aktiv);
   const [aktiverTab, setAktiverTab] = useState<ShareTab>('teams');
@@ -488,6 +491,20 @@ export function TeamShareModal({
                             </div>
 
                             <div className="flex flex-wrap items-center gap-1.5">
+                              {onShareVorschau && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onSchliessen();
+                                    onShareVorschau(link.token);
+                                  }}
+                                  title="Öffentliche /share/-Ansicht testen"
+                                  className="inline-flex items-center gap-1 rounded border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2.5 py-1 text-[11px] font-medium text-[#F59E0B] hover:bg-[#F59E0B]/20"
+                                >
+                                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                                  Öffnen
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => void handleKopieren(link)}

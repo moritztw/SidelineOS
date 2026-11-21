@@ -80,6 +80,7 @@ export interface PluginLaufzeitKontext {
   onTabWechseln: (tabId: string) => void;
   onTeamSettingsOeffnen: () => void;
   onZurueckZurStartseite: () => void;
+  onPublicShareOeffnen?: (token: string) => void;
 }
 
 /**
@@ -105,6 +106,8 @@ export interface SidelinePlugin {
   /** Optionale Primäraktion rechts in der TopBar (als eigenständige React-Komponente) */
   PrimaerAktion?: ComponentType<{ ctx: PluginLaufzeitKontext; className: string }>;
   renderMainView: (ctx: PluginLaufzeitKontext) => ReactNode;
+  /** Optionaler öffentlicher Empfänger-View für /share/<token> ohne Anmeldung */
+  renderPublicShareView?: (ctx: { token: string; onSchliessen: () => void }) => ReactNode;
   settingsPanels?: {
     user?: ComponentType<{ ctx: PluginSettingsKontext }>;
     team?: ComponentType<{ ctx: PluginSettingsKontext }>;

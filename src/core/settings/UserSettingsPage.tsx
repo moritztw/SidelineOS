@@ -19,6 +19,11 @@ interface UserSettingsPageProps {
   s3Konfig: S3Konfiguration;
   aktivePlugins: SidelinePlugin[];
   onBenutzerAktualisieren: (aktualisiert: BenutzerKonto) => void;
+  onPasswortAendern?: (
+    userUuid: string,
+    aktuellesPasswort: string,
+    neuesPasswort: string
+  ) => boolean;
   onZurueck?: () => void;
 }
 
@@ -30,6 +35,7 @@ export function UserSettingsPage({
   s3Konfig,
   aktivePlugins,
   onBenutzerAktualisieren,
+  onPasswortAendern,
   onZurueck,
 }: UserSettingsPageProps) {
   const [vollerName, setVollerName] = useState(benutzer.vollerName);
@@ -101,6 +107,10 @@ export function UserSettingsPage({
         setKontoFehler('Die neuen Passwörter stimmen nicht überein.');
         return;
       }
+      if (onPasswortAendern && !onPasswortAendern(benutzer.uuid, passwortAktuell, passwortNeu)) {
+        setKontoFehler('Das aktuelle Passwort ist nicht korrekt.');
+        return;
+      }
     }
 
     onBenutzerAktualisieren({
@@ -120,8 +130,8 @@ export function UserSettingsPage({
   };
 
   const kategorien: SettingsKategorie[] = [
-    { id: 'profil', label: 'Spieler- & Nutzerprofil', gruppe: 'SidelineOS Konto' },
-    { id: 'konto', label: 'Zugang, E-Mail & Passwort', gruppe: 'SidelineOS Konto' },
+    { id: 'profil', label: 'Spieler- & Nutzerprofil', gruppe: 'SidelineOS-Core Konto' },
+    { id: 'konto', label: 'Zugang, E-Mail & Passwort', gruppe: 'SidelineOS-Core Konto' },
   ];
 
   const pluginsMitPanel = aktivePlugins.filter((p) => Boolean(p.settingsPanels?.user));
@@ -358,7 +368,7 @@ export function UserSettingsPage({
         <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-3 text-xs text-[#8B949E]">
           <strong className="font-medium text-[#E6EDF3]">Konto-Portabilität (Roadmap):</strong>{' '}
           Dein Konto bleibt bei einem Team-Austritt erhalten. In einer späteren Version kannst du
-          dein Profil inkl. eigener Notizen per Export-Token auf einen anderen SidelineOS-Server
+          dein Profil inkl. eigener Notizen per Export-Token auf einen anderen SidelineOS-Core-Server
           umziehen.
         </div>
       </section>

@@ -1,12 +1,12 @@
-# AI Handoff – SidelineOS Videoanalyse-Plugin (`video-analysis`)
+# AI Handoff – SidelineOS-Core Videoanalyse-Plugin (`video-analysis`)
 
-Dieses Verzeichnis ist bewusst **vollständig in sich gekapselt**, damit es ohne Altlasten in ein eigenes GitHub-Repository (z. B. `sidelineos-plugin-video`) ausgelagert und über den SidelineOS Plugin Store installiert werden kann.
+Dieses Verzeichnis ist bewusst **vollständig in sich gekapselt**, damit es ohne Altlasten in ein eigenes GitHub-Repository (z. B. `sidelineos-plugin-video`) ausgelagert und über den SidelineOS-Core Plugin Store installiert werden kann.
 
 ---
 
 ## 1. Woran wir bislang gearbeitet haben (Status quo)
 
-Alle Funktionen von **Paket 1** und **Paket 2a** der Videoanalyse sind hier als UI- und Logik-Prototyp vollständig umgesetzt und durch Unit-Tests abgesichert:
+Alle Funktionen von **Paket 1**, **Paket 2a** und **Paket 2b** der Videoanalyse sind hier als UI- und Logik-Prototyp vollständig umgesetzt und durch Unit-Tests abgesichert:
 
 1. **Videobibliothek & Upload (`components/DashboardView.tsx`, `components/UploadPanel.tsx`)**
    - Filterung nach Team, Saison (`filtereNachSaison` aus `@sidelineos/plugin-sdk`), Kategorie (`Spiel`, `Training`, `Scouting`, `Self-Scout`) sowie Volltextsuche.
@@ -16,9 +16,10 @@ Alle Funktionen von **Paket 1** und **Paket 2a** der Videoanalyse sind hier als 
      - **Einzeldatei (Time-Slice)**
      - **JSON-Import & -Export (`sideline-bundle.json`, Version 1.0)** via `services/bundleSchema.ts` inkl. Validierung.
 
-2. **Team-zu-Team Austausch & `/share/`-Links (`components/TeamShareModal.tsx`)**
+2. **Team-zu-Team Austausch & öffentliche `/share/<token>`-Ansicht (`components/TeamShareModal.tsx`, `components/PublicShareView.tsx`)**
    - Granulare Auswahl pro Empfänger-Team/Scouting-Pool, *welche* Tagging-Felder (inkl. Custom-Feldern) mitgeteilt werden.
    - Öffentliche, zeitlich ablaufende Download-Links mit `/share/<token>`-Pfad inkl. wählbarer Tagging-Freigabe.
+   - SDK-entkoppelte Read-Only-Empfängeransicht über `renderPublicShareView` (`404`/`410`-Prüfung, Play- & Multi-Angle-Vorschau, ausschließlich freigegebene Breakdown-Spalten, gefilterte JSON/CSV-Downloads ohne Coach-Notizen/Zeichnungen).
 
 3. **Film Room & Exakte Frame-Telestration (`components/FilmRoomView.tsx`, `components/TelestrationCanvas.tsx`, `services/frameAndHotkeys.ts`)**
    - Multi-Angle-Wechsel (z. B. Sideline / Endzone) ohne Verlust der Play-Position.
@@ -50,16 +51,16 @@ Alle Funktionen von **Paket 1** und **Paket 2a** der Videoanalyse sind hier als 
 
 ## 3. Was in diesem Plugin noch fehlt (Roadmap für das separate Repo)
 
-1. **Paket 2b – Öffentliche `/share/<token>`-Empfängeransicht**
-   - Read-only Player + selektiver JSON/Video-Download anhand der `freigegebeneFelder` im `ShareDownloadLink`.
-2. **Paket 3 – Cut & Multi-Angle Sync + Smart Playlists**
+> **Hinweis:** Im `SidelineOS-Core`-Repository wird nur noch der Core weiterentwickelt. Die folgenden Schritte werden nach der Auslagerung direkt im eigenen Repository `sidelineos-plugin-video` umgesetzt:
+
+1. **Paket 3 – Cut & Multi-Angle Sync + Smart Playlists**
    - `VideoCutSyncPlaceholder.tsx` ersetzen durch:
      - Echten Dual-Viewport Sync-Editor (Einzelclips mit optionalem Offset, Snap-Sync, Lücken- & Fehl-Clip-Handling) und Fast-Cut-Editor (`I / O / J-K-L` für Einzeldatei-Tapes).
      - Smart Playlists (typsicheres Filter-Grid über alle aktiven & Custom-Breakdown-Spalten, speicherbare Cutups).
-3. **Paket 4 – Backend-Persistenz & S3-Streaming**
+2. **Paket 4 – Backend-Persistenz & S3-Streaming**
    - PostgreSQL-Tabellen strikt mit Präfix `mod_video_` (siehe `dbPrefix` im Manifest).
    - Video-Upload/Playback ausschließlich über signierte S3-Presigned-URLs innerhalb von `teams/{teamId}/plugins/video-analysis/`.
    - Grundstock an Default-Definitionen für Backfield/Formationen/Fronts nach Abschluss der UI final kuratieren.
-4. **Eigenes GitHub-Repo (`sidelineos-plugin-video`)**
-   - Lizenz: **GNU AGPLv3** (Pflicht wegen Kopplung an SidelineOS).
+3. **Eigenes GitHub-Repo (`sidelineos-plugin-video`)**
+   - Lizenz: **GNU AGPLv3** (Pflicht wegen Kopplung an SidelineOS-Core).
    - Imports von `../../../sdk/plugin.ts` auf `@sidelineos/plugin-sdk` umstellen und gegen das Build-Format `sideline-plugin-v1` bündeln (siehe `/docs/plugin-sdk.md`).

@@ -221,7 +221,7 @@ export function SysadminPage({
   return (
     <SettingsShell
       titel="Sysadmin · Instanz-Administration"
-      untertitel="SidelineOS Core verwaltet ausschließlich Auth, Mandanten, S3/SMTP und den Plugin Store. Alle Fachmodule laufen isoliert als installierbare GitHub-Plugins."
+      untertitel="SidelineOS-Core verwaltet ausschließlich Auth, Mandanten, S3/SMTP und den Plugin Store. Alle Fachmodule laufen isoliert als installierbare GitHub-Plugins."
       kategorien={kategorien}
       zurueckLabel="Alle Einstellungen"
       onZurueck={onZurueck}
@@ -896,8 +896,8 @@ export function SysadminPage({
           </h2>
         </div>
         <p className="text-xs leading-relaxed text-[#8B949E]">
-          SidelineOS verzichtet bewusst auf einen unsicheren Erststart-Wizard im Browser. Der erste
-          Sysadmin, Datenbank, S3, SMTP und die installierten Plugins werden einheitlich über
+          SidelineOS-Core verzichtet bewusst auf einen unsicheren Erststart-Wizard im Browser. Der
+          erste Sysadmin, Datenbank, S3, SMTP und die installierten Plugins werden einheitlich über
           Umgebungsvariablen (Docker Compose, Kubernetes, Proxmox LXC oder Systemd) gesetzt.
         </p>
         <pre className="overflow-x-auto rounded-md border border-[#232933] bg-[#0B0E11] p-3 font-mono text-[11px] leading-relaxed text-[#E6EDF3]">

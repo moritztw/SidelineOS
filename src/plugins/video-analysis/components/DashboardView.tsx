@@ -38,6 +38,7 @@ interface DashboardViewProps {
   onTeamFreigabenAendern: (reelId: string, freigaben: TeamFreigabeEintrag[]) => void;
   onShareLinksAendern: (reelId: string, links: ShareDownloadLink[]) => void;
   onReelOeffnen: (reel: VideoReel) => void;
+  onShareVorschau?: (token: string) => void;
 }
 
 const KATEGORIE_TABS: Array<{ id: 'ALL' | ReelKategorie; label: string }> = [
@@ -100,6 +101,7 @@ export function DashboardView({
   onTeamFreigabenAendern,
   onShareLinksAendern,
   onReelOeffnen,
+  onShareVorschau,
 }: DashboardViewProps) {
   const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const istArchivSaison = gewaehlteSaison !== 'ALL' && gewaehlteSaison !== teamAktiveSaison;
@@ -417,6 +419,7 @@ export function DashboardView({
           onSchliessen={() => setTeilenReelId(null)}
           onTeamFreigabenAendern={onTeamFreigabenAendern}
           onShareLinksAendern={onShareLinksAendern}
+          onShareVorschau={onShareVorschau}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import { VIDEO_PLUGIN_MANIFEST } from './manifest.ts';
 import { VideoAnalysisProvider, useVideoAnalysis } from './VideoAnalysisContext.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
 import { FilmRoomView } from './components/FilmRoomView.tsx';
+import { PublicShareView } from './components/PublicShareView.tsx';
 import { VideoCutSyncPlaceholder } from './components/VideoCutSyncPlaceholder.tsx';
 import {
   VideoSysadminSettingsPanel,
@@ -73,6 +74,7 @@ function VideoAnalysisMainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
         video.setAusgewaehltesReelId(reel.id);
         ctx.onTabWechseln('film-room');
       }}
+      onShareVorschau={ctx.onPublicShareOeffnen}
     />
   );
 }
@@ -125,6 +127,9 @@ export const videoAnalysisPlugin: SidelinePlugin = {
   },
   PrimaerAktion: VideoPrimaerAktionButton,
   renderMainView: (ctx) => <VideoAnalysisMainView ctx={ctx} />,
+  renderPublicShareView: ({ token, onSchliessen }) => (
+    <PublicShareView token={token} onSchliessen={onSchliessen} />
+  ),
   settingsPanels: {
     user: VideoUserSettingsPanel,
     team: VideoTeamSettingsPanel,
