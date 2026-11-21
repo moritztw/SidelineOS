@@ -6,7 +6,7 @@ import {
   FileJson,
   Upload,
 } from 'lucide-react';
-import type { VideoReel } from '../../../shared/types.ts';
+import type { VideoReel } from '../types.ts';
 import {
   bundleZuReel,
   erstelleBeispielBundle,

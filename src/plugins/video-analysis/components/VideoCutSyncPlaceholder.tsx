@@ -1,10 +1,10 @@
 import { ArrowLeft, Layers, ListFilter } from 'lucide-react';
-import type { VideoReel } from '../shared/types.ts';
-import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../shared/types.ts';
+import type { VideoReel } from '../types.ts';
+import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../types.ts';
 
 type PlatzhalterAnsicht = 'cut-sync' | 'playlists';
 
-interface ModulePlaceholderViewProps {
+interface VideoCutSyncPlaceholderProps {
   ansicht: PlatzhalterAnsicht;
   ausgewaehltesReel: VideoReel | null;
   onZurueckZumDashboard: () => void;
@@ -28,11 +28,11 @@ const ANSICHT_META: Record<
   },
 };
 
-export function ModulePlaceholderView({
+export function VideoCutSyncPlaceholder({
   ansicht,
   ausgewaehltesReel,
   onZurueckZumDashboard,
-}: ModulePlaceholderViewProps) {
+}: VideoCutSyncPlaceholderProps) {
   const meta = ANSICHT_META[ansicht];
   const Icon = ansicht === 'cut-sync' ? Layers : ListFilter;
 
@@ -82,7 +82,10 @@ export function ModulePlaceholderView({
                 </div>
               </div>
               <span className="font-mono text-xs text-[#8B949E]">
-                Modus: {ausgewaehltesReel.sourceMode === 'TIME_SLICE' ? 'Einzeldatei (Time-Slice)' : 'Einzelclips'}
+                Modus:{' '}
+                {ausgewaehltesReel.sourceMode === 'TIME_SLICE'
+                  ? 'Einzeldatei (Time-Slice)'
+                  : 'Einzelclips'}
               </span>
             </div>
 

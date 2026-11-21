@@ -12,7 +12,7 @@ import type {
   TagFeldKonfig,
   ValidierungsErgebnis,
   VideoReel,
-} from '../../../shared/types.ts';
+} from '../types.ts';
 import { STANDARD_TAG_SCHEMA, leseBreakdownWert } from './taggingEngine.ts';
 
 const GUELTIGE_KATEGORIEN = new Set<ReelKategorie>([

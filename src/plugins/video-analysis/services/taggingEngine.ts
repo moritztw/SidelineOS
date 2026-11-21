@@ -3,7 +3,7 @@ import type {
   PlayBreakdown,
   Spielzug,
   TagFeldKonfig,
-} from '../../../shared/types.ts';
+} from '../types.ts';
 
 /**
  * Standard-Grundstock an Football-Tagging-Feldern & Basis-Definitionen.
@@ -288,12 +288,7 @@ export function leseBreakdownWert(
 }
 
 /**
- * Schreibt eine Breakdown-Änderung inkl. automatischer GN/LS <-> YD LN Synchronisation:
- * - Änderung von `gn_ls` berechnet `yard_line` des Folge-Plays (im selben ODK-Drive), außer bei RESULT = FLAG.
- * - Änderung von `yard_line` berechnet:
- *   1) `gn_ls` des aktuellen Plays, falls Folge-Play im selben Drive bereits eine `yard_line` hat (außer FLAG).
- *   2) `gn_ls` des Vorgänger-Plays, falls Vorgänger im selben Drive eine `yard_line` hat (außer Vorgänger = FLAG).
- * - Bei RESULT = TD und gesetzter `yard_line` wird `gn_ls` automatisch bis zur Goalline berechnet.
+ * Schreibt eine Breakdown-Änderung inkl. automatischer GN/LS <-> YD LN Synchronisation.
  */
 export function wendeBreakdownUpdateMitAutoCalcAn(
   plays: Spielzug[],
@@ -325,18 +320,15 @@ export function wendeBreakdownUpdateMitAutoCalcAn(
 
   const istFlag = b.result?.toUpperCase() === 'FLAG';
 
-  // Bei Touchdown + vorhandener Yard-Line automatisch Yards bis zur Endzone setzen
   if (feldKey === 'result' && String(neuerWert ?? '').toUpperCase() === 'TD' && b.yard_line !== undefined) {
     b.gn_ls = 100 - yardLineZuAbsolut(b.yard_line);
     return geklont;
   }
 
-  // Bei INCOMPLETE automatisch GN/LS = 0 setzen (sofern nicht FLAG)
   if (feldKey === 'result' && String(neuerWert ?? '').toUpperCase() === 'INCOMPLETE') {
     b.gn_ls = 0;
   }
 
-  // Richtung 1: GN/LS geändert -> Yard-Line des nächsten Plays im selben Drive berechnen
   if (feldKey === 'gn_ls' && !istFlag && typeof neuerWert === 'number' && b.yard_line !== undefined) {
     const naechstes = geklont[index + 1];
     if (naechstes && (!b.odk || !naechstes.breakdown?.odk || naechstes.breakdown.odk === b.odk)) {
@@ -347,7 +339,6 @@ export function wendeBreakdownUpdateMitAutoCalcAn(
     }
   }
 
-  // Richtung 2: YD LN geändert -> GN/LS des vorherigen UND/ODER aktuellen Plays berechnen
   if (feldKey === 'yard_line' && typeof neuerWert === 'number') {
     const vorheriges = geklont[index - 1];
     if (

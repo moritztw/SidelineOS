@@ -1,13 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Eye, RotateCcw } from 'lucide-react';
 import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
 import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
-import { ModulePreviewView } from './core/hub/ModulePreviewView.tsx';
 import { SettingsHubView } from './core/settings/SettingsHubView.tsx';
 import { UserSettingsPage } from './core/settings/UserSettingsPage.tsx';
 import { TeamSettingsPage } from './core/settings/TeamSettingsPage.tsx';
 import { SysadminPage } from './core/settings/SysadminPage.tsx';
-import { ModulePlaceholderView } from './core/ModulePlaceholderView.tsx';
 import {
   INITIALE_BENUTZER,
   INITIALE_EINLADUNGEN,
@@ -17,100 +15,84 @@ import {
   INITIALE_TEAMS,
 } from './core/demoOrgData.ts';
 import {
-  STANDARD_AKTIVIERTE_MODULE,
-  istModulFuerTeamAktiv,
-} from './core/moduleRegistry.ts';
+  OFFIZIELLER_PLUGIN_KATALOG,
+  STANDARD_AKTIVIERTE_PLUGIN_IDS,
+  STANDARD_INSTALLIERTE_PLUGIN_IDS,
+} from './core/pluginStoreCatalog.ts';
 import {
-  filtereReelsNachSaison,
-  fuegeNeueSaisonHinzu,
-} from './core/seasonUtils.ts';
+  erstelleCustomPluginManifest,
+  findePlugin,
+  istPluginFuerTeamAktiv,
+} from './core/pluginRegistry.ts';
+import { fuegeNeueSaisonHinzu } from './core/seasonUtils.ts';
 import {
-  STANDARD_HOTKEYS,
-  STANDARD_NUTZER_EINSTELLUNGEN,
   darfAnsichtWechseln,
   ermittleWaehlbareTeamAnsichten,
 } from './core/rolePermissions.ts';
-import { DashboardView } from './modules/video-analysis/components/DashboardView.tsx';
-import { FilmRoomView } from './modules/video-analysis/components/FilmRoomView.tsx';
-import { INITIALE_DEMO_REELS } from './modules/video-analysis/data/demoReels.ts';
-import {
-  STANDARD_TAG_SCHEMA,
-  registriereDefinitionWennNeu,
-  wendeBreakdownUpdateMitAutoCalcAn,
-} from './modules/video-analysis/services/taggingEngine.ts';
+import { ladeInstalliertePlugins } from './plugins/pluginLoader.ts';
+import type {
+  PluginLaufzeitKontext,
+  PluginStoreEintrag,
+  SidelinePlugin,
+} from './sdk/plugin.ts';
 import type {
   BenutzerKonto,
   BenutzerProfil,
-  BreakdownFeldKey,
-  CanvasZeichnung,
-  CoachNotiz,
   CoreBereich,
-  ModulId,
-  NormPunkt,
-  NutzerEinstellungen,
+  PluginId,
   ProfilCustomFeld,
   S3Konfiguration,
-  ShareDownloadLink,
   SmtpKonfiguration,
-  SpielerFreigabe,
   SpielerUnit,
-  TagFeldKonfig,
   TeamEinladung,
-  TeamFreigabeEintrag,
   TeamKontext,
   TeamMitgliedschaft,
   TeamRolle,
-  VideoModulTab,
-  VideoReel,
 } from './shared/types.ts';
 import { DEMO_PROFILE, TEAM_ROLLEN_LABELS } from './shared/types.ts';
 
-const SETTINGS_STORAGE_KEY = 'sidelineos.user_settings.v1';
-
-function ladeNutzerEinstellungen(): NutzerEinstellungen {
-  try {
-    const roh = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!roh) return STANDARD_NUTZER_EINSTELLUNGEN;
-    const geparst = JSON.parse(roh) as Partial<NutzerEinstellungen>;
-    return {
-      ...STANDARD_NUTZER_EINSTELLUNGEN,
-      ...geparst,
-      hotkeys: {
-        ...STANDARD_HOTKEYS,
-        ...(geparst.hotkeys ?? {}),
-      },
-    };
-  } catch {
-    return STANDARD_NUTZER_EINSTELLUNGEN;
-  }
+/**
+ * Schachtelt alle optionalen React-Provider der installierten Plugins um den App-Kern,
+ * sodass jedes Plugin seinen eigenen Zustand unabhängig von `App.tsx` verwaltet.
+ */
+function PluginProviderStack({
+  plugins,
+  children,
+}: {
+  plugins: SidelinePlugin[];
+  children: ReactNode;
+}) {
+  return plugins.reduceRight<ReactNode>((acc, plugin) => {
+    const Provider = plugin.Provider;
+    return Provider ? <Provider>{acc}</Provider> : acc;
+  }, children);
 }
 
-function zaehleGetaggtePlays(reel: VideoReel): number {
-  return reel.plays.filter((play) => {
-    if (!play.breakdown) return false;
-    const hatStandard = Object.entries(play.breakdown).some(
-      ([k, v]) => k !== 'custom' && v !== undefined && v !== ''
-    );
-    const hatCustom =
-      play.breakdown.custom !== undefined &&
-      Object.values(play.breakdown.custom).some((v) => v !== undefined && v !== '');
-    return hatStandard || hatCustom;
-  }).length;
+interface SidelineShellProps {
+  storeKatalog: PluginStoreEintrag[];
+  installiertePlugins: SidelinePlugin[];
+  installiertePluginIds: PluginId[];
+  globalAktivierteModule: PluginId[];
+  onPluginInstallieren: (pluginId: PluginId) => void;
+  onPluginDeinstallieren: (pluginId: PluginId) => void;
+  onCustomGitHubPluginHinzufuegen: (repoUrl: string, slug: string) => void;
+  onGlobalModulToggle: (modulId: PluginId) => void;
 }
 
-function zaehleEntwuerfe(reel: VideoReel): number {
-  return reel.plays.reduce((summe, play) => {
-    const notes = (play.notes ?? []).filter((n) => n.status === 'DRAFT').length;
-    const drawings = (play.drawings ?? []).filter((d) => d.status === 'DRAFT').length;
-    return summe + notes + drawings;
-  }, 0);
-}
-
-export default function App() {
-  // Core-Navigation (Hub, Modul, zentrale Einstellungen)
+function SidelineCoreShell({
+  storeKatalog,
+  installiertePlugins,
+  installiertePluginIds,
+  globalAktivierteModule,
+  onPluginInstallieren,
+  onPluginDeinstallieren,
+  onCustomGitHubPluginHinzufuegen,
+  onGlobalModulToggle,
+}: SidelineShellProps) {
+  // Core-Navigation (Startseite, aktives Plugin, Plugin-Tab, zentrale Einstellungen)
   const [bereich, setBereich] = useState<CoreBereich>('hub');
-  const [aktivesModulId, setAktivesModulId] = useState<ModulId | null>(null);
-  const [videoTab, setVideoTab] = useState<VideoModulTab>('dashboard');
+  const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(null);
+  const [aktiverPluginTab, setAktiverPluginTab] = useState<string>('');
 
   // Konto & produktiver Rollen-Ansichtsumschalter
   const [kontoId, setKontoId] = useState<string>(DEMO_PROFILE[0].id);
@@ -118,10 +100,7 @@ export default function App() {
     DEMO_PROFILE[0].teamRolle
   );
 
-  // Core-Plattform-Zustand (Module, Teams, Benutzer, Mitgliedschaften, Einladungen, S3 & SMTP)
-  const [globalAktivierteModule, setGlobalAktivierteModule] = useState<ModulId[]>(
-    STANDARD_AKTIVIERTE_MODULE
-  );
+  // Core-Plattform-Zustand (Teams, Benutzer, Mitgliedschaften, Einladungen, S3 & SMTP)
   const [teams, setTeams] = useState<TeamKontext[]>(INITIALE_TEAMS);
   const [aktivesTeamId, setAktivesTeamId] = useState<string>(INITIALE_TEAMS[0].id);
   const [gewaehlteSaison, setGewaehlteSaison] = useState<string>(INITIALE_TEAMS[0].aktiveSaison);
@@ -132,17 +111,6 @@ export default function App() {
   const [einladungen, setEinladungen] = useState<TeamEinladung[]>(INITIALE_EINLADUNGEN);
   const [s3Konfig, setS3Konfig] = useState<S3Konfiguration>(INITIALE_S3_KONFIG);
   const [smtpKonfig, setSmtpKonfig] = useState<SmtpKonfiguration>(INITIALE_SMTP_KONFIG);
-
-  // Modul-Zustand: Videoanalyse
-  const [reels, setReels] = useState<VideoReel[]>(INITIALE_DEMO_REELS);
-  const [tagSchema, setTagSchema] = useState<TagFeldKonfig[]>(STANDARD_TAG_SCHEMA);
-  const [nutzerEinstellungen, setNutzerEinstellungen] = useState<NutzerEinstellungen>(
-    ladeNutzerEinstellungen
-  );
-  const [ausgewaehltesReelId, setAusgewaehltesReelId] = useState<string>(
-    INITIALE_DEMO_REELS[0].id
-  );
-  const [uploadHervorgehoben, setUploadHervorgehoben] = useState(false);
 
   const konto: BenutzerProfil = DEMO_PROFILE.find((p) => p.id === kontoId) ?? DEMO_PROFILE[0];
   const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0];
@@ -160,10 +128,31 @@ export default function App() {
     konto.teamRolle !== null &&
     aktiveTeamAnsicht !== konto.teamRolle;
 
-  const videoModulAktiv = istModulFuerTeamAktiv(
-    'video-analysis',
-    globalAktivierteModule,
-    aktivesTeam.aktivierteModule
+  const aktiveTeamPlugins = useMemo(
+    () =>
+      aktiveTeamAnsicht === null
+        ? []
+        : installiertePlugins.filter((plugin) =>
+            istPluginFuerTeamAktiv(
+              plugin.manifest.id,
+              installiertePluginIds,
+              globalAktivierteModule,
+              aktivesTeam.aktivierteModule
+            )
+          ),
+    [
+      aktiveTeamAnsicht,
+      installiertePlugins,
+      installiertePluginIds,
+      globalAktivierteModule,
+      aktivesTeam.aktivierteModule,
+    ]
+  );
+
+  const aktivesPlugin = useMemo(
+    () =>
+      findePlugin(aktiveTeamPlugins, aktivesPluginId) ?? null,
+    [aktiveTeamPlugins, aktivesPluginId]
   );
 
   const aktiveSaisonAuswahl =
@@ -171,55 +160,29 @@ export default function App() {
       ? gewaehlteSaison
       : aktivesTeam.aktiveSaison;
 
-  const sichtbareTeamReels = filtereReelsNachSaison(
-    reels.filter(
-      (r) =>
-        r.teamId === aktivesTeam.id &&
-        (aktiveTeamAnsicht === 'PLAYER' ? r.visibility !== 'COACHES_ONLY' : true)
-    ),
-    aktiveSaisonAuswahl
-  );
-
-  const ausgewaehltesReel =
-    sichtbareTeamReels.find((r) => r.id === ausgewaehltesReelId) ??
-    sichtbareTeamReels[0] ??
-    null;
-
   const ausstehendeAnfragenAnzahl = mitgliedschaften.filter(
     (m) => m.teamId === aktivesTeam.id && m.status === 'WARTET_AUF_FREIGABE'
   ).length;
 
-  const handleNutzerEinstellungenAendern = (neu: NutzerEinstellungen) => {
-    setNutzerEinstellungen(neu);
-    try {
-      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(neu));
-    } catch {
-      // Speicher im eingebetteten Kontext ggf. deaktiviert
-    }
-  };
-
   // --- Navigation ---
   const handleLogoKlick = () => {
-    setAktivesModulId(null);
+    setAktivesPluginId(null);
     setBereich(aktiveTeamAnsicht === null ? 'sysadmin' : 'hub');
   };
 
   const handleBereichWechseln = (ziel: CoreBereich) => {
     if (ziel !== 'modul') {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
     }
     setBereich(ziel);
   };
 
-  const handleModulOeffnen = (modulId: ModulId) => {
-    if (!istModulFuerTeamAktiv(modulId, globalAktivierteModule, aktivesTeam.aktivierteModule)) {
-      return;
-    }
-    setAktivesModulId(modulId);
+  const handleModulOeffnen = (pluginId: PluginId) => {
+    const ziel = findePlugin(aktiveTeamPlugins, pluginId);
+    if (!ziel) return;
+    setAktivesPluginId(pluginId);
+    setAktiverPluginTab(ziel.defaultTab);
     setBereich('modul');
-    if (modulId === 'video-analysis') {
-      setVideoTab('dashboard');
-    }
   };
 
   const handleKontoWechseln = (neueId: string) => {
@@ -229,22 +192,25 @@ export default function App() {
     setAktiveTeamAnsicht(neu.teamRolle);
 
     if (neu.teamRolle === null) {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
       setBereich('sysadmin');
       return;
     }
     if (!neu.istSysadmin && bereich === 'sysadmin') {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
       setBereich('hub');
       return;
     }
     if (neu.teamRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
       setBereich('hub');
       return;
     }
-    if (neu.teamRolle === 'PLAYER' && bereich === 'modul' && videoTab === 'cut-sync') {
-      setVideoTab('dashboard');
+    if (aktivesPlugin && bereich === 'modul') {
+      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: neu.teamRolle });
+      if (!erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
+        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab);
+      }
     }
   };
 
@@ -253,66 +219,25 @@ export default function App() {
     setAktiveTeamAnsicht(zielRolle);
 
     if (bereich === 'sysadmin') {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
       setBereich('hub');
       return;
     }
     if (zielRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
-      setAktivesModulId(null);
+      setAktivesPluginId(null);
       setBereich('hub');
       return;
     }
-    if (zielRolle === 'PLAYER' && bereich === 'modul' && videoTab === 'cut-sync') {
-      setVideoTab('dashboard');
-    }
-  };
-
-  const handlePrimaerAktion = () => {
-    if (bereich === 'modul' && aktivesModulId === 'video-analysis') {
-      if (aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN') {
-        setVideoTab('dashboard');
-        setUploadHervorgehoben(true);
-        setTimeout(() => {
-          document.getElementById('upload-panel')?.scrollIntoView({ behavior: 'smooth' });
-        }, 50);
-        setTimeout(() => setUploadHervorgehoben(false), 1800);
-      } else {
-        setVideoTab('film-room');
+    if (aktivesPlugin && bereich === 'modul') {
+      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: zielRolle });
+      if (!erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
+        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab);
       }
-      return;
-    }
-
-    if (bereich === 'modul') {
-      handleLogoKlick();
-      return;
-    }
-
-    if (aktiveTeamAnsicht === null) {
-      setBereich('sysadmin');
-      return;
-    }
-
-    if (videoModulAktiv) {
-      handleModulOeffnen('video-analysis');
-    } else {
-      setBereich('hub');
     }
   };
 
-  // --- Core-Stammdaten-Handler (Sysadmin / Team Admin / Profil) ---
-  const handleGlobalModulToggle = (modulId: ModulId) => {
-    setGlobalAktivierteModule((alt) => {
-      const aktiv = alt.includes(modulId);
-      const neu = aktiv ? alt.filter((id) => id !== modulId) : [...alt, modulId];
-      if (aktiv && aktivesModulId === modulId) {
-        setAktivesModulId(null);
-        setBereich('hub');
-      }
-      return neu;
-    });
-  };
-
-  const handleTeamModulToggle = (teamId: string, modulId: ModulId) => {
+  // --- Core-Stammdaten-Handler ---
+  const handleTeamModulToggle = (teamId: string, modulId: PluginId) => {
     setTeams((alt) =>
       alt.map((team) => {
         if (team.id !== teamId) return team;
@@ -458,239 +383,62 @@ export default function App() {
     );
   };
 
-  // --- Videoanalyse-Handler ---
-  const aktualisiereReel = (reelId: string, updater: (reel: VideoReel) => VideoReel) => {
-    setReels((alt) =>
-      alt.map((reel) => {
-        if (reel.id !== reelId) return reel;
-        const neu = updater(reel);
-        return {
-          ...neu,
-          playCount: neu.plays.length,
-          taggedCount: zaehleGetaggtePlays(neu),
-          draftNoteCount: zaehleEntwuerfe(neu),
-        };
-      })
-    );
+  const handleDeinstallierenMitRuecksprung = (pluginId: PluginId) => {
+    if (aktivesPluginId === pluginId) {
+      setAktivesPluginId(null);
+      setBereich('sysadmin');
+    }
+    onPluginDeinstallieren(pluginId);
   };
 
-  const handleNeuesReel = (neuesReel: VideoReel) => {
-    setReels((alt) => [neuesReel, ...alt]);
-    setAusgewaehltesReelId(neuesReel.id);
+  const handleGlobalToggleMitRuecksprung = (pluginId: PluginId) => {
+    if (aktivesPluginId === pluginId && globalAktivierteModule.includes(pluginId)) {
+      setAktivesPluginId(null);
+      setBereich('hub');
+    }
+    onGlobalModulToggle(pluginId);
   };
 
-  const handleFreigabeAendern = (reelId: string, freigabe: SpielerFreigabe) => {
-    aktualisiereReel(reelId, (reel) => ({ ...reel, visibility: freigabe }));
-  };
-
-  const handleTeamFreigabenAendern = (reelId: string, teamFreigaben: TeamFreigabeEintrag[]) => {
-    aktualisiereReel(reelId, (reel) => ({ ...reel, teamFreigaben }));
-  };
-
-  const handleShareLinksAendern = (reelId: string, shareLinks: ShareDownloadLink[]) => {
-    aktualisiereReel(reelId, (reel) => ({ ...reel, shareLinks }));
-  };
-
-  const handleFeldAendern = (
-    reelId: string,
-    playNumber: number,
-    feldKey: BreakdownFeldKey,
-    wert: string | number | undefined,
-    istCustom: boolean
-  ) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: wendeBreakdownUpdateMitAutoCalcAn(reel.plays, playNumber, feldKey, wert, istCustom),
-    }));
-  };
-
-  const handleDefinitionLernen = (feldKey: BreakdownFeldKey, begriff: string) => {
-    setTagSchema((alt) => registriereDefinitionWennNeu(alt, feldKey, begriff));
-  };
-
-  const handleFeldToggle = (feldKey: BreakdownFeldKey) => {
-    setTagSchema((alt) =>
-      alt.map((f) => (f.key === feldKey ? { ...f, aktiv: !f.aktiv } : f))
-    );
-  };
-
-  const handleDefinitionLoeschen = (feldKey: BreakdownFeldKey, begriff: string) => {
-    setTagSchema((alt) =>
-      alt.map((f) =>
-        f.key === feldKey
-          ? { ...f, definitionen: (f.definitionen ?? []).filter((d) => d !== begriff) }
-          : f
-      )
-    );
-  };
-
-  const handleCustomFeldErstellen = (neuesFeld: TagFeldKonfig) => {
-    setTagSchema((alt) => [...alt, neuesFeld]);
-  };
-
-  const handleCustomFeldLoeschen = (feldKey: BreakdownFeldKey) => {
-    setTagSchema((alt) => alt.filter((f) => f.key !== feldKey));
-  };
-
-  const handleNotizHinzufuegen = (reelId: string, playNumber: number, notiz: CoachNotiz) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? { ...play, notes: [...(play.notes ?? []), notiz] }
-          : play
-      ),
-    }));
-  };
-
-  const handleNotizBearbeiten = (
-    reelId: string,
-    playNumber: number,
-    notizId: string,
-    neuerText: string
-  ) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? {
-              ...play,
-              notes: (play.notes ?? []).map((n) =>
-                n.id === notizId ? { ...n, text: neuerText } : n
-              ),
-            }
-          : play
-      ),
-    }));
-  };
-
-  const handleNotizLoeschen = (reelId: string, playNumber: number, notizId: string) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? {
-              ...play,
-              notes: (play.notes ?? []).filter((n) => n.id !== notizId),
-            }
-          : play
-      ),
-    }));
-  };
-
-  const handleZeichnungHinzufuegen = (
-    reelId: string,
-    playNumber: number,
-    zeichnung: CanvasZeichnung
-  ) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? { ...play, drawings: [...(play.drawings ?? []), zeichnung] }
-          : play
-      ),
-    }));
-  };
-
-  const handleZeichnungAktualisieren = (
-    reelId: string,
-    playNumber: number,
-    zeichnungId: string,
-    punkte: NormPunkt[]
-  ) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? {
-              ...play,
-              drawings: (play.drawings ?? []).map((d) =>
-                d.id === zeichnungId ? { ...d, punkte } : d
-              ),
-            }
-          : play
-      ),
-    }));
-  };
-
-  const handleZeichnungEntfernen = (
-    reelId: string,
-    playNumber: number,
-    zeichnungId: string
-  ) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? { ...play, drawings: (play.drawings ?? []).filter((d) => d.id !== zeichnungId) }
-          : play
-      ),
-    }));
-  };
-
-  const handleLetzteZeichnungEntfernen = (reelId: string, playNumber: number, angle: string) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) => {
-        if (play.play_number !== playNumber) return play;
-        const liste = [...(play.drawings ?? [])];
-        for (let i = liste.length - 1; i >= 0; i -= 1) {
-          if (liste[i].angle === angle) {
-            liste.splice(i, 1);
-            break;
-          }
+  // Plugin-Laufzeitkontext nur konstruieren, wenn ein Plugin aktiv angezeigt werden kann
+  const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
+    bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null
+      ? {
+          team: aktivesTeam,
+          aktiveTeamAnsicht,
+          gewaehlteSaison: aktiveSaisonAuswahl,
+          benutzer: aktuellerBenutzer,
+          aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab,
+          onTabWechseln: setAktiverPluginTab,
+          onTeamSettingsOeffnen: () => {
+            setAktivesPluginId(null);
+            setBereich('team-settings');
+          },
+          onZurueckZurStartseite: handleLogoKlick,
         }
-        return { ...play, drawings: liste };
-      }),
-    }));
-  };
+      : null;
 
-  const handleAlleZeichnungenLeeren = (reelId: string, playNumber: number, angle: string) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) =>
-        play.play_number === playNumber
-          ? { ...play, drawings: (play.drawings ?? []).filter((d) => d.angle !== angle) }
-          : play
-      ),
-    }));
-  };
-
-  const handleSessionVeroeffentlichen = (reelId: string) => {
-    aktualisiereReel(reelId, (reel) => ({
-      ...reel,
-      plays: reel.plays.map((play) => ({
-        ...play,
-        notes: play.notes?.map((n) => ({ ...n, status: 'PUBLISHED' as const })),
-        drawings: play.drawings?.map((d) => ({ ...d, status: 'PUBLISHED' as const })),
-      })),
-    }));
-  };
-
-  const handleReelOeffnen = (reel: VideoReel) => {
-    setAusgewaehltesReelId(reel.id);
-    setAktivesModulId('video-analysis');
-    setBereich('modul');
-    setVideoTab('film-room');
-  };
+  const pluginTabs =
+    pluginLaufzeitKontext && aktivesPlugin
+      ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht })
+      : [];
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
       <CoreTopBar
         bereich={bereich}
-        aktivesModulId={aktivesModulId}
-        videoTab={videoTab}
+        aktivesPlugin={aktivesPlugin}
+        pluginTabs={pluginTabs}
+        aktiverPluginTab={pluginLaufzeitKontext?.aktuellerTab ?? ''}
+        pluginLaufzeitKontext={pluginLaufzeitKontext}
         konto={konto}
         aktiveTeamAnsicht={aktiveTeamAnsicht}
         ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
         onLogoKlick={handleLogoKlick}
         onBereichWechseln={handleBereichWechseln}
-        onVideoTabWechseln={setVideoTab}
-        onPrimaerAktion={handlePrimaerAktion}
+        onPluginTabWechseln={setAktiverPluginTab}
       />
 
-      {/* Kontext-Leiste: Team-Wahl, produktiver Ansichts-Umschalter (nur bei Rollen unter sich) & Demo-Konto */}
+      {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter & Demo-Konto */}
       <div className="border-b border-[#232933] bg-[#0F1318]">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex flex-wrap items-center gap-3">
@@ -816,13 +564,19 @@ export default function App() {
       <main className="mx-auto max-w-[1440px] px-6 py-6">
         {bereich === 'sysadmin' && konto.istSysadmin ? (
           <SysadminPage
+            storeKatalog={storeKatalog}
+            installiertePlugins={installiertePlugins}
+            installiertePluginIds={installiertePluginIds}
             globalAktivierteModule={globalAktivierteModule}
             teams={teams}
             benutzerListe={benutzerListe}
             mitgliedschaften={mitgliedschaften}
             s3Konfig={s3Konfig}
             smtpKonfig={smtpKonfig}
-            onGlobalModulToggle={handleGlobalModulToggle}
+            onPluginInstallieren={onPluginInstallieren}
+            onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
+            onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
+            onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
             onTeamLoeschen={handleTeamLoeschen}
@@ -839,13 +593,19 @@ export default function App() {
           />
         ) : aktiveTeamAnsicht === null ? (
           <SysadminPage
+            storeKatalog={storeKatalog}
+            installiertePlugins={installiertePlugins}
+            installiertePluginIds={installiertePluginIds}
             globalAktivierteModule={globalAktivierteModule}
             teams={teams}
             benutzerListe={benutzerListe}
             mitgliedschaften={mitgliedschaften}
             s3Konfig={s3Konfig}
             smtpKonfig={smtpKonfig}
-            onGlobalModulToggle={handleGlobalModulToggle}
+            onPluginInstallieren={onPluginInstallieren}
+            onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
+            onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
+            onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
             onTeamLoeschen={handleTeamLoeschen}
@@ -857,9 +617,8 @@ export default function App() {
           />
         ) : bereich === 'hub' ? (
           <SidelineHubView
-            team={aktivesTeam}
+            aktivePlugins={aktiveTeamPlugins}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
-            globalAktivierteModule={globalAktivierteModule}
             ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
             onModulOeffnen={handleModulOeffnen}
             onBereichOeffnen={handleBereichWechseln}
@@ -879,20 +638,20 @@ export default function App() {
             team={aktivesTeam}
             mitgliedschaft={aktuelleMitgliedschaft}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
-            videoModulAktiv={videoModulAktiv}
-            einstellungen={nutzerEinstellungen}
+            s3Konfig={s3Konfig}
+            aktivePlugins={aktiveTeamPlugins}
             onBenutzerAktualisieren={handleBenutzerAktualisieren}
-            onEinstellungenAendern={handleNutzerEinstellungenAendern}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
           <TeamSettingsPage
             team={aktivesTeam}
+            benutzer={aktuellerBenutzer}
             benutzerListe={benutzerListe}
             mitgliedschaften={mitgliedschaften}
             einladungen={einladungen}
-            videoModulAktiv={videoModulAktiv}
-            tagSchema={tagSchema}
+            s3Konfig={s3Konfig}
+            aktivePlugins={aktiveTeamPlugins}
             onTeamAktualisieren={handleTeamAktualisieren}
             onNeueSaisonStarten={handleNeueSaisonStarten}
             onMitgliedRolleAendern={handleMitgliedRolleAendern}
@@ -903,75 +662,14 @@ export default function App() {
             onEinladungWiderrufen={handleEinladungWiderrufen}
             onProfilCustomFeldHinzufuegen={handleProfilCustomFeldHinzufuegen}
             onProfilCustomFeldLoeschen={handleProfilCustomFeldLoeschen}
-            onTagFeldToggle={handleFeldToggle}
-            onTagDefinitionHinzufuegen={handleDefinitionLernen}
-            onTagDefinitionLoeschen={handleDefinitionLoeschen}
-            onTagCustomFeldErstellen={handleCustomFeldErstellen}
-            onTagCustomFeldLoeschen={handleCustomFeldLoeschen}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
-        ) : bereich === 'modul' && aktivesModulId === 'video-analysis' && videoModulAktiv ? (
-          videoTab === 'dashboard' ? (
-            <DashboardView
-              teamId={aktivesTeam.id}
-              gewaehlteSaison={aktiveSaisonAuswahl}
-              teamAktiveSaison={aktivesTeam.aktiveSaison}
-              teamRolle={aktiveTeamAnsicht}
-              tagSchema={tagSchema}
-              reels={reels}
-              uploadHervorgehoben={uploadHervorgehoben}
-              onNeuesReel={handleNeuesReel}
-              onFreigabeAendern={handleFreigabeAendern}
-              onTeamFreigabenAendern={handleTeamFreigabenAendern}
-              onShareLinksAendern={handleShareLinksAendern}
-              onReelOeffnen={handleReelOeffnen}
-            />
-          ) : videoTab === 'film-room' && ausgewaehltesReel ? (
-            <FilmRoomView
-              key={ausgewaehltesReel.id}
-              reel={ausgewaehltesReel}
-              teamRolle={aktiveTeamAnsicht}
-              tagSchema={tagSchema}
-              nutzerEinstellungen={nutzerEinstellungen}
-              onZurueck={() => setVideoTab('dashboard')}
-              onSchemaSettingsOeffnen={() => {
-                setAktivesModulId(null);
-                setBereich('team-settings');
-              }}
-              onFreigabeAendern={handleFreigabeAendern}
-              onFeldAendern={handleFeldAendern}
-              onDefinitionLernen={handleDefinitionLernen}
-              onNotizHinzufuegen={handleNotizHinzufuegen}
-              onNotizBearbeiten={handleNotizBearbeiten}
-              onNotizLoeschen={handleNotizLoeschen}
-              onZeichnungHinzufuegen={handleZeichnungHinzufuegen}
-              onZeichnungAktualisieren={handleZeichnungAktualisieren}
-              onZeichnungEntfernen={handleZeichnungEntfernen}
-              onLetzteZeichnungEntfernen={handleLetzteZeichnungEntfernen}
-              onAlleZeichnungenLeeren={handleAlleZeichnungenLeeren}
-              onSessionVeroeffentlichen={handleSessionVeroeffentlichen}
-            />
-          ) : (
-            <ModulePlaceholderView
-              ansicht={videoTab === 'playlists' ? 'playlists' : 'cut-sync'}
-              ausgewaehltesReel={ausgewaehltesReel}
-              onZurueckZumDashboard={() => setVideoTab('dashboard')}
-            />
-          )
-        ) : bereich === 'modul' &&
-          aktivesModulId &&
-          aktivesModulId !== 'video-analysis' &&
-          istModulFuerTeamAktiv(
-            aktivesModulId,
-            globalAktivierteModule,
-            aktivesTeam.aktivierteModule
-          ) ? (
-          <ModulePreviewView modulId={aktivesModulId} onZurUebersicht={handleLogoKlick} />
+        ) : bereich === 'modul' && aktivesPlugin && pluginLaufzeitKontext ? (
+          aktivesPlugin.renderMainView(pluginLaufzeitKontext)
         ) : (
           <SidelineHubView
-            team={aktivesTeam}
+            aktivePlugins={aktiveTeamPlugins}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
-            globalAktivierteModule={globalAktivierteModule}
             ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
             onModulOeffnen={handleModulOeffnen}
             onBereichOeffnen={handleBereichWechseln}
@@ -979,5 +677,67 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function App() {
+  const [storeKatalog, setStoreKatalog] = useState<PluginStoreEintrag[]>(
+    OFFIZIELLER_PLUGIN_KATALOG
+  );
+  const [installiertePluginIds, setInstalliertePluginIds] = useState<PluginId[]>(
+    STANDARD_INSTALLIERTE_PLUGIN_IDS
+  );
+  const [globalAktivierteModule, setGlobalAktivierteModule] = useState<PluginId[]>(
+    STANDARD_AKTIVIERTE_PLUGIN_IDS
+  );
+
+  const installiertePlugins = useMemo(
+    () => ladeInstalliertePlugins(storeKatalog, installiertePluginIds),
+    [storeKatalog, installiertePluginIds]
+  );
+
+  const handlePluginInstallieren = (pluginId: PluginId) => {
+    setInstalliertePluginIds((alt) => (alt.includes(pluginId) ? alt : [...alt, pluginId]));
+    setGlobalAktivierteModule((alt) => (alt.includes(pluginId) ? alt : [...alt, pluginId]));
+  };
+
+  const handlePluginDeinstallieren = (pluginId: PluginId) => {
+    setInstalliertePluginIds((alt) => alt.filter((id) => id !== pluginId));
+    setGlobalAktivierteModule((alt) => alt.filter((id) => id !== pluginId));
+  };
+
+  const handleCustomGitHubPluginHinzufuegen = (repoUrl: string, slug: string) => {
+    const manifest = erstelleCustomPluginManifest(repoUrl, slug);
+    const eintrag: PluginStoreEintrag = {
+      manifest,
+      quelle: 'CUSTOM_GITHUB',
+      verifiziert: false,
+      releaseTag: 'main',
+      paketFormat: 'sideline-plugin-v1',
+    };
+    setStoreKatalog((alt) => [...alt, eintrag]);
+    setInstalliertePluginIds((alt) => [...alt, manifest.id]);
+    setGlobalAktivierteModule((alt) => [...alt, manifest.id]);
+  };
+
+  const handleGlobalModulToggle = (modulId: PluginId) => {
+    setGlobalAktivierteModule((alt) =>
+      alt.includes(modulId) ? alt.filter((id) => id !== modulId) : [...alt, modulId]
+    );
+  };
+
+  return (
+    <PluginProviderStack plugins={installiertePlugins}>
+      <SidelineCoreShell
+        storeKatalog={storeKatalog}
+        installiertePlugins={installiertePlugins}
+        installiertePluginIds={installiertePluginIds}
+        globalAktivierteModule={globalAktivierteModule}
+        onPluginInstallieren={handlePluginInstallieren}
+        onPluginDeinstallieren={handlePluginDeinstallieren}
+        onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
+        onGlobalModulToggle={handleGlobalModulToggle}
+      />
+    </PluginProviderStack>
   );
 }

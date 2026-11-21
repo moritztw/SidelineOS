@@ -14,26 +14,26 @@ import {
 } from 'lucide-react';
 import type {
   BenutzerKonto,
-  BreakdownFeldKey,
   ProfilCustomFeld,
+  S3Konfiguration,
   SpielerUnit,
-  TagFeldKonfig,
   TeamEinladung,
   TeamKontext,
   TeamMitgliedschaft,
   TeamRolle,
 } from '../../shared/types.ts';
 import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
-import { TaggingSchemaSettings } from '../../modules/video-analysis/components/TaggingSchemaSettings.tsx';
+import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
 interface TeamSettingsPageProps {
   team: TeamKontext;
+  benutzer: BenutzerKonto;
   benutzerListe: BenutzerKonto[];
   mitgliedschaften: TeamMitgliedschaft[];
   einladungen: TeamEinladung[];
-  videoModulAktiv: boolean;
-  tagSchema: TagFeldKonfig[];
+  s3Konfig: S3Konfiguration;
+  aktivePlugins: SidelinePlugin[];
   onTeamAktualisieren: (team: TeamKontext) => void;
   onNeueSaisonStarten: (teamId: string, neueSaison: string) => void;
   onMitgliedRolleAendern: (mitgliedschaftId: string, rolle: TeamRolle) => void;
@@ -44,12 +44,6 @@ interface TeamSettingsPageProps {
   onEinladungWiderrufen: (einladungId: string) => void;
   onProfilCustomFeldHinzufuegen: (teamId: string, feld: ProfilCustomFeld) => void;
   onProfilCustomFeldLoeschen: (teamId: string, key: string) => void;
-  // Videoanalyse-Modul-Callbacks
-  onTagFeldToggle: (feldKey: BreakdownFeldKey) => void;
-  onTagDefinitionHinzufuegen: (feldKey: BreakdownFeldKey, begriff: string) => void;
-  onTagDefinitionLoeschen: (feldKey: BreakdownFeldKey, begriff: string) => void;
-  onTagCustomFeldErstellen: (feld: TagFeldKonfig) => void;
-  onTagCustomFeldLoeschen: (feldKey: BreakdownFeldKey) => void;
   onZurueck?: () => void;
 }
 
@@ -58,11 +52,12 @@ const ALLE_ROLLEN: TeamRolle[] = ['TEAM_ADMIN', 'COACH', 'PLAYER'];
 
 export function TeamSettingsPage({
   team,
+  benutzer,
   benutzerListe,
   mitgliedschaften,
   einladungen,
-  videoModulAktiv,
-  tagSchema,
+  s3Konfig,
+  aktivePlugins,
   onTeamAktualisieren,
   onNeueSaisonStarten,
   onMitgliedRolleAendern,
@@ -73,14 +68,8 @@ export function TeamSettingsPage({
   onEinladungWiderrufen,
   onProfilCustomFeldHinzufuegen,
   onProfilCustomFeldLoeschen,
-  onTagFeldToggle,
-  onTagDefinitionHinzufuegen,
-  onTagDefinitionLoeschen,
-  onTagCustomFeldErstellen,
-  onTagCustomFeldLoeschen,
   onZurueck,
 }: TeamSettingsPageProps) {
-  // Team-Stammdaten & Saisons
   const [teamName, setTeamName] = useState(team.name);
   const [aktiveSaison, setAktiveSaison] = useState(team.aktiveSaison);
   const [neueSaisonEingabe, setNeueSaisonEingabe] = useState('');
@@ -88,7 +77,6 @@ export function TeamSettingsPage({
   const [primaerFarbe, setPrimaerFarbe] = useState(team.primaerFarbe ?? '#F59E0B');
   const [teamHinweis, setTeamHinweis] = useState<string | null>(null);
 
-  // Einladungen (E-Mail & Team-Link)
   const [mailAdresse, setMailAdresse] = useState('');
   const [mailRolle, setMailRolle] = useState<TeamRolle>('PLAYER');
   const [mailUnits, setMailUnits] = useState<SpielerUnit[]>(['OFFENSE']);
@@ -98,7 +86,6 @@ export function TeamSettingsPage({
   const [kopiertId, setKopiertId] = useState<string | null>(null);
   const [einladungHinweis, setEinladungHinweis] = useState<string | null>(null);
 
-  // Spieler-Profil Custom-Felder
   const [profilFeldLabel, setProfilFeldLabel] = useState('');
   const [profilFeldTyp, setProfilFeldTyp] = useState<ProfilCustomFeld['typ']>('text');
   const [profilFeldPflicht, setProfilFeldPflicht] = useState(false);
@@ -248,18 +235,29 @@ export function TeamSettingsPage({
     { id: 'team-profilfelder', label: 'Spieler-Custom-Felder', gruppe: 'Team-Verwaltung' },
   ];
 
-  if (videoModulAktiv) {
-    kategorien.push({
-      id: 'modul-video-tagging',
-      label: 'Tagging-Schema & Wörterbuch',
-      gruppe: 'Modul: Videoanalyse',
-    });
+  const pluginsMitTeamPanel = aktivePlugins.filter((p) => Boolean(p.settingsPanels?.team));
+  for (const plugin of pluginsMitTeamPanel) {
+    for (const anker of plugin.manifest.settingsAnker.team ?? []) {
+      kategorien.push({
+        id: anker.id,
+        label: anker.label,
+        gruppe: `Plugin: ${plugin.manifest.name}`,
+        badge: anker.badge,
+      });
+    }
   }
+
+  const settingsKontext: PluginSettingsKontext = {
+    team,
+    benutzer,
+    aktiveTeamAnsicht: 'TEAM_ADMIN',
+    s3Konfig,
+  };
 
   return (
     <SettingsShell
       titel={`Team-Einstellungen · ${team.name}`}
-      untertitel="Zentrale Team-Admin-Verwaltung für Saisons, Mitglieder, Multi-Units, Einladungen inkl. Freigabe-Warteliste, Spieler-Custom-Felder sowie teamweite Modul-Konfigurationen."
+      untertitel="Zentrale Team-Admin-Verwaltung für Saisons, Mitglieder, Multi-Units, Einladungen inkl. Freigabe-Warteliste, Spieler-Custom-Felder sowie Plugin-Konfigurationen."
       kategorien={kategorien}
       zurueckLabel="Alle Einstellungen"
       onZurueck={onZurueck}
@@ -312,7 +310,6 @@ export function TeamSettingsPage({
           </label>
         </div>
 
-        {/* Neue Saison starten (ohne Team neu anzulegen) */}
         <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-white">
@@ -487,7 +484,7 @@ export function TeamSettingsPage({
         </div>
       </section>
 
-      {/* 3. Einladungen (E-Mail + Team-Link) & Bestätigungs-Warteliste */}
+      {/* 3. Einladungen & Bestätigungs-Warteliste */}
       <section
         id="team-einladungen"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
@@ -502,7 +499,6 @@ export function TeamSettingsPage({
           </p>
         </div>
 
-        {/* Ausstehende Freigaben */}
         <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-semibold text-[#F59E0B]">
             <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
@@ -583,9 +579,7 @@ export function TeamSettingsPage({
           )}
         </div>
 
-        {/* Zwei Einladungswege nebeneinander */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          {/* Weg 1: Direkte E-Mail-Einladung */}
           <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-white">
               <Mail className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
@@ -638,7 +632,6 @@ export function TeamSettingsPage({
             </button>
           </div>
 
-          {/* Weg 2: Teilbarer Team-Einladungslink */}
           <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-white">
               <Link2 className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
@@ -693,7 +686,6 @@ export function TeamSettingsPage({
           </div>
         )}
 
-        {/* Aktive Einladungslinks */}
         {teamEinladungen.length > 0 && (
           <div className="space-y-1.5">
             <div className="text-xs font-medium text-[#8B949E]">Aktive Einladungen</div>
@@ -851,20 +843,11 @@ export function TeamSettingsPage({
         </div>
       </section>
 
-      {/* 5. Dynamischer Modul-Beitrag: Videoanalyse Tagging-Schema */}
-      {videoModulAktiv && (
-        <div id="modul-video-tagging" className="scroll-mt-20">
-          <TaggingSchemaSettings
-            teamRolle="TEAM_ADMIN"
-            tagSchema={tagSchema}
-            onFeldToggle={onTagFeldToggle}
-            onDefinitionHinzufuegen={onTagDefinitionHinzufuegen}
-            onDefinitionLoeschen={onTagDefinitionLoeschen}
-            onCustomFeldErstellen={onTagCustomFeldErstellen}
-            onCustomFeldLoeschen={onTagCustomFeldLoeschen}
-          />
-        </div>
-      )}
+      {/* 5. Dynamische Team-Einstellungs-Panels aller aktiven Plugins */}
+      {pluginsMitTeamPanel.map((plugin) => {
+        const TeamPanel = plugin.settingsPanels!.team!;
+        return <TeamPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+      })}
     </SettingsShell>
   );
 }

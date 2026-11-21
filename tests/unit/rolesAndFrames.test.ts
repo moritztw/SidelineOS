@@ -1,16 +1,18 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  darfAnsichtWechseln,
+  ermittleWaehlbareTeamAnsichten,
+} from '../../src/core/rolePermissions.ts';
+import {
   FRAME_MS,
   STANDARD_HOTKEYS,
   aktualisiereBenutzerHotkey,
-  darfAnsichtWechseln,
-  ermittleWaehlbareTeamAnsichten,
   findeNaechstenAutoStopFrame,
   frameZuZeit,
   istGleicherFrame,
   zeitZuFrame,
-} from '../../src/core/rolePermissions.ts';
+} from '../../src/plugins/video-analysis/services/frameAndHotkeys.ts';
 import { DEMO_PROFILE } from '../../src/shared/types.ts';
 
 describe('Rollen-Hierarchie & Ansichts-Umschalter', () => {

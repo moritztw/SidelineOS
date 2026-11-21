@@ -1,23 +1,5 @@
-import type { TeamKontext, VideoReel } from '../shared/types.ts';
-
-/**
- * Ermittelt die zugehörige Saison eines Reels.
- * Nutzt das explizite Feld `saison` oder leitet das Jahr aus `eventDate` ab.
- */
-export function ermittleReelSaison(reel: Pick<VideoReel, 'saison' | 'eventDate'>): string {
-  const explizit = reel.saison?.trim();
-  if (explizit) return explizit;
-  return reel.eventDate.slice(0, 4);
-}
-
-/**
- * Filtert Reels nach einer konkreten Saison (z. B. "2026" oder "2025").
- * Der Wert "ALL" liefert alle Saisons ungefiltert zurück.
- */
-export function filtereReelsNachSaison(reels: VideoReel[], saison: string): VideoReel[] {
-  if (!saison || saison === 'ALL') return reels;
-  return reels.filter((reel) => ermittleReelSaison(reel) === saison);
-}
+import type { TeamKontext } from '../shared/types.ts';
+export { ermittleEintragSaison, filtereNachSaison } from '../sdk/plugin.ts';
 
 /**
  * Startet eine neue Saison für ein dauerhaft bestehendes Team,

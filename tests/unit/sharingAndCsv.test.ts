@@ -5,8 +5,8 @@ import {
   filtereBundleFuerFreigabe,
   generiereShareLinkPfad,
   istShareLinkGueltig,
-} from '../../src/modules/video-analysis/services/bundleSchema.ts';
-import { INITIALE_DEMO_REELS } from '../../src/modules/video-analysis/data/demoReels.ts';
+} from '../../src/plugins/video-analysis/services/bundleSchema.ts';
+import { INITIALE_DEMO_REELS } from '../../src/plugins/video-analysis/data/demoReels.ts';
 
 test('filtereBundleFuerFreigabe gibt nur gewählte Tagging-Felder frei und schützt Notizen/Zeichnungen', () => {
   const reel = INITIALE_DEMO_REELS[0];

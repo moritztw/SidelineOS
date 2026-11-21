@@ -1,5 +1,4 @@
-import type { VideoReel } from '../../../shared/types.ts';
-export { INITIALE_TEAMS as DEMO_TEAMS } from '../../../core/demoOrgData.ts';
+import type { VideoReel } from '../types.ts';
 
 export const THUMB_SIDELINE = '/src/assets/images/film_thumb_sideline_game_1795162829101.jpg';
 export const THUMB_ENDZONE = '/src/assets/images/film_thumb_endzone_practice_1795162830601.jpg';

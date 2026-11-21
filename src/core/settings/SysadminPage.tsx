@@ -2,18 +2,21 @@ import { useState } from 'react';
 import {
   Blocks,
   Building2,
+  CheckCircle2,
+  Download,
+  ExternalLink,
   HardDrive,
   Mail,
   Plus,
-  RotateCcw,
   ShieldAlert,
+  Store,
   Terminal,
   Trash2,
   UserPlus,
 } from 'lucide-react';
 import type {
   BenutzerKonto,
-  ModulId,
+  PluginId,
   S3Konfiguration,
   SmtpKonfiguration,
   TeamKontext,
@@ -21,43 +24,30 @@ import type {
   TeamRolle,
 } from '../../shared/types.ts';
 import { TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
-import { SIDELINE_MODULE_REGISTRY } from '../moduleRegistry.ts';
+import {
+  PERMISSION_BESCHREIBUNGEN,
+  type PluginSettingsKontext,
+  type PluginStoreEintrag,
+  type SidelinePlugin,
+} from '../../sdk/plugin.ts';
+import { parseGitHubPluginQuelle } from '../pluginRegistry.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
-interface CleanupEintrag {
-  id: string;
-  assetPfad: string;
-  groesseGb: number;
-  geplanteLoeschung: string;
-  restTage: number;
-}
-
-const INITIALE_QUEUE: CleanupEintrag[] = [
-  {
-    id: 'gc-1',
-    assetPfad: 'assets/reels/a8f12c90-4b21/clips/',
-    groesseGb: 3.4,
-    geplanteLoeschung: '04.12.2026',
-    restTage: 14,
-  },
-  {
-    id: 'gc-2',
-    assetPfad: 'assets/reels/d390e112-90ab/raw_source.mp4',
-    groesseGb: 8.7,
-    geplanteLoeschung: '22.11.2026',
-    restTage: 2,
-  },
-];
-
 interface SysadminPageProps {
-  globalAktivierteModule: ModulId[];
+  storeKatalog: PluginStoreEintrag[];
+  installiertePlugins: SidelinePlugin[];
+  installiertePluginIds: PluginId[];
+  globalAktivierteModule: PluginId[];
   teams: TeamKontext[];
   benutzerListe: BenutzerKonto[];
   mitgliedschaften: TeamMitgliedschaft[];
   s3Konfig: S3Konfiguration;
   smtpKonfig: SmtpKonfiguration;
-  onGlobalModulToggle: (modulId: ModulId) => void;
-  onTeamModulToggle: (teamId: string, modulId: ModulId) => void;
+  onPluginInstallieren: (pluginId: PluginId) => void;
+  onPluginDeinstallieren: (pluginId: PluginId) => void;
+  onCustomGitHubPluginHinzufuegen: (repoUrl: string, slug: string) => void;
+  onGlobalModulToggle: (modulId: PluginId) => void;
+  onTeamModulToggle: (teamId: string, modulId: PluginId) => void;
   onTeamErstellen: (team: TeamKontext) => void;
   onTeamLoeschen: (teamId: string) => void;
   onBenutzerErstellen: (
@@ -72,12 +62,18 @@ interface SysadminPageProps {
 }
 
 export function SysadminPage({
+  storeKatalog,
+  installiertePlugins,
+  installiertePluginIds,
   globalAktivierteModule,
   teams,
   benutzerListe,
   mitgliedschaften,
   s3Konfig,
   smtpKonfig,
+  onPluginInstallieren,
+  onPluginDeinstallieren,
+  onCustomGitHubPluginHinzufuegen,
   onGlobalModulToggle,
   onTeamModulToggle,
   onTeamErstellen,
@@ -89,6 +85,11 @@ export function SysadminPage({
   onSmtpSpeichern,
   onZurueck,
 }: SysadminPageProps) {
+  // Plugin Store (Custom GitHub-Repo)
+  const [githubUrl, setGithubUrl] = useState('');
+  const [storeFehler, setStoreFehler] = useState<string | null>(null);
+  const [storeHinweis, setStoreHinweis] = useState<string | null>(null);
+
   // Neues Team
   const [neuesTeamName, setNeuesTeamName] = useState('');
   const [neuesTeamSaison, setNeuesTeamSaison] = useState('2026');
@@ -109,15 +110,21 @@ export function SysadminPage({
   const [smtpForm, setSmtpForm] = useState<SmtpKonfiguration>(smtpKonfig);
   const [smtpStatus, setSmtpStatus] = useState<string | null>(null);
 
-  // S3-Cleanup-Queue (Videoanalyse-Beitrag)
-  const [retentionTage, setRetentionTage] = useState<number>(14);
-  const [queue, setQueue] = useState<CleanupEintrag[]>(INITIALE_QUEUE);
-  const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
-
-  const videoGlobalAktiv = globalAktivierteModule.includes('video-analysis');
+  const globalAktivePlugins = installiertePlugins.filter((p) =>
+    globalAktivierteModule.includes(p.manifest.id)
+  );
+  const pluginsMitSysadminPanel = globalAktivePlugins.filter((p) =>
+    Boolean(p.settingsPanels?.sysadmin)
+  );
 
   const kategorien: SettingsKategorie[] = [
-    { id: 'sys-module', label: 'Module & Installation', gruppe: 'Instanz-Verwaltung' },
+    {
+      id: 'sys-store',
+      label: 'Plugin Store (GitHub)',
+      gruppe: 'Erweiterungen',
+      badge: storeKatalog.length,
+    },
+    { id: 'sys-module', label: 'Team-Freigabe-Matrix', gruppe: 'Erweiterungen' },
     { id: 'sys-teams', label: 'Teams / Mandanten', gruppe: 'Instanz-Verwaltung' },
     { id: 'sys-benutzer', label: 'Globale Benutzer & Rollen', gruppe: 'Instanz-Verwaltung' },
     { id: 'sys-storage', label: 'S3 Object Storage', gruppe: 'Infrastruktur' },
@@ -125,14 +132,34 @@ export function SysadminPage({
     { id: 'sys-bootstrap', label: 'ENV-Ersteinrichtung', gruppe: 'Infrastruktur' },
   ];
 
-  if (videoGlobalAktiv) {
-    kategorien.push({
-      id: 'modul-video-cleanup',
-      label: 'S3-Cleanup & Schonfrist',
-      gruppe: 'Modul: Videoanalyse',
-      badge: queue.length,
-    });
+  for (const plugin of pluginsMitSysadminPanel) {
+    for (const anker of plugin.manifest.settingsAnker.sysadmin ?? []) {
+      kategorien.push({
+        id: anker.id,
+        label: anker.label,
+        gruppe: `Plugin: ${plugin.manifest.name}`,
+        badge: anker.badge,
+      });
+    }
   }
+
+  const handleGitHubPluginEinbinden = () => {
+    setStoreFehler(null);
+    setStoreHinweis(null);
+    const pruefung = parseGitHubPluginQuelle(githubUrl);
+    if (!pruefung.ok || !pruefung.repoUrl || !pruefung.slug) {
+      setStoreFehler(pruefung.fehler ?? 'Ungültige GitHub-URL.');
+      return;
+    }
+    if (storeKatalog.some((e) => e.manifest.id === pruefung.slug)) {
+      setStoreFehler(`Ein Plugin mit ID "${pruefung.slug}" ist bereits im Store vorhanden.`);
+      return;
+    }
+    onCustomGitHubPluginHinzufuegen(pruefung.repoUrl, pruefung.slug);
+    setGithubUrl('');
+    setStoreHinweis(`GitHub-Plugin "${pruefung.slug}" installiert und im Store registriert.`);
+    setTimeout(() => setStoreHinweis(null), 3000);
+  };
 
   const handleTeamAnlegen = () => {
     const name = neuesTeamName.trim();
@@ -184,14 +211,17 @@ export function SysadminPage({
     setNeuIstSysadmin(false);
   };
 
-  const globalAktiveModuleListe = SIDELINE_MODULE_REGISTRY.filter((m) =>
-    globalAktivierteModule.includes(m.id)
-  );
+  const settingsKontext: PluginSettingsKontext = {
+    team: teams[0],
+    benutzer: benutzerListe[0],
+    aktiveTeamAnsicht: null,
+    s3Konfig,
+  };
 
   return (
     <SettingsShell
       titel="Sysadmin · Instanz-Administration"
-      untertitel="Strikte Datenschutz-Trennung: Als Instance Admin verwaltest du Module, Mandanten, globale Benutzer, S3-Storage und SMTP – ohne App-Zugriff auf Team-Videos, Breakdowns oder Notizen."
+      untertitel="SidelineOS Core verwaltet ausschließlich Auth, Mandanten, S3/SMTP und den Plugin Store. Alle Fachmodule laufen isoliert als installierbare GitHub-Plugins."
       kategorien={kategorien}
       zurueckLabel="Alle Einstellungen"
       onZurueck={onZurueck}
@@ -202,7 +232,159 @@ export function SysadminPage({
         </div>
       }
     >
-      {/* 1. Modul-Verwaltung (Instanz-Freigabe oben, Matrix nach Team sortiert darunter) */}
+      {/* 1. Plugin Store (GitHub-Repositories) */}
+      <section
+        id="sys-store"
+        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
+          <div className="flex items-center gap-2">
+            <Store className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
+            <div>
+              <h2 className="text-sm font-semibold text-white">
+                Plugin Store · Unabhängige GitHub-Module
+              </h2>
+              <p className="text-[11px] text-[#8B949E]">
+                Jedes Plugin wird in einem eigenen Repo gegen{' '}
+                <code className="font-mono text-[#E6EDF3]">@sidelineos/plugin-sdk</code> entwickelt
+                und mit isoliertem DB-/S3-Präfix geladen.
+              </p>
+            </div>
+          </div>
+
+          <span className="font-mono text-[11px] text-[#8B949E]">
+            {installiertePlugins.length} installiert · SDK v1.0
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+          {storeKatalog.map((eintrag) => {
+            const { manifest } = eintrag;
+            const installiert = installiertePluginIds.includes(manifest.id);
+            const globalAn = globalAktivierteModule.includes(manifest.id);
+
+            return (
+              <div
+                key={manifest.id}
+                className={`flex flex-col justify-between rounded-md border p-4 space-y-3 ${
+                  installiert
+                    ? 'border-[#F59E0B]/40 bg-[#0B0E11]'
+                    : 'border-[#232933] bg-[#0B0E11]/60'
+                }`}
+              >
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-white">{manifest.name}</div>
+                      <div className="font-mono text-[10px] text-[#8B949E]">
+                        {manifest.id} · {eintrag.releaseTag}
+                      </div>
+                    </div>
+                    {eintrag.verifiziert ? (
+                      <span className="inline-flex items-center gap-1 rounded border border-[#16A34A]/40 bg-[#16A34A]/10 px-1.5 py-0.5 font-mono text-[10px] text-[#86EFAC]">
+                        <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                        Offiziell
+                      </span>
+                    ) : (
+                      <span className="rounded border border-[#232933] px-1.5 py-0.5 font-mono text-[10px] text-[#8B949E]">
+                        GitHub
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs leading-relaxed text-[#8B949E]">
+                    {manifest.kurzbeschreibung}
+                  </p>
+
+                  <div className="space-y-1 border-t border-[#232933] pt-2 font-mono text-[10px] text-[#6E7681]">
+                    <div>DB: {manifest.dbPrefix}*</div>
+                    {manifest.s3Prefix && <div>S3: teams/&#123;id&#125;/{manifest.s3Prefix}</div>}
+                    <div
+                      title={manifest.permissions
+                        .map((p) => `${p}: ${PERMISSION_BESCHREIBUNGEN[p]}`)
+                        .join('\n')}
+                    >
+                      Rechte: {manifest.permissions.join(', ')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-2 border-t border-[#232933] pt-3">
+                  <a
+                    href={manifest.repositoryUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-mono text-[11px] text-[#8B949E] hover:text-white"
+                  >
+                    Repo
+                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  </a>
+
+                  {installiert ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => onGlobalModulToggle(manifest.id)}
+                        className={`rounded border px-2 py-1 text-[11px] font-medium ${
+                          globalAn
+                            ? 'border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC]'
+                            : 'border-[#232933] bg-[#13171D] text-[#8B949E]'
+                        }`}
+                      >
+                        {globalAn ? 'Aktiv' : 'Pausiert'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onPluginDeinstallieren(manifest.id)}
+                        className="rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
+                      >
+                        Entfernen
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onPluginInstallieren(manifest.id)}
+                      className="inline-flex items-center gap-1 rounded bg-[#F59E0B] px-2.5 py-1 text-[11px] font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+                    >
+                      <Download className="h-3 w-3" aria-hidden="true" />
+                      Installieren
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Externes GitHub-Plugin per URL einbinden */}
+        <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-2.5">
+          <div className="text-xs font-semibold text-white">
+            Drittanbieter- oder eigenes GitHub-Plugin hinzufügen
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              type="url"
+              value={githubUrl}
+              onChange={(e) => setGithubUrl(e.target.value)}
+              placeholder="https://github.com/dein-verein/sidelineos-plugin-scouting"
+              className="flex-1 rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleGitHubPluginEinbinden}
+              className="inline-flex items-center justify-center gap-1.5 rounded bg-[#1E2530] px-3.5 py-1.5 text-xs font-medium text-white hover:border hover:border-[#F59E0B]"
+            >
+              <Plus className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+              Aus GitHub installieren
+            </button>
+          </div>
+          {storeFehler && <p className="text-xs text-[#FCA5A5]">{storeFehler}</p>}
+          {storeHinweis && <p className="text-xs text-[#86EFAC]">{storeHinweis}</p>}
+        </div>
+      </section>
+
+      {/* 2. Team-sortierte Freigabe-Matrix */}
       <section
         id="sys-module"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
@@ -212,11 +394,11 @@ export function SysadminPage({
             <Blocks className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
             <div>
               <h2 className="text-sm font-semibold text-white">
-                Modul-Verwaltung (nach Team sortiert)
+                Modul-Freigabe (nach Team sortiert)
               </h2>
               <p className="text-[11px] text-[#8B949E]">
-                Nicht freigeschaltete Dienste werden auf der Startseite und in den Einstellungen
-                vollständig ausgeblendet.
+                Nicht installierte oder für ein Team deaktivierte Plugins verschwinden vollständig
+                auf der Startseite und in den Einstellungen.
               </p>
             </div>
           </div>
@@ -226,99 +408,61 @@ export function SysadminPage({
           </code>
         </div>
 
-        {/* Kompakte Instanz-Schalter (ENABLED_MODULES) */}
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-[#8B949E]">
-            Instanzweit installierte Module
+        {globalAktivePlugins.length === 0 ? (
+          <div className="rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-5 text-center text-xs text-[#6E7681]">
+            Aktuell ist kein installiertes Plugin instanzweit aktiviert.
           </div>
-          <div className="flex flex-wrap gap-2">
-            {SIDELINE_MODULE_REGISTRY.map((modul) => {
-              const globalAn = globalAktivierteModule.includes(modul.id);
+        ) : (
+          <div className="divide-y divide-[#232933] rounded-md border border-[#232933] bg-[#0B0E11]">
+            {teams.map((team) => {
+              const aktivAnzahl = globalAktivePlugins.filter((p) =>
+                team.aktivierteModule.includes(p.manifest.id)
+              ).length;
+
               return (
-                <label
-                  key={modul.id}
-                  className={`inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${
-                    globalAn
-                      ? 'border-[#F59E0B]/50 bg-[#0B0E11] text-white'
-                      : 'border-[#232933] bg-[#0B0E11]/50 text-[#6E7681]'
-                  }`}
+                <div
+                  key={team.id}
+                  className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <input
-                    type="checkbox"
-                    checked={globalAn}
-                    onChange={() => onGlobalModulToggle(modul.id)}
-                    className="h-3.5 w-3.5 accent-[#F59E0B]"
-                  />
-                  <span className="font-medium">{modul.name}</span>
-                  <span className="font-mono text-[10px] text-[#6E7681]">v{modul.version}</span>
-                </label>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-white">{team.name}</div>
+                    <div className="mt-0.5 font-mono text-[11px] text-[#8B949E]">
+                      Aktuelle Saison {team.aktiveSaison} · {aktivAnzahl}/
+                      {globalAktivePlugins.length} Module aktiv
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    {globalAktivePlugins.map((plugin) => {
+                      const teamAktiv = team.aktivierteModule.includes(plugin.manifest.id);
+                      return (
+                        <label
+                          key={plugin.manifest.id}
+                          className={`inline-flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
+                            teamAktiv
+                              ? 'border-[#232933] bg-[#13171D] text-[#E6EDF3]'
+                              : 'border-[#232933]/60 bg-transparent text-[#6E7681]'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={teamAktiv}
+                            onChange={() => onTeamModulToggle(team.id, plugin.manifest.id)}
+                            className="h-3.5 w-3.5 accent-[#F59E0B]"
+                          />
+                          <span>{plugin.manifest.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </div>
-        </div>
-
-        {/* Team-sortierte Freigabe-Matrix */}
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-[#8B949E]">
-            Freigabe pro Team ({teams.length} Teams)
-          </div>
-
-          {globalAktiveModuleListe.length === 0 ? (
-            <div className="rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-5 text-center text-xs text-[#6E7681]">
-              Aktuell ist kein Modul instanzweit aktiviert.
-            </div>
-          ) : (
-            <div className="divide-y divide-[#232933] rounded-md border border-[#232933] bg-[#0B0E11]">
-              {teams.map((team) => {
-                const aktivAnzahl = globalAktiveModuleListe.filter((m) =>
-                  team.aktivierteModule.includes(m.id)
-                ).length;
-
-                return (
-                  <div
-                    key={team.id}
-                    className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold text-white">{team.name}</div>
-                      <div className="mt-0.5 font-mono text-[11px] text-[#8B949E]">
-                        Aktuelle Saison {team.aktiveSaison} · {aktivAnzahl}/
-                        {globalAktiveModuleListe.length} Module aktiv
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      {globalAktiveModuleListe.map((modul) => {
-                        const teamAktiv = team.aktivierteModule.includes(modul.id);
-                        return (
-                          <label
-                            key={modul.id}
-                            className={`inline-flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs transition-colors ${
-                              teamAktiv
-                                ? 'border-[#232933] bg-[#13171D] text-[#E6EDF3]'
-                                : 'border-[#232933]/60 bg-transparent text-[#6E7681]'
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={teamAktiv}
-                              onChange={() => onTeamModulToggle(team.id, modul.id)}
-                              className="h-3.5 w-3.5 accent-[#F59E0B]"
-                            />
-                            <span>{modul.name}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        )}
       </section>
 
-      {/* 2. Teams / Mandanten */}
+      {/* 3. Teams / Mandanten */}
       <section
         id="sys-teams"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
@@ -353,7 +497,7 @@ export function SysadminPage({
                     <span className="font-mono text-[#F59E0B]">· Saison {team.aktiveSaison}</span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-[#8B949E]">
-                    {mitgliederZahl} aktive Mitglieder · {team.aktivierteModule.length} Module
+                    {mitgliederZahl} aktive Mitglieder · {team.aktivierteModule.length} Plugins
                     {alteSaisons.length > 0 && ` · Archivierte Saisons: ${alteSaisons.join(', ')}`}
                   </div>
                 </div>
@@ -422,7 +566,7 @@ export function SysadminPage({
         </div>
       </section>
 
-      {/* 3. Globale Benutzer & Rollen */}
+      {/* 4. Globale Benutzer & Rollen */}
       <section
         id="sys-benutzer"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
@@ -565,7 +709,7 @@ export function SysadminPage({
         </div>
       </section>
 
-      {/* 4. S3 Object Storage */}
+      {/* 5. S3 Object Storage */}
       <section
         id="sys-storage"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
@@ -575,8 +719,8 @@ export function SysadminPage({
           <div>
             <h2 className="text-sm font-semibold text-white">S3 Object Storage</h2>
             <p className="text-[11px] text-[#8B949E]">
-              Kompatibel mit MinIO, Hetzner Object Storage, Ceph und AWS S3. Secrets werden primär
-              über ENV-Variablen injiziert.
+              Kompatibel mit MinIO, Hetzner Object Storage, Ceph und AWS S3. Plugins erhalten
+              ausschließlich zeitlich signierte Presigned-URLs auf ihren S3-Präfix.
             </p>
           </div>
         </div>
@@ -658,7 +802,7 @@ export function SysadminPage({
         {s3Status && <p className="text-xs text-[#86EFAC]">{s3Status}</p>}
       </section>
 
-      {/* 5. E-Mail / SMTP */}
+      {/* 6. E-Mail / SMTP */}
       <section
         id="sys-smtp"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
@@ -740,7 +884,7 @@ export function SysadminPage({
         {smtpStatus && <p className="text-xs text-[#86EFAC]">{smtpStatus}</p>}
       </section>
 
-      {/* 6. ENV-Ersteinrichtung (kein UI-Wizard) */}
+      {/* 7. ENV-Ersteinrichtung */}
       <section
         id="sys-bootstrap"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-3"
@@ -753,7 +897,7 @@ export function SysadminPage({
         </div>
         <p className="text-xs leading-relaxed text-[#8B949E]">
           SidelineOS verzichtet bewusst auf einen unsicheren Erststart-Wizard im Browser. Der erste
-          Sysadmin, Datenbank, S3, SMTP und die installierten Module werden einheitlich über
+          Sysadmin, Datenbank, S3, SMTP und die installierten Plugins werden einheitlich über
           Umgebungsvariablen (Docker Compose, Kubernetes, Proxmox LXC oder Systemd) gesetzt.
         </p>
         <pre className="overflow-x-auto rounded-md border border-[#232933] bg-[#0B0E11] p-3 font-mono text-[11px] leading-relaxed text-[#E6EDF3]">
@@ -764,114 +908,11 @@ ENABLED_MODULES="${globalAktivierteModule.join(',')}"`}
         </pre>
       </section>
 
-      {/* 7. Dynamischer Modul-Beitrag: Videoanalyse S3-Cleanup-Queue */}
-      {videoGlobalAktiv && (
-        <section
-          id="modul-video-cleanup"
-          className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#232933] pb-4">
-            <div className="flex items-center gap-2.5">
-              <HardDrive className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-              <div>
-                <h2 className="text-sm font-semibold text-white">
-                  S3-Cleanup-Queue (Modul: Videoanalyse · ref_count = 0)
-                </h2>
-                <p className="text-xs text-[#8B949E]">
-                  Verwaiste Video-Assets bleiben bis zum Ablauf der Schonfrist wiederherstellbar.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                Schonfrist (Tage)
-                <input
-                  type="number"
-                  min={1}
-                  max={90}
-                  value={retentionTage}
-                  onChange={(e) => setRetentionTage(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-16 rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 font-mono text-xs text-white tabular-nums focus:border-[#F59E0B] focus:outline-none"
-                />
-              </label>
-
-              <button
-                type="button"
-                disabled={queue.length === 0}
-                onClick={() => {
-                  const anzahl = queue.length;
-                  if (anzahl === 0) return;
-                  setQueue([]);
-                  setCleanupStatus(
-                    `${anzahl} vorgemerkte S3-Assets wurden sofort aus dem Bucket bereinigt.`
-                  );
-                }}
-                className="inline-flex items-center gap-1.5 rounded-md border border-[#DC2626]/40 bg-[#DC2626]/10 px-3 py-1.5 text-xs font-medium text-[#FCA5A5] transition-colors hover:bg-[#DC2626]/20 disabled:cursor-not-allowed disabled:opacity-40 whitespace-nowrap"
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                Cleanup jetzt ausführen
-              </button>
-            </div>
-          </div>
-
-          {cleanupStatus && (
-            <div
-              role="status"
-              className="rounded-md border border-[#16A34A]/30 bg-[#16A34A]/10 px-3 py-2 text-xs text-[#86EFAC]"
-            >
-              {cleanupStatus}
-            </div>
-          )}
-
-          {queue.length === 0 ? (
-            <div className="py-8 text-center text-xs text-[#8B949E]">
-              Keine verwaisten S3-Objekte in der Löschwarteschlange.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-[#232933] text-[#8B949E]">
-                    <th className="py-2 font-medium">Anonymisierter S3-Pfad</th>
-                    <th className="py-2 text-right font-medium">Größe</th>
-                    <th className="py-2 text-right font-medium">Löschung am</th>
-                    <th className="py-2 text-right font-medium">Aktion</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#232933]">
-                  {queue.map((eintrag) => (
-                    <tr key={eintrag.id} className="hover:bg-[#191F27]">
-                      <td className="py-3 font-mono text-[#E6EDF3]">{eintrag.assetPfad}</td>
-                      <td className="py-3 text-right font-mono text-[#E6EDF3] tabular-nums">
-                        {eintrag.groesseGb.toFixed(1)} GB
-                      </td>
-                      <td className="py-3 text-right font-mono text-[#8B949E] tabular-nums">
-                        {eintrag.geplanteLoeschung} ({eintrag.restTage} T.)
-                      </td>
-                      <td className="py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setQueue((alt) => alt.filter((item) => item.id !== eintrag.id));
-                            setCleanupStatus(
-                              'Löschung zurückgenommen – Asset-Referenz wurde wiederhergestellt.'
-                            );
-                          }}
-                          className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-xs font-medium text-[#E6EDF3] transition-colors hover:border-[#F59E0B] hover:text-white"
-                        >
-                          <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                          Wiederherstellen
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
+      {/* 8. Dynamische Sysadmin-Panels aller aktivierten Plugins */}
+      {pluginsMitSysadminPanel.map((plugin) => {
+        const SysadminPanel = plugin.settingsPanels!.sysadmin!;
+        return <SysadminPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+      })}
     </SettingsShell>
   );
 }

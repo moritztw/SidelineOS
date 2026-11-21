@@ -24,6 +24,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import type { TeamRolle } from '../../../sdk/plugin.ts';
 import type {
   BreakdownFeldKey,
   CanvasZeichnung,
@@ -33,18 +34,17 @@ import type {
   NutzerEinstellungen,
   SpielerFreigabe,
   TagFeldKonfig,
-  TeamRolle,
   VideoReel,
   ZeichenWerkzeug,
-} from '../../../shared/types.ts';
-import { FREIGABE_LABELS } from '../../../shared/types.ts';
+} from '../types.ts';
+import { FREIGABE_LABELS } from '../types.ts';
 import {
   FRAME_MS,
   findeNaechstenAutoStopFrame,
   frameZuZeit,
   istGleicherFrame,
   zeitZuFrame,
-} from '../../../core/rolePermissions.ts';
+} from '../services/frameAndHotkeys.ts';
 import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 import { leseBreakdownWert } from '../services/taggingEngine.ts';
 import { BreakdownGrid } from './BreakdownGrid.tsx';

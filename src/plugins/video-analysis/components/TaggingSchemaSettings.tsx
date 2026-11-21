@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Plus, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import type { TeamRolle } from '../../../sdk/plugin.ts';
 import type {
   BreakdownFeldKey,
   TagFeldKonfig,
   TagFeldTyp,
-  TeamRolle,
-} from '../../../shared/types.ts';
+} from '../types.ts';
 
 interface TaggingSchemaSettingsProps {
   teamRolle: TeamRolle;

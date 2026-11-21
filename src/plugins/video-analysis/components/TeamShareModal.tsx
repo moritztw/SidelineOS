@@ -17,8 +17,8 @@ import type {
   TagFeldKonfig,
   TeamFreigabeEintrag,
   VideoReel,
-} from '../../../shared/types.ts';
-import { BASIS_TAGGING_FELDER } from '../../../shared/types.ts';
+} from '../types.ts';
+import { BASIS_TAGGING_FELDER } from '../types.ts';
 import { VERFUEGBARE_TAUSCH_TEAMS } from '../data/demoReels.ts';
 import {
   exportiereBreakdownAlsCsv,

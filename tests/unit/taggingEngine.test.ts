@@ -8,8 +8,8 @@ import {
   registriereDefinitionWennNeu,
   wendeBreakdownUpdateMitAutoCalcAn,
   yardLineZuAbsolut,
-} from '../../src/modules/video-analysis/services/taggingEngine.ts';
-import type { Spielzug } from '../../src/shared/types.ts';
+} from '../../src/plugins/video-analysis/services/taggingEngine.ts';
+import type { Spielzug } from '../../src/plugins/video-analysis/types.ts';
 
 function erstelleTestPlays(): Spielzug[] {
   return [

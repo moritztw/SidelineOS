@@ -1,23 +1,18 @@
-import type {
-  BenutzerProfil,
-  CoreBereich,
-  ModulId,
-  TeamRolle,
-  VideoModulTab,
-} from '../../shared/types.ts';
-import { findeModulManifest } from '../moduleRegistry.ts';
+import type { BenutzerProfil, CoreBereich, TeamRolle } from '../../shared/types.ts';
+import type { PluginLaufzeitKontext, PluginTab, SidelinePlugin } from '../../sdk/plugin.ts';
 
 interface CoreTopBarProps {
   bereich: CoreBereich;
-  aktivesModulId: ModulId | null;
-  videoTab: VideoModulTab;
+  aktivesPlugin: SidelinePlugin | null;
+  pluginTabs: PluginTab[];
+  aktiverPluginTab: string;
+  pluginLaufzeitKontext: PluginLaufzeitKontext | null;
   konto: BenutzerProfil;
   aktiveTeamAnsicht: TeamRolle | null;
   ausstehendeAnfragenAnzahl: number;
   onLogoKlick: () => void;
   onBereichWechseln: (bereich: CoreBereich) => void;
-  onVideoTabWechseln: (tab: VideoModulTab) => void;
-  onPrimaerAktion: () => void;
+  onPluginTabWechseln: (tabId: string) => void;
 }
 
 const EINSTELLUNGS_BEREICHE: CoreBereich[] = [
@@ -27,39 +22,31 @@ const EINSTELLUNGS_BEREICHE: CoreBereich[] = [
   'sysadmin',
 ];
 
+const PRIMAER_AKTION_KLASSE =
+  'rounded-md bg-[#F59E0B] px-4 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]';
+
 export function CoreTopBar({
   bereich,
-  aktivesModulId,
-  videoTab,
+  aktivesPlugin,
+  pluginTabs,
+  aktiverPluginTab,
+  pluginLaufzeitKontext,
   konto,
   aktiveTeamAnsicht,
   ausstehendeAnfragenAnzahl,
   onLogoKlick,
   onBereichWechseln,
-  onVideoTabWechseln,
-  onPrimaerAktion,
+  onPluginTabWechseln,
 }: CoreTopBarProps) {
   const hatTeamZugriff = aktiveTeamAnsicht !== null;
-  const istCoach = aktiveTeamAnsicht === 'COACH' || aktiveTeamAnsicht === 'TEAM_ADMIN';
   const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
 
-  const imVideoModul = bereich === 'modul' && aktivesModulId === 'video-analysis';
+  const imPlugin = bereich === 'modul' && aktivesPlugin !== null;
   const inEinstellungen = EINSTELLUNGS_BEREICHE.includes(bereich);
-  const aktivesModul = aktivesModulId ? findeModulManifest(aktivesModulId) : null;
-
-  // Zone 2: Strikte Trennung – im Modul nur Modul-Tabs, außerhalb nur Start & Einstellungen
-  const videoLinks: Array<{ id: VideoModulTab; label: string }> = [];
-  if (imVideoModul && hatTeamZugriff) {
-    videoLinks.push({ id: 'dashboard', label: 'Bibliothek' });
-    if (istCoach) {
-      videoLinks.push({ id: 'cut-sync', label: 'Cut & Sync' });
-    }
-    videoLinks.push({ id: 'film-room', label: 'Film Room' });
-    videoLinks.push({ id: 'playlists', label: 'Playlists' });
-  }
+  const PrimaerAktionKomponente = aktivesPlugin?.PrimaerAktion;
 
   const coreLinks: Array<{ id: CoreBereich; label: string; aktiv: boolean; badge?: number }> = [];
-  if (!imVideoModul) {
+  if (!imPlugin) {
     if (hatTeamZugriff) {
       coreLinks.push({ id: 'hub', label: 'Start', aktiv: bereich === 'hub' });
       coreLinks.push({
@@ -77,17 +64,10 @@ export function CoreTopBar({
     }
   }
 
-  const zeigePrimaerAktion = imVideoModul || bereich === 'modul';
-  const primaerLabel = imVideoModul
-    ? istCoach
-      ? 'Tapes hochladen'
-      : 'Film Room öffnen'
-    : 'Zur Startseite';
-
   return (
     <header className="sticky top-0 z-30 border-b border-[#232933] bg-[#0B0E11]/95 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-6 px-6">
-        {/* Zone 1: Wortmarke (Klick führt immer zurück zur Startseite) + dezenter Kontext */}
+        {/* Zone 1: Wortmarke (Klick führt immer zurück zur Startseite) + Plugin-Breadcrumb */}
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
@@ -98,13 +78,13 @@ export function CoreTopBar({
             Sideline<span className="text-[#F59E0B]">OS</span>
           </button>
 
-          {bereich === 'modul' && aktivesModul && (
+          {imPlugin && aktivesPlugin && (
             <>
               <span aria-hidden="true" className="text-[#36404F]">
                 /
               </span>
               <span className="text-xs font-medium text-[#8B949E] whitespace-nowrap">
-                {aktivesModul.name}
+                {aktivesPlugin.manifest.name}
               </span>
             </>
           )}
@@ -112,14 +92,14 @@ export function CoreTopBar({
 
         {/* Zone 2: Einzeilige Text-Navigation */}
         <nav aria-label="Hauptnavigation" className="flex items-center gap-6 overflow-x-auto">
-          {imVideoModul
-            ? videoLinks.map((eintrag) => {
-                const istAktiv = videoTab === eintrag.id;
+          {imPlugin
+            ? pluginTabs.map((eintrag) => {
+                const istAktiv = aktiverPluginTab === eintrag.id;
                 return (
                   <button
                     key={eintrag.id}
                     type="button"
-                    onClick={() => onVideoTabWechseln(eintrag.id)}
+                    onClick={() => onPluginTabWechseln(eintrag.id)}
                     className={`relative h-14 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#F59E0B] ${
                       istAktiv ? 'text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
                     }`}
@@ -159,16 +139,13 @@ export function CoreTopBar({
               ))}
         </nav>
 
-        {/* Zone 3: Kontextuelle Primäraktion (nur innerhalb von Modulen, damit Startseite clean bleibt) */}
+        {/* Zone 3: Kontextuelle Primäraktion (als saubere Komponente des aktiven Plugins) */}
         <div className="flex min-w-[120px] items-center justify-end shrink-0">
-          {zeigePrimaerAktion && (
-            <button
-              type="button"
-              onClick={onPrimaerAktion}
-              className="rounded-md bg-[#F59E0B] px-4 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
-            >
-              {primaerLabel}
-            </button>
+          {imPlugin && PrimaerAktionKomponente && pluginLaufzeitKontext && (
+            <PrimaerAktionKomponente
+              ctx={pluginLaufzeitKontext}
+              className={PRIMAER_AKTION_KLASSE}
+            />
           )}
         </div>
       </div>

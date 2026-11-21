@@ -5,7 +5,7 @@ import type {
   NormPunkt,
   ZeichenWerkzeug,
   ZeichnungsTyp,
-} from '../../../shared/types.ts';
+} from '../types.ts';
 
 interface TelestrationCanvasProps {
   zeichnungen: CanvasZeichnung[];

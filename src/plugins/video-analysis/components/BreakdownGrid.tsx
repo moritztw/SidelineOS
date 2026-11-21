@@ -1,10 +1,10 @@
 import { Download } from 'lucide-react';
+import type { TeamRolle } from '../../../sdk/plugin.ts';
 import type {
   BreakdownFeldKey,
   Spielzug,
   TagFeldKonfig,
-  TeamRolle,
-} from '../../../shared/types.ts';
+} from '../types.ts';
 import { exportiereBreakdownAlsCsv } from '../services/bundleSchema.ts';
 import { leseBreakdownWert } from '../services/taggingEngine.ts';
 

@@ -10,17 +10,17 @@ import {
   Share2,
   Users,
 } from 'lucide-react';
+import { filtereNachSaison } from '../../../sdk/plugin.ts';
+import type { TeamRolle } from '../../../sdk/plugin.ts';
 import type {
   ReelKategorie,
   ShareDownloadLink,
   SpielerFreigabe,
   TagFeldKonfig,
   TeamFreigabeEintrag,
-  TeamRolle,
   VideoReel,
-} from '../../../shared/types.ts';
-import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../../../shared/types.ts';
-import { filtereReelsNachSaison } from '../../../core/seasonUtils.ts';
+} from '../types.ts';
+import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../types.ts';
 import { istShareLinkGueltig, reelZuBundle } from '../services/bundleSchema.ts';
 import { TeamShareModal } from './TeamShareModal.tsx';
 import { UploadPanel } from './UploadPanel.tsx';
@@ -110,7 +110,7 @@ export function DashboardView({
   const gefilterteReels = useMemo(() => {
     const query = suchbegriff.trim().toLowerCase();
     const teamReels = reels.filter((reel) => reel.teamId === teamId);
-    const saisonReels = filtereReelsNachSaison(teamReels, gewaehlteSaison);
+    const saisonReels = filtereNachSaison(teamReels, gewaehlteSaison);
     return saisonReels
       .filter((reel) => (teamRolle === 'PLAYER' ? reel.visibility !== 'COACHES_ONLY' : true))
       .filter((reel) => (aktiveKategorie === 'ALL' ? true : reel.category === aktiveKategorie))

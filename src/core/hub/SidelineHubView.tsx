@@ -3,55 +3,42 @@ import {
   BookOpen,
   ClipboardCheck,
   Film,
+  Layers,
+  Puzzle,
   Settings,
 } from 'lucide-react';
-import type {
-  CoreBereich,
-  ModulId,
-  TeamKontext,
-  TeamRolle,
-} from '../../shared/types.ts';
-import {
-  SIDELINE_MODULE_REGISTRY,
-  istModulFuerTeamAktiv,
-} from '../moduleRegistry.ts';
+import type { CoreBereich, PluginId, TeamRolle } from '../../shared/types.ts';
+import type { PluginIconName, SidelinePlugin } from '../../sdk/plugin.ts';
 
 interface SidelineHubViewProps {
-  team: TeamKontext;
+  aktivePlugins: SidelinePlugin[];
   aktiveTeamAnsicht: TeamRolle | null;
-  globalAktivierteModule: ModulId[];
   ausstehendeAnfragenAnzahl: number;
-  onModulOeffnen: (modulId: ModulId) => void;
+  onModulOeffnen: (pluginId: PluginId) => void;
   onBereichOeffnen: (bereich: CoreBereich) => void;
 }
 
-const MODUL_ICONS: Record<ModulId, typeof Film> = {
-  'video-analysis': Film,
-  playbook: BookOpen,
-  'roster-attendance': ClipboardCheck,
+const ICON_MAP: Record<PluginIconName, typeof Film> = {
+  film: Film,
+  'book-open': BookOpen,
+  'clipboard-check': ClipboardCheck,
+  layers: Layers,
+  puzzle: Puzzle,
 };
 
 /**
  * Aufgeräumte SidelineOS-Startseite:
- * Zeigt ausschließlich Kacheln für die freigeschalteten Module sowie eine Kachel "Einstellungen".
- * Nicht freigeschaltete Dienste werden vollständig ausgeblendet.
+ * Zeigt ausschließlich Kacheln für die freigeschalteten Plugins sowie eine Kachel "Einstellungen".
+ * Nicht installierte oder deaktivierte Dienste werden vollständig ausgeblendet.
  */
 export function SidelineHubView({
-  team,
+  aktivePlugins,
   aktiveTeamAnsicht,
-  globalAktivierteModule,
   ausstehendeAnfragenAnzahl,
   onModulOeffnen,
   onBereichOeffnen,
 }: SidelineHubViewProps) {
   const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
-
-  const aktiveModule =
-    aktiveTeamAnsicht === null
-      ? []
-      : SIDELINE_MODULE_REGISTRY.filter((modul) =>
-          istModulFuerTeamAktiv(modul.id, globalAktivierteModule, team.aktivierteModule)
-        );
 
   return (
     <section
@@ -59,15 +46,16 @@ export function SidelineHubView({
       className="mx-auto max-w-5xl py-4 sm:py-8"
     >
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {aktiveModule.map((modul) => {
-          const Icon = MODUL_ICONS[modul.id];
-          const istVorschau = modul.status === 'VORSCHAU';
+        {aktivePlugins.map((plugin) => {
+          const { manifest } = plugin;
+          const Icon = ICON_MAP[manifest.icon] ?? Puzzle;
+          const istVorschau = manifest.status === 'VORSCHAU';
 
           return (
             <button
-              key={modul.id}
+              key={manifest.id}
               type="button"
-              onClick={() => onModulOeffnen(modul.id)}
+              onClick={() => onModulOeffnen(manifest.id)}
               className="group flex min-h-[184px] flex-col justify-between rounded-xl border border-[#232933] bg-[#13171D] p-6 text-left transition-colors hover:border-[#F59E0B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
             >
               <div>
@@ -81,10 +69,10 @@ export function SidelineHubView({
                 </div>
 
                 <h2 className="mt-5 text-base font-semibold text-white group-hover:text-[#F59E0B]">
-                  {modul.name}
+                  {manifest.name}
                 </h2>
                 <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
-                  {modul.kurzbeschreibung}
+                  {manifest.kurzbeschreibung}
                 </p>
               </div>
 
@@ -98,7 +86,7 @@ export function SidelineHubView({
           );
         })}
 
-        {/* Kachel: Einstellungen (führt zur dedizierten Einstellungs-Übersichtsseite) */}
+        {/* Kachel: Einstellungen */}
         <button
           type="button"
           onClick={() => onBereichOeffnen('settings-hub')}
