@@ -122,6 +122,21 @@ export class CoreRepository {
     return res.rows[0] ? mapUserRow(res.rows[0]) : null;
   }
 
+  async existiertEmailOderBenutzername(
+    email: string,
+    benutzername: string,
+    ignoriereUuid?: string
+  ): Promise<boolean> {
+    const res = await this.db.query<{ uuid: string }>(
+      `SELECT uuid FROM core.users
+       WHERE (LOWER(email) = $1 OR LOWER(username) = $2)
+         AND ($3::text IS NULL OR uuid <> $3)
+       LIMIT 1`,
+      [email.trim().toLowerCase(), benutzername.trim().toLowerCase(), ignoriereUuid ?? null]
+    );
+    return res.rows.length > 0;
+  }
+
   async erstelleBenutzer(konto: BenutzerKonto, passwordHash: string): Promise<BenutzerKonto> {
     const res = await this.db.query<UserRow>(
       `INSERT INTO core.users (
@@ -304,6 +319,35 @@ export class CoreRepository {
     return team;
   }
 
+  async findeTeamNachId(teamId: string): Promise<TeamKontext | null> {
+    const teams = await this.listeTeams();
+    return teams.find((t) => t.id === teamId) ?? null;
+  }
+
+  async aktualisiereTeam(team: TeamKontext): Promise<TeamKontext | null> {
+    const res = await this.db.query<{ id: string }>(
+      `UPDATE core.teams
+       SET name = $2,
+           short_name = $3,
+           active_season = $4,
+           primary_color = $5,
+           custom_profile_fields = $6::jsonb
+       WHERE id = $1
+       RETURNING id`,
+      [
+        team.id,
+        team.name.trim(),
+        team.kurzname.trim(),
+        team.aktiveSaison,
+        team.primaerFarbe ?? '#F59E0B',
+        JSON.stringify(team.customProfilFelder ?? []),
+      ]
+    );
+    if (res.rows.length === 0) return null;
+    await this.fuegeTeamSaisonHinzu(team.id, team.aktiveSaison, true);
+    return this.findeTeamNachId(team.id);
+  }
+
   async fuegeTeamSaisonHinzu(teamId: string, saison: string, alsAktiv = true): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx.query(
@@ -324,6 +368,33 @@ export class CoreRepository {
   }
 
   // --- Mitgliedschaften ---
+
+  async findeMitgliedschaftNachId(id: string): Promise<TeamMitgliedschaft | null> {
+    const res = await this.db.query<{
+      id: string;
+      user_uuid: string;
+      team_id: string;
+      role: TeamRolle;
+      units: unknown;
+      status: TeamMitgliedschaft['status'];
+      joined_at: unknown;
+    }>(
+      `SELECT id, user_uuid, team_id, role, units, status, joined_at
+       FROM core.memberships WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    const m = res.rows[0];
+    if (!m) return null;
+    return {
+      id: m.id,
+      userUuid: m.user_uuid,
+      teamId: m.team_id,
+      rolle: m.role,
+      units: parseJsonWert<SpielerUnit[]>(m.units, ['OFFENSE']),
+      status: m.status,
+      beigetretenAm: toIsoDate(m.joined_at),
+    };
+  }
 
   async listeMitgliedschaften(teamId?: string): Promise<TeamMitgliedschaft[]> {
     const sql = teamId
@@ -510,6 +581,39 @@ export class CoreRepository {
       source: r.source,
       releaseTag: r.release_tag,
     }));
+  }
+
+  async findePluginStatus(pluginId: string): Promise<{
+    manifest: PluginManifest;
+    enabledGlobally: boolean;
+  } | null> {
+    const res = await this.db.query<{ manifest_json: unknown; enabled_globally: boolean }>(
+      `SELECT manifest_json, enabled_globally
+       FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
+      [pluginId]
+    );
+    const r = res.rows[0];
+    if (!r) return null;
+    return {
+      manifest: parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest),
+      enabledGlobally: Boolean(r.enabled_globally),
+    };
+  }
+
+  async setzePluginGlobalAktiv(pluginId: string, aktiv: boolean): Promise<boolean> {
+    const res = await this.db.query<{ plugin_id: string }>(
+      `UPDATE core.installed_plugins SET enabled_globally = $2 WHERE plugin_id = $1 RETURNING plugin_id`,
+      [pluginId, aktiv]
+    );
+    return res.rows.length > 0;
+  }
+
+  async istTeamModulAktiv(teamId: string, pluginId: PluginId): Promise<boolean> {
+    const res = await this.db.query<{ enabled: boolean }>(
+      `SELECT enabled FROM core.team_modules WHERE team_id = $1 AND plugin_id = $2 LIMIT 1`,
+      [teamId, pluginId]
+    );
+    return Boolean(res.rows[0]?.enabled);
   }
 
   async setzeTeamModulAktiv(teamId: string, pluginId: PluginId, aktiv: boolean): Promise<void> {

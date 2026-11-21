@@ -94,6 +94,58 @@ export interface PluginSettingsKontext {
 }
 
 /**
+ * Isolierter Datenbank-Zugriff für ein externes Plugin (`plugin_<slug>`-Schema).
+ * Der Core injiziert diese Schnittstelle, damit Plugins keine Core-Tabellen oder fremde Plugins sehen.
+ */
+export interface PluginDbScope {
+  readonly schemaName: string;
+  query<T = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[]
+  ): Promise<{ rows: T[]; rowCount: number }>;
+}
+
+/**
+ * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
+ */
+export interface PluginBackendKontext {
+  readonly pluginId: PluginId;
+  readonly manifest: PluginManifest;
+  readonly db: PluginDbScope;
+  readonly user: BenutzerKonto;
+  readonly team: TeamKontext;
+  readonly teamRolle: TeamRolle;
+  hasPermission(permission: PluginPermission): boolean;
+}
+
+/**
+ * Verbindlicher Backend-Vertrag eines Plugins (optional für reine Frontend-Prototypen).
+ */
+export interface SidelineBackendPlugin {
+  readonly manifest: PluginManifest;
+  readonly migrations?: Array<{ name: string; sql: string }>;
+  handleRequest?: (
+    req: {
+      method: string;
+      path: string;
+      params: Record<string, string>;
+      query: Record<string, unknown>;
+      body: unknown;
+    },
+    ctx: PluginBackendKontext
+  ) => Promise<{ status: number; body: unknown }>;
+  handlePublicRequest?: (
+    req: {
+      method: string;
+      path: string;
+      query: Record<string, unknown>;
+      body: unknown;
+    },
+    db: PluginDbScope
+  ) => Promise<{ status: number; body: unknown }>;
+}
+
+/**
  * Verbindlicher Plugin-Vertrag (`@sidelineos/plugin-sdk`).
  * Jedes externe GitHub-Modul implementiert genau dieses Interface.
  */
