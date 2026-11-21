@@ -100,6 +100,7 @@ Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
 * Plugins importieren **niemals** interne Core-Dateien (`src/core/*`) und der Core importiert **niemals** Plugin-Interna (`src/plugins/*`).
 * Sämtliche Kommunikation zwischen Core und Plugin erfolgt über `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`).
 * Saison-Filterung nutzt generische SDK-Helper (`filtereNachSaison`, `ermittleEintragSaison`).
+* **Geplante SDK-Erweiterung (Core-Phase 3–5):** Ein gemeinsames Scope-Interface (`listExportableItems`, `exportScope`, `importScope` inkl. `mode: 'replace' | 'merge'` sowie `ExchangeTarget`-Adressierung `teamId@instanceId`), über das Plugins sowohl Peer-Federation als auch den Offline-Camp-Modus (inkl. Delta-Rück-Sync) ohne Core-Sonderlogik unterstützen.
 
 ---
 

@@ -70,3 +70,15 @@ mod_video_media_reels (physisches Asset-Container-Objekt)
 1. **Headless TypeScript Logik (`src/core/*`, `src/sdk/*`, `src/plugins/*/services/*`):** Alle Fachregeln (RBAC, Saisonfilter, Tagging-Auto-Calc, Frame-Quantisierung, Bundle-Validierung, GitHub-Store-Parser) sind frei von Browser-DOM-Abhängigkeiten.
 2. **Strikte API-Grenze (Core-Backend):** Auth, Presigned S3-URLs (`206 Partial Content`), Plugin-Manifeste und Metadaten laufen ausschließlich über `/api/v1/*`.
 3. **Mobile & Desktop:** **Capacitor** (Android/iOS) und **Tauri v2** (Linux/Windows/macOS) können direkt auf derselben Web-App + REST-API aufsetzen.
+
+---
+
+## 7. Instanz-Federation & Lokale Teamkopie („Camp-Modus“)
+
+* **Dezentrale Peer-Federation (`team@instance`):** Zwei SidelineOS-Core-Instanzen können über ein einmaliges Sysadmin-Pairing (Ed25519-/HMAC-signierte Requests, ohne zentralen Relay-Server) verbunden werden. Es werden ausschließlich minimale Team-Metadaten synchronisiert. Plugins nutzen das einheitliche `ExchangeTarget`-Format des SDKs, wodurch Teams fremder Instanzen beim Austausch wie lokale Teams angesprochen werden können.
+* **Lokale Teamkopie & Offline-Camp-Modus (Raspberry Pi / `linux/arm64`):**
+  * **Berechtigungen:** Sysadmins dürfen beliebige Teams der Instanz kopieren; Team Admins dürfen ihr eigenes Team exportieren/mitnehmen.
+  * **Selektive Mitnahme:** Pro Team-Snapshot wird getrennt gewählt, welche **Module** (Alle / Gefiltert / Keine) und welche **S3-Objekte** (Alle / Ausgewählte / Keine) übertragen werden. Nicht übertragene S3-Medien werden auf der Ziel-Instanz sauber als offline nicht verfügbar markiert.
+  * **Offline-Logins:** Optional werden die bestehenden **Passwort-Hashes** (Argon2id/scrypt) der Teammitglieder mitübertragen, sodass sich Coaches und Spieler vor Ort ohne Internet direkt mit ihren gewohnten Zugangsdaten anmelden können.
+  * **Dualer Transfer & Delta-Rück-Sync:** Der Transport unterstützt sowohl den direkten **Core-to-Core-Transfer** (LAN/HTTPS) als auch portable **`.sideline-camp.tar`-Archive** (USB/Air-Gapped). Änderungen aus dem Trainingslager (neue Uploads, Tags, Zeichnungen, Notizen) erhalten `origin_instance_id` + `updated_at` und werden nach Rückkehr per **UUID-Delta-Merge** zurück in die Haupt-Instanz gespielt.
+
