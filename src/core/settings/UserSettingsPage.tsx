@@ -11,6 +11,11 @@ import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
 import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
+export interface ApiAktionErgebnis {
+  ok: boolean;
+  fehler?: string;
+}
+
 interface UserSettingsPageProps {
   benutzer: BenutzerKonto;
   team: TeamKontext;
@@ -18,12 +23,19 @@ interface UserSettingsPageProps {
   aktiveTeamAnsicht: TeamRolle;
   s3Konfig: S3Konfiguration;
   aktivePlugins: SidelinePlugin[];
-  onBenutzerAktualisieren: (aktualisiert: BenutzerKonto) => void;
-  onPasswortAendern?: (
-    userUuid: string,
-    aktuellesPasswort: string,
-    neuesPasswort: string
-  ) => boolean;
+  onProfilSpeichern: (daten: {
+    vollerName: string;
+    telefon: string;
+    trikotNummer: string;
+    position: string;
+    customProfilWerte: Record<string, string>;
+  }) => Promise<ApiAktionErgebnis>;
+  onZugangSpeichern: (daten: {
+    benutzername: string;
+    email: string;
+    altesPasswort?: string;
+    neuesPasswort?: string;
+  }) => Promise<ApiAktionErgebnis>;
   onZurueck?: () => void;
 }
 
@@ -34,8 +46,8 @@ export function UserSettingsPage({
   aktiveTeamAnsicht,
   s3Konfig,
   aktivePlugins,
-  onBenutzerAktualisieren,
-  onPasswortAendern,
+  onProfilSpeichern,
+  onZugangSpeichern,
   onZurueck,
 }: UserSettingsPageProps) {
   const [vollerName, setVollerName] = useState(benutzer.vollerName);
@@ -46,6 +58,8 @@ export function UserSettingsPage({
     benutzer.customProfilWerte
   );
   const [profilHinweis, setProfilHinweis] = useState<string | null>(null);
+  const [profilFehler, setProfilFehler] = useState<string | null>(null);
+  const [speichertProfil, setSpeichertProfil] = useState(false);
 
   const [benutzername, setBenutzername] = useState(benutzer.benutzername);
   const [email, setEmail] = useState(benutzer.email);
@@ -54,6 +68,7 @@ export function UserSettingsPage({
   const [passwortWiederholung, setPasswortWiederholung] = useState('');
   const [kontoHinweis, setKontoHinweis] = useState<string | null>(null);
   const [kontoFehler, setKontoFehler] = useState<string | null>(null);
+  const [speichertKonto, setSpeichertKonto] = useState(false);
 
   useEffect(() => {
     setVollerName(benutzer.vollerName);
@@ -64,26 +79,41 @@ export function UserSettingsPage({
     setBenutzername(benutzer.benutzername);
     setEmail(benutzer.email);
     setProfilHinweis(null);
+    setProfilFehler(null);
     setKontoHinweis(null);
     setKontoFehler(null);
   }, [benutzer]);
 
-  const handleProfilSpeichern = () => {
+  const handleProfilSpeichern = async () => {
+    setProfilFehler(null);
+    setProfilHinweis(null);
     const nameBereinigt = vollerName.trim();
-    if (!nameBereinigt) return;
-    onBenutzerAktualisieren({
-      ...benutzer,
-      vollerName: nameBereinigt,
-      trikotNummer: trikotNummer.trim(),
-      position: position.trim(),
-      telefon: telefon.trim(),
-      customProfilWerte: { ...customWerte },
-    });
-    setProfilHinweis('Profil- und Spielerdaten gespeichert.');
-    setTimeout(() => setProfilHinweis(null), 2400);
+    if (!nameBereinigt) {
+      setProfilFehler('Bitte einen vollständigen Namen angeben.');
+      return;
+    }
+
+    setSpeichertProfil(true);
+    try {
+      const res = await onProfilSpeichern({
+        vollerName: nameBereinigt,
+        trikotNummer: trikotNummer.trim(),
+        position: position.trim(),
+        telefon: telefon.trim(),
+        customProfilWerte: { ...customWerte },
+      });
+      if (!res.ok) {
+        setProfilFehler(res.fehler ?? 'Profil konnte nicht gespeichert werden.');
+        return;
+      }
+      setProfilHinweis('Profil- und Spielerdaten gespeichert.');
+      setTimeout(() => setProfilHinweis(null), 2400);
+    } finally {
+      setSpeichertProfil(false);
+    }
   };
 
-  const handleKontoSpeichern = () => {
+  const handleKontoSpeichern = async () => {
     setKontoFehler(null);
     setKontoHinweis(null);
 
@@ -107,26 +137,33 @@ export function UserSettingsPage({
         setKontoFehler('Die neuen Passwörter stimmen nicht überein.');
         return;
       }
-      if (onPasswortAendern && !onPasswortAendern(benutzer.uuid, passwortAktuell, passwortNeu)) {
-        setKontoFehler('Das aktuelle Passwort ist nicht korrekt.');
-        return;
-      }
     }
 
-    onBenutzerAktualisieren({
-      ...benutzer,
-      benutzername: userBereinigt,
-      email: mailBereinigt,
-    });
-    setPasswortAktuell('');
-    setPasswortNeu('');
-    setPasswortWiederholung('');
-    setKontoHinweis(
-      passwortNeu
-        ? 'Kontodaten und Passwort erfolgreich aktualisiert.'
-        : 'Nutzername und E-Mail-Adresse gespeichert.'
-    );
-    setTimeout(() => setKontoHinweis(null), 2600);
+    setSpeichertKonto(true);
+    try {
+      const res = await onZugangSpeichern({
+        benutzername: userBereinigt,
+        email: mailBereinigt,
+        ...(passwortNeu
+          ? { altesPasswort: passwortAktuell, neuesPasswort: passwortNeu }
+          : {}),
+      });
+      if (!res.ok) {
+        setKontoFehler(res.fehler ?? 'Kontodaten konnten nicht aktualisiert werden.');
+        return;
+      }
+      setPasswortAktuell('');
+      setPasswortNeu('');
+      setPasswortWiederholung('');
+      setKontoHinweis(
+        passwortNeu
+          ? 'Kontodaten und Passwort erfolgreich aktualisiert.'
+          : 'Nutzername und E-Mail-Adresse gespeichert.'
+      );
+      setTimeout(() => setKontoHinweis(null), 2600);
+    } finally {
+      setSpeichertKonto(false);
+    }
   };
 
   const kategorien: SettingsKategorie[] = [
@@ -271,15 +308,18 @@ export function UserSettingsPage({
           </div>
         )}
 
+        {profilFehler && <p className="text-xs text-[#FCA5A5]">{profilFehler}</p>}
+
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
           <span className="text-xs text-[#86EFAC]">{profilHinweis ?? ''}</span>
           <button
             type="button"
-            onClick={handleProfilSpeichern}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24]"
+            disabled={speichertProfil}
+            onClick={() => void handleProfilSpeichern()}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:opacity-60"
           >
             <Save className="h-3.5 w-3.5" aria-hidden="true" />
-            Profil speichern
+            {speichertProfil ? 'Speichert…' : 'Profil speichern'}
           </button>
         </div>
       </section>
@@ -358,10 +398,11 @@ export function UserSettingsPage({
           <span className="text-xs text-[#86EFAC]">{kontoHinweis ?? ''}</span>
           <button
             type="button"
-            onClick={handleKontoSpeichern}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:border-[#F59E0B]"
+            disabled={speichertKonto}
+            onClick={() => void handleKontoSpeichern()}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:border-[#F59E0B] disabled:opacity-60"
           >
-            Zugangsdaten aktualisieren
+            {speichertKonto ? 'Speichert…' : 'Zugangsdaten aktualisieren'}
           </button>
         </div>
 

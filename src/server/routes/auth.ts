@@ -196,6 +196,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
           id: pruefung.einladung.id,
           teamId: pruefung.einladung.teamId,
           typ: pruefung.einladung.typ,
+          ...(pruefung.einladung.zielEmail ? { zielEmail: pruefung.einladung.zielEmail } : {}),
           rolle: pruefung.einladung.rolle,
           units: pruefung.einladung.units,
           gueltigBis: pruefung.einladung.gueltigBis,
@@ -205,7 +206,9 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
           id: team.id,
           name: team.name,
           kurzname: team.kurzname,
+          aktiveSaison: team.aktiveSaison,
           primaerFarbe: team.primaerFarbe,
+          customProfilFelder: team.customProfilFelder,
         },
       });
     } catch (err) {
@@ -270,6 +273,16 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
           return;
         }
 
+        const customProfilWerte =
+          body.customProfilWerte && typeof body.customProfilWerte === 'object'
+            ? Object.fromEntries(
+                Object.entries(body.customProfilWerte as Record<string, unknown>).map(([k, v]) => [
+                  k,
+                  String(v ?? ''),
+                ])
+              )
+            : {};
+
         konto = await repo.erstelleBenutzer(
           {
             uuid: `usr-${crypto.randomUUID()}`,
@@ -282,7 +295,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
             position: typeof body.position === 'string' ? body.position.trim() : undefined,
             istSysadmin: false,
             erstelltAm: new Date().toISOString().slice(0, 10),
-            customProfilWerte: {},
+            customProfilWerte,
           },
           hashPasswort(passwort)
         );
@@ -294,6 +307,14 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
         return;
       }
 
+      const gueltigeUnits = new Set(['OFFENSE', 'DEFENSE', 'SPECIAL_TEAMS']);
+      const gewaehlteUnits = Array.isArray(body.units)
+        ? body.units.filter((u: unknown): u is 'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS' =>
+            typeof u === 'string' && gueltigeUnits.has(u)
+          )
+        : [];
+      const finalUnits = gewaehlteUnits.length > 0 ? gewaehlteUnits : pruefung.einladung.units;
+
       const status: TeamMitgliedschaft['status'] = pruefung.einladung.bestaetigungErforderlich
         ? 'WARTET_AUF_FREIGABE'
         : 'AKTIV';
@@ -303,7 +324,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
         userUuid: konto.uuid,
         teamId: team.id,
         rolle: pruefung.einladung.rolle,
-        units: pruefung.einladung.units,
+        units: finalUnits,
         status,
         beigetretenAm: new Date().toISOString().slice(0, 10),
       });

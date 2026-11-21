@@ -1,38 +1,48 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, KeyRound, Link2, Lock, Share2, ShieldCheck } from 'lucide-react';
-import type { BenutzerKonto, BenutzerProfil } from '../../shared/types.ts';
-import { DEMO_PROFILE } from '../../shared/types.ts';
-import { DEMO_STANDARD_PASSWORT, authentifiziereBenutzer } from '../authService.ts';
+import { DEMO_STANDARD_PASSWORT } from '../authService.ts';
 
 interface LoginViewProps {
-  benutzerListe: BenutzerKonto[];
-  passwoerter: ReadonlyMap<string, string>;
-  onErfolgreicherLogin: (benutzer: BenutzerKonto, demoProfil?: BenutzerProfil) => void;
+  onAnmelden: (kennung: string, passwort: string) => Promise<{ ok: boolean; fehler?: string }>;
   onInviteOeffnen: (token: string) => void;
   onShareOeffnen: (token: string) => void;
+  demoSchnellzugangErlaubt?: boolean;
 }
 
+const DEMO_SCHNELLZUGANG_KONTEN = [
+  { id: 'demo-admin', label: 'Team Admin + Sysadmin', kennung: 'm.brenner' },
+  { id: 'demo-coach', label: 'Coach', kennung: 't.richter' },
+  { id: 'demo-player', label: 'Spieler', kennung: 'l.weber' },
+  { id: 'demo-sysadmin', label: 'Nur Sysadmin', kennung: 'sysadmin' },
+] as const;
+
 export function LoginView({
-  benutzerListe,
-  passwoerter,
-  onErfolgreicherLogin,
+  onAnmelden,
   onInviteOeffnen,
   onShareOeffnen,
+  demoSchnellzugangErlaubt = true,
 }: LoginViewProps) {
   const [kennung, setKennung] = useState('headcoach@stallions-football.de');
   const [passwort, setPasswort] = useState(DEMO_STANDARD_PASSWORT);
+  const [laedt, setLaedt] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
+
+  const fuehreLoginAus = async (zielKennung: string, zielPasswort: string) => {
+    setFehler(null);
+    setLaedt(true);
+    try {
+      const res = await onAnmelden(zielKennung, zielPasswort);
+      if (!res.ok) {
+        setFehler(res.fehler ?? 'Anmeldung fehlgeschlagen.');
+      }
+    } finally {
+      setLaedt(false);
+    }
+  };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    setFehler(null);
-    const res = authentifiziereBenutzer(benutzerListe, passwoerter, kennung, passwort);
-    if (!res.ok || !res.benutzer) {
-      setFehler(res.fehler ?? 'Anmeldung fehlgeschlagen.');
-      return;
-    }
-    const passendesDemo = DEMO_PROFILE.find((p) => p.userUuid === res.benutzer!.uuid);
-    onErfolgreicherLogin(res.benutzer, passendesDemo);
+    void fuehreLoginAus(kennung, passwort);
   };
 
   return (
@@ -93,47 +103,49 @@ export function LoginView({
 
           <button
             type="submit"
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24]"
+            disabled={laedt}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:opacity-60"
           >
-            Anmelden
+            {laedt ? 'Wird angemeldet…' : 'Anmelden'}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
 
-          <div className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-[11px] text-[#8B949E]">
-            Demo-Passwort für alle vorkonfigurierten Konten:{' '}
-            <code className="font-mono text-[#E6EDF3]">{DEMO_STANDARD_PASSWORT}</code>
-          </div>
+          {demoSchnellzugangErlaubt && (
+            <div className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-[11px] text-[#8B949E]">
+              Demo-Passwort (Dev/Preview):{' '}
+              <code className="font-mono text-[#E6EDF3]">{DEMO_STANDARD_PASSWORT}</code>
+            </div>
+          )}
         </form>
 
-        {/* Demo-Schnellzugang */}
-        <section
-          aria-label="Demo-Schnellzugang"
-          className="rounded-xl border border-[#232933] bg-[#13171D] p-5 space-y-3"
-        >
-          <div className="flex items-center gap-2 text-xs font-semibold text-white">
-            <ShieldCheck className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-            <span>Demo-Schnellzugang (ohne Eingabe)</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            {DEMO_PROFILE.map((profil) => {
-              const user = benutzerListe.find((b) => b.uuid === profil.userUuid);
-              if (!user) return null;
-              return (
+        {/* Demo-Schnellzugang (führt echte Backend-Session-Anmeldung durch) */}
+        {demoSchnellzugangErlaubt && (
+          <section
+            aria-label="Demo-Schnellzugang"
+            className="rounded-xl border border-[#232933] bg-[#13171D] p-5 space-y-3"
+          >
+            <div className="flex items-center gap-2 text-xs font-semibold text-white">
+              <ShieldCheck className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+              <span>Demo-Schnellzugang (Backend-Session)</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {DEMO_SCHNELLZUGANG_KONTEN.map((eintrag) => (
                 <button
-                  key={profil.id}
+                  key={eintrag.id}
                   type="button"
-                  onClick={() => onErfolgreicherLogin(user, profil)}
-                  className="rounded-md border border-[#232933] bg-[#0B0E11] px-3 py-2 text-left transition-colors hover:border-[#F59E0B]"
+                  disabled={laedt}
+                  onClick={() => void fuehreLoginAus(eintrag.kennung, DEMO_STANDARD_PASSWORT)}
+                  className="rounded-md border border-[#232933] bg-[#0B0E11] px-3 py-2 text-left transition-colors hover:border-[#F59E0B] disabled:opacity-60"
                 >
-                  <div className="text-xs font-medium text-white">{profil.label}</div>
+                  <div className="text-xs font-medium text-white">{eintrag.label}</div>
                   <div className="truncate font-mono text-[10px] text-[#8B949E]">
-                    @{user.benutzername}
+                    @{eintrag.kennung}
                   </div>
                 </button>
-              );
-            })}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Direktzugriff auf öffentliche Flows (/invite & /share) */}
         <section

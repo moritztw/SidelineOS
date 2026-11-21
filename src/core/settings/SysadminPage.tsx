@@ -33,6 +33,8 @@ import {
 import { parseGitHubPluginQuelle } from '../pluginRegistry.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
+import type { ApiAktionErgebnis } from './UserSettingsPage.tsx';
+
 interface SysadminPageProps {
   storeKatalog: PluginStoreEintrag[];
   installiertePlugins: SidelinePlugin[];
@@ -46,16 +48,29 @@ interface SysadminPageProps {
   onPluginInstallieren: (pluginId: PluginId) => void;
   onPluginDeinstallieren: (pluginId: PluginId) => void;
   onCustomGitHubPluginHinzufuegen: (repoUrl: string, slug: string) => void;
-  onGlobalModulToggle: (modulId: PluginId) => void;
-  onTeamModulToggle: (teamId: string, modulId: PluginId) => void;
-  onTeamErstellen: (team: TeamKontext) => void;
-  onTeamLoeschen: (teamId: string) => void;
+  onGlobalModulToggle: (modulId: PluginId) => Promise<ApiAktionErgebnis> | void;
+  onTeamModulToggle: (teamId: string, modulId: PluginId) => Promise<ApiAktionErgebnis>;
+  onTeamErstellen: (payload: {
+    name: string;
+    kurzname: string;
+    aktiveSaison: string;
+    primaerFarbe?: string;
+    aktivierteModule?: PluginId[];
+    customProfilFelder?: TeamKontext['customProfilFelder'];
+  }) => Promise<ApiAktionErgebnis>;
+  onTeamLoeschen: (teamId: string) => Promise<ApiAktionErgebnis>;
   onBenutzerErstellen: (
-    benutzer: BenutzerKonto,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      passwort: string;
+      istSysadmin: boolean;
+    },
     teamZuweisung?: { teamId: string; rolle: TeamRolle }
-  ) => void;
-  onBenutzerSysadminToggle: (userUuid: string) => void;
-  onBenutzerLoeschen: (userUuid: string) => void;
+  ) => Promise<ApiAktionErgebnis>;
+  onBenutzerSysadminToggle: (userUuid: string) => Promise<ApiAktionErgebnis>;
+  onBenutzerLoeschen: (userUuid: string) => Promise<ApiAktionErgebnis>;
   onS3Speichern: (neu: S3Konfiguration) => void;
   onSmtpSpeichern: (neu: SmtpKonfiguration) => void;
   onZurueck?: () => void;
@@ -100,9 +115,11 @@ export function SysadminPage({
   const [neuName, setNeuName] = useState('');
   const [neuUsername, setNeuUsername] = useState('');
   const [neuEmail, setNeuEmail] = useState('');
+  const [neuPasswort, setNeuPasswort] = useState('');
   const [neuIstSysadmin, setNeuIstSysadmin] = useState(false);
   const [neuTeamId, setNeuTeamId] = useState<string>(teams[0]?.id ?? '');
   const [neuTeamRolle, setNeuTeamRolle] = useState<TeamRolle>('TEAM_ADMIN');
+  const [sysadminFehler, setSysadminFehler] = useState<string | null>(null);
 
   // S3 & SMTP lokale Formular-Kopien
   const [s3Form, setS3Form] = useState<S3Konfiguration>(s3Konfig);
@@ -161,62 +178,86 @@ export function SysadminPage({
     setTimeout(() => setStoreHinweis(null), 3000);
   };
 
-  const handleTeamAnlegen = () => {
+  const fuehreSysAktionAus = async (
+    fn: () => Promise<ApiAktionErgebnis> | ApiAktionErgebnis | void,
+    erfolgCb?: () => void
+  ) => {
+    setSysadminFehler(null);
+    const res = await fn();
+    if (res && !res.ok) {
+      setSysadminFehler(res.fehler ?? 'Aktion fehlgeschlagen.');
+      return;
+    }
+    erfolgCb?.();
+  };
+
+  const handleTeamAnlegen = async () => {
     const name = neuesTeamName.trim();
     if (!name) return;
     const startSaison = neuesTeamSaison.trim() || '2026';
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    onTeamErstellen({
-      id: `team-${slug || Date.now()}`,
-      name,
-      aktiveSaison: startSaison,
-      saisons: [startSaison],
-      kurzname: neuesTeamKurz.trim() || name.slice(0, 12),
-      primaerFarbe: '#F59E0B',
-      aktivierteModule: [...globalAktivierteModule],
-      customProfilFelder: [
-        { key: 'notfallkontakt', label: 'Notfallkontakt', typ: 'text', pflicht: true },
-      ],
-    });
-    setNeuesTeamName('');
-    setNeuesTeamKurz('');
+    await fuehreSysAktionAus(
+      () =>
+        onTeamErstellen({
+          name,
+          aktiveSaison: startSaison,
+          kurzname: neuesTeamKurz.trim() || name.slice(0, 12),
+          primaerFarbe: '#F59E0B',
+          aktivierteModule: [...globalAktivierteModule],
+          customProfilFelder: [
+            { key: 'notfallkontakt', label: 'Notfallkontakt', typ: 'text', pflicht: true },
+          ],
+        }),
+      () => {
+        setNeuesTeamName('');
+        setNeuesTeamKurz('');
+      }
+    );
   };
 
-  const handleBenutzerAnlegen = () => {
+  const handleBenutzerAnlegen = async () => {
     const name = neuName.trim();
     const mail = neuEmail.trim();
     const username = (neuUsername.trim() || mail.split('@')[0] || '').toLowerCase();
-    if (!name || !mail.includes('@') || !username) return;
+    if (!name || !mail.includes('@') || !username) {
+      setSysadminFehler('Bitte Name, gültige E-Mail-Adresse und Benutzername eingeben.');
+      return;
+    }
+    if (neuPasswort.length < 10) {
+      setSysadminFehler('Das Initialpasswort muss mindestens 10 Zeichen lang sein.');
+      return;
+    }
 
-    const neuerUser: BenutzerKonto = {
-      uuid: `usr-${Date.now().toString(36)}`,
-      benutzername: username,
-      vollerName: name,
-      email: mail,
-      istSysadmin: neuIstSysadmin,
-      erstelltAm: new Date().toISOString().slice(0, 10),
-      customProfilWerte: {},
-    };
-
-    onBenutzerErstellen(
-      neuerUser,
-      neuTeamId ? { teamId: neuTeamId, rolle: neuTeamRolle } : undefined
+    await fuehreSysAktionAus(
+      () =>
+        onBenutzerErstellen(
+          {
+            vollerName: name,
+            benutzername: username,
+            email: mail,
+            passwort: neuPasswort,
+            istSysadmin: neuIstSysadmin,
+          },
+          neuTeamId ? { teamId: neuTeamId, rolle: neuTeamRolle } : undefined
+        ),
+      () => {
+        setNeuName('');
+        setNeuUsername('');
+        setNeuEmail('');
+        setNeuPasswort('');
+        setNeuIstSysadmin(false);
+      }
     );
-    setNeuName('');
-    setNeuUsername('');
-    setNeuEmail('');
-    setNeuIstSysadmin(false);
   };
 
-  const settingsKontext: PluginSettingsKontext = {
-    team: teams[0],
-    benutzer: benutzerListe[0],
-    aktiveTeamAnsicht: null,
-    s3Konfig,
-  };
+  const settingsKontext: PluginSettingsKontext | null =
+    teams[0] && benutzerListe[0]
+      ? {
+          team: teams[0],
+          benutzer: benutzerListe[0],
+          aktiveTeamAnsicht: null,
+          s3Konfig,
+        }
+      : null;
 
   return (
     <SettingsShell
@@ -232,6 +273,14 @@ export function SysadminPage({
         </div>
       }
     >
+      {sysadminFehler && (
+        <div
+          role="alert"
+          className="rounded-lg border border-[#DC2626]/50 bg-[#DC2626]/10 px-4 py-2.5 text-xs text-[#FCA5A5]"
+        >
+          {sysadminFehler}
+        </div>
+      )}
       {/* 1. Plugin Store (GitHub-Repositories) */}
       <section
         id="sys-store"
@@ -324,7 +373,7 @@ export function SysadminPage({
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => onGlobalModulToggle(manifest.id)}
+                        onClick={() => void fuehreSysAktionAus(() => onGlobalModulToggle(manifest.id))}
                         className={`rounded border px-2 py-1 text-[11px] font-medium ${
                           globalAn
                             ? 'border-[#16A34A]/40 bg-[#16A34A]/10 text-[#86EFAC]'
@@ -447,7 +496,11 @@ export function SysadminPage({
                           <input
                             type="checkbox"
                             checked={teamAktiv}
-                            onChange={() => onTeamModulToggle(team.id, plugin.manifest.id)}
+                            onChange={() =>
+                              void fuehreSysAktionAus(() =>
+                                onTeamModulToggle(team.id, plugin.manifest.id)
+                              )
+                            }
                             className="h-3.5 w-3.5 accent-[#F59E0B]"
                           />
                           <span>{plugin.manifest.name}</span>
@@ -509,8 +562,10 @@ export function SysadminPage({
                         <button
                           type="button"
                           onClick={() => {
-                            onTeamLoeschen(team.id);
-                            setLoeschTeamBestaetigungId(null);
+                            void fuehreSysAktionAus(
+                              () => onTeamLoeschen(team.id),
+                              () => setLoeschTeamBestaetigungId(null)
+                            );
                           }}
                           className="rounded bg-[#DC2626] px-2 py-1 text-[11px] font-semibold text-white"
                         >
@@ -557,7 +612,7 @@ export function SysadminPage({
           />
           <button
             type="button"
-            onClick={handleTeamAnlegen}
+            onClick={() => void handleTeamAnlegen()}
             className="inline-flex items-center justify-center gap-1.5 rounded bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
@@ -621,7 +676,7 @@ export function SysadminPage({
                         <input
                           type="checkbox"
                           checked={user.istSysadmin}
-                          onChange={() => onBenutzerSysadminToggle(user.uuid)}
+                          onChange={() => void fuehreSysAktionAus(() => onBenutzerSysadminToggle(user.uuid))}
                           className="h-3.5 w-3.5 accent-[#F59E0B]"
                         />
                         <span>{user.istSysadmin ? 'Ja' : 'Nein'}</span>
@@ -631,7 +686,7 @@ export function SysadminPage({
                       <button
                         type="button"
                         disabled={benutzerListe.length <= 1}
-                        onClick={() => onBenutzerLoeschen(user.uuid)}
+                        onClick={() => void fuehreSysAktionAus(() => onBenutzerLoeschen(user.uuid))}
                         className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5] disabled:opacity-40"
                       >
                         Konto löschen
@@ -666,6 +721,13 @@ export function SysadminPage({
             placeholder="E-Mail-Adresse"
             className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
           />
+          <input
+            type="password"
+            value={neuPasswort}
+            onChange={(e) => setNeuPasswort(e.target.value)}
+            placeholder="Initialpasswort (mind. 10 Zeichen)"
+            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+          />
           <select
             value={neuTeamId}
             onChange={(e) => setNeuTeamId(e.target.value)}
@@ -688,7 +750,7 @@ export function SysadminPage({
             <option value="COACH">Rolle: Coach</option>
             <option value="PLAYER">Rolle: Spieler</option>
           </select>
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 sm:col-span-2 lg:col-span-3">
             <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[#E6EDF3]">
               <input
                 type="checkbox"
@@ -700,7 +762,7 @@ export function SysadminPage({
             </label>
             <button
               type="button"
-              onClick={handleBenutzerAnlegen}
+              onClick={() => void handleBenutzerAnlegen()}
               className="rounded bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
             >
               Anlegen
@@ -909,10 +971,11 @@ ENABLED_MODULES="${globalAktivierteModule.join(',')}"`}
       </section>
 
       {/* 8. Dynamische Sysadmin-Panels aller aktivierten Plugins */}
-      {pluginsMitSysadminPanel.map((plugin) => {
-        const SysadminPanel = plugin.settingsPanels!.sysadmin!;
-        return <SysadminPanel key={plugin.manifest.id} ctx={settingsKontext} />;
-      })}
+      {settingsKontext &&
+        pluginsMitSysadminPanel.map((plugin) => {
+          const SysadminPanel = plugin.settingsPanels!.sysadmin!;
+          return <SysadminPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+        })}
     </SettingsShell>
   );
 }

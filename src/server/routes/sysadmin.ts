@@ -152,7 +152,28 @@ export function erstelleSysadminRouter(repo: CoreRepository, config: CoreServerC
         hashPasswort(passwort)
       );
 
-      res.status(201).json({ user });
+      let membership = undefined;
+      const zuweisung = body.teamZuweisung as { teamId?: unknown; rolle?: unknown } | undefined;
+      if (zuweisung && typeof zuweisung.teamId === 'string' && zuweisung.teamId.trim()) {
+        const team = await repo.findeTeamNachId(zuweisung.teamId.trim());
+        const rolle =
+          zuweisung.rolle === 'TEAM_ADMIN' || zuweisung.rolle === 'COACH' || zuweisung.rolle === 'PLAYER'
+            ? zuweisung.rolle
+            : 'PLAYER';
+        if (team) {
+          membership = await repo.speichereMitgliedschaft({
+            id: `mem-${crypto.randomUUID()}`,
+            userUuid: user.uuid,
+            teamId: team.id,
+            rolle,
+            units: ['OFFENSE'],
+            status: 'AKTIV',
+            beigetretenAm: new Date().toISOString().slice(0, 10),
+          });
+        }
+      }
+
+      res.status(201).json({ user, ...(membership ? { membership } : {}) });
     } catch (err) {
       next(err);
     }

@@ -27,24 +27,49 @@ import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
 import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
+import type { ApiAktionErgebnis } from './UserSettingsPage.tsx';
+
+export interface TeamMitgliedBenutzerInfo {
+  uuid: string;
+  benutzername: string;
+  vollerName: string;
+  trikotNummer?: string;
+  position?: string;
+  email?: string;
+  telefon?: string;
+}
+
 interface TeamSettingsPageProps {
   team: TeamKontext;
   benutzer: BenutzerKonto;
-  benutzerListe: BenutzerKonto[];
+  benutzerListe: TeamMitgliedBenutzerInfo[];
   mitgliedschaften: TeamMitgliedschaft[];
   einladungen: TeamEinladung[];
   s3Konfig: S3Konfiguration;
   aktivePlugins: SidelinePlugin[];
-  onTeamAktualisieren: (team: TeamKontext) => void;
-  onNeueSaisonStarten: (teamId: string, neueSaison: string) => void;
-  onMitgliedRolleAendern: (mitgliedschaftId: string, rolle: TeamRolle) => void;
-  onMitgliedUnitsAendern: (mitgliedschaftId: string, units: SpielerUnit[]) => void;
-  onMitgliedBestaetigen: (mitgliedschaftId: string) => void;
-  onMitgliedEntfernen: (mitgliedschaftId: string) => void;
-  onEinladungErstellen: (einladung: TeamEinladung) => void;
-  onEinladungWiderrufen: (einladungId: string) => void;
-  onProfilCustomFeldHinzufuegen: (teamId: string, feld: ProfilCustomFeld) => void;
-  onProfilCustomFeldLoeschen: (teamId: string, key: string) => void;
+  onTeamAktualisieren: (team: TeamKontext) => Promise<ApiAktionErgebnis>;
+  onNeueSaisonStarten: (teamId: string, neueSaison: string) => Promise<ApiAktionErgebnis>;
+  onMitgliedRolleAendern: (mitgliedschaftId: string, rolle: TeamRolle) => Promise<ApiAktionErgebnis>;
+  onMitgliedUnitsAendern: (
+    mitgliedschaftId: string,
+    units: SpielerUnit[]
+  ) => Promise<ApiAktionErgebnis>;
+  onMitgliedBestaetigen: (mitgliedschaftId: string) => Promise<ApiAktionErgebnis>;
+  onMitgliedEntfernen: (mitgliedschaftId: string) => Promise<ApiAktionErgebnis>;
+  onEinladungErstellen: (payload: {
+    typ: 'EMAIL' | 'TEAM_LINK';
+    zielEmail?: string;
+    rolle: TeamRolle;
+    units: SpielerUnit[];
+    gueltigTage?: number;
+    bestaetigungErforderlich?: boolean;
+  }) => Promise<ApiAktionErgebnis & { invitation?: TeamEinladung }>;
+  onEinladungWiderrufen: (einladungId: string) => Promise<ApiAktionErgebnis>;
+  onProfilCustomFeldHinzufuegen: (
+    teamId: string,
+    feld: ProfilCustomFeld
+  ) => Promise<ApiAktionErgebnis>;
+  onProfilCustomFeldLoeschen: (teamId: string, key: string) => Promise<ApiAktionErgebnis>;
   onEinladungTesten?: (token: string) => void;
   onZurueck?: () => void;
 }
@@ -94,6 +119,7 @@ export function TeamSettingsPage({
   const [profilFeldPflicht, setProfilFeldPflicht] = useState(false);
   const [profilFeldOptionen, setProfilFeldOptionen] = useState('');
   const [profilFeldFehler, setProfilFeldFehler] = useState<string | null>(null);
+  const [aktionFehler, setAktionFehler] = useState<string | null>(null);
 
   useEffect(() => {
     setTeamName(team.name);
@@ -101,83 +127,97 @@ export function TeamSettingsPage({
     setKurzname(team.kurzname);
     setPrimaerFarbe(team.primaerFarbe ?? '#F59E0B');
     setTeamHinweis(null);
+    setAktionFehler(null);
   }, [team]);
 
   const teamMitglieder = mitgliedschaften.filter((m) => m.teamId === team.id);
   const aktiveMitglieder = teamMitglieder.filter((m) => m.status === 'AKTIV');
   const offeneAnfragen = teamMitglieder.filter((m) => m.status === 'WARTET_AUF_FREIGABE');
-  const teamEinladungen = einladungen.filter((e) => e.teamId === team.id);
+  const teamEinladungen = einladungen.filter((e) => e.teamId === team.id && e.aktiv);
 
   const findeBenutzer = (uuid: string) => benutzerListe.find((b) => b.uuid === uuid);
 
   const toggleUnitInListe = (aktuell: SpielerUnit[], unit: SpielerUnit): SpielerUnit[] =>
     aktuell.includes(unit) ? aktuell.filter((u) => u !== unit) : [...aktuell, unit];
 
-  const handleTeamSpeichern = () => {
-    if (!teamName.trim()) return;
-    onTeamAktualisieren({
-      ...team,
-      name: teamName.trim(),
-      aktiveSaison,
-      kurzname: kurzname.trim() || team.kurzname,
-      primaerFarbe,
-    });
-    setTeamHinweis('Team-Einstellungen gespeichert.');
-    setTimeout(() => setTeamHinweis(null), 2200);
+  const fuehreAus = async (fn: () => Promise<ApiAktionErgebnis>, erfolgsCb?: () => void) => {
+    setAktionFehler(null);
+    const res = await fn();
+    if (!res.ok) {
+      setAktionFehler(res.fehler ?? 'Aktion fehlgeschlagen.');
+      return;
+    }
+    erfolgsCb?.();
   };
 
-  const handleNeueSaison = () => {
+  const handleTeamSpeichern = async () => {
+    if (!teamName.trim()) return;
+    await fuehreAus(
+      () =>
+        onTeamAktualisieren({
+          ...team,
+          name: teamName.trim(),
+          aktiveSaison,
+          kurzname: kurzname.trim() || team.kurzname,
+          primaerFarbe,
+        }),
+      () => {
+        setTeamHinweis('Team-Einstellungen gespeichert.');
+        setTimeout(() => setTeamHinweis(null), 2200);
+      }
+    );
+  };
+
+  const handleNeueSaison = async () => {
     const wert = neueSaisonEingabe.trim();
     if (!wert) return;
-    onNeueSaisonStarten(team.id, wert);
-    setNeueSaisonEingabe('');
-    setTeamHinweis(`Saison ${wert} gestartet – alle bisherigen Saisons bleiben abrufbar.`);
-    setTimeout(() => setTeamHinweis(null), 3000);
+    await fuehreAus(
+      () => onNeueSaisonStarten(team.id, wert),
+      () => {
+        setNeueSaisonEingabe('');
+        setTeamHinweis(`Saison ${wert} gestartet – alle bisherigen Saisons bleiben abrufbar.`);
+        setTimeout(() => setTeamHinweis(null), 3000);
+      }
+    );
   };
 
-  const handleMailEinladung = () => {
+  const handleMailEinladung = async () => {
     const ziel = mailAdresse.trim();
     if (!ziel || !ziel.includes('@')) return;
-    const token = `mail-${Math.random().toString(36).slice(2, 10)}`;
-    const ablauf = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-
-    onEinladungErstellen({
-      id: `inv-${Date.now()}`,
-      teamId: team.id,
+    setAktionFehler(null);
+    const res = await onEinladungErstellen({
       typ: 'EMAIL',
       zielEmail: ziel,
       rolle: mailRolle,
       units: mailUnits,
-      token,
-      pfad: `/invite/${token}`,
-      erstelltAm: new Date().toISOString().slice(0, 10),
-      gueltigBis: ablauf,
+      gueltigTage: 7,
       bestaetigungErforderlich: false,
-      aktiv: true,
     });
+    if (!res.ok) {
+      setAktionFehler(res.fehler ?? 'E-Mail-Einladung konnte nicht angelegt werden.');
+      return;
+    }
     setMailAdresse('');
-    setEinladungHinweis(`E-Mail-Einladung an ${ziel} angelegt (/invite/${token}).`);
+    setEinladungHinweis(
+      `E-Mail-Einladung an ${ziel} angelegt (${res.invitation?.pfad ?? '/invite/…'}).`
+    );
     setTimeout(() => setEinladungHinweis(null), 3000);
   };
 
-  const handleTeamLinkErstellen = () => {
-    const token = `team-${Math.random().toString(36).slice(2, 10)}`;
-    const ablauf = new Date(Date.now() + linkTage * 86400000).toISOString().slice(0, 10);
-
-    onEinladungErstellen({
-      id: `inv-${Date.now()}`,
-      teamId: team.id,
+  const handleTeamLinkErstellen = async () => {
+    setAktionFehler(null);
+    const res = await onEinladungErstellen({
       typ: 'TEAM_LINK',
       rolle: linkRolle,
       units: ['OFFENSE'],
-      token,
-      pfad: `/invite/${token}`,
-      erstelltAm: new Date().toISOString().slice(0, 10),
-      gueltigBis: ablauf,
+      gueltigTage: linkTage,
       bestaetigungErforderlich: linkBestaetigung,
-      aktiv: true,
     });
-    setEinladungHinweis(`Team-Einladungslink erstellt (/invite/${token}).`);
+    if (!res.ok) {
+      setAktionFehler(res.fehler ?? 'Team-Link konnte nicht erstellt werden.');
+      return;
+    }
+    setEinladungHinweis(`Team-Einladungslink erstellt (${res.invitation?.pfad ?? '/invite/…'}).`);
     setTimeout(() => setEinladungHinweis(null), 3000);
   };
 
@@ -191,7 +231,7 @@ export function TeamSettingsPage({
     setTimeout(() => setKopiertId(null), 1800);
   };
 
-  const handleProfilCustomFeldAnlegen = () => {
+  const handleProfilCustomFeldAnlegen = async () => {
     setProfilFeldFehler(null);
     const label = profilFeldLabel.trim();
     if (!label) {
@@ -214,13 +254,17 @@ export function TeamSettingsPage({
             .filter(Boolean)
         : undefined;
 
-    onProfilCustomFeldHinzufuegen(team.id, {
+    const res = await onProfilCustomFeldHinzufuegen(team.id, {
       key,
       label,
       typ: profilFeldTyp,
       pflicht: profilFeldPflicht,
       ...(optionen && optionen.length > 0 ? { optionen } : {}),
     });
+    if (!res.ok) {
+      setProfilFeldFehler(res.fehler ?? 'Profilfeld konnte nicht gespeichert werden.');
+      return;
+    }
     setProfilFeldLabel('');
     setProfilFeldOptionen('');
     setProfilFeldPflicht(false);
@@ -265,6 +309,14 @@ export function TeamSettingsPage({
       zurueckLabel="Alle Einstellungen"
       onZurueck={onZurueck}
     >
+      {aktionFehler && (
+        <div
+          role="alert"
+          className="rounded-lg border border-[#DC2626]/50 bg-[#DC2626]/10 px-4 py-2.5 text-xs text-[#FCA5A5]"
+        >
+          {aktionFehler}
+        </div>
+      )}
       {/* 1. Team-Profil, Saisons & Farben */}
       <section
         id="team-profil"
@@ -418,7 +470,9 @@ export function TeamSettingsPage({
                   <tr key={mem.id}>
                     <td className="py-3 pr-3">
                       <div className="font-medium text-[#E6EDF3]">{user.vollerName}</div>
-                      <div className="font-mono text-[11px] text-[#8B949E]">{user.email}</div>
+                      <div className="font-mono text-[11px] text-[#8B949E]">
+                        {user.email ?? `@${user.benutzername}`}
+                      </div>
                     </td>
                     <td className="py-3 pr-3 font-mono text-[#E6EDF3] whitespace-nowrap">
                       {user.trikotNummer ? `#${user.trikotNummer}` : '–'}{' '}
@@ -429,7 +483,9 @@ export function TeamSettingsPage({
                         aria-label={`Rolle für ${user.vollerName}`}
                         value={mem.rolle}
                         onChange={(e) =>
-                          onMitgliedRolleAendern(mem.id, e.target.value as TeamRolle)
+                          void fuehreAus(() =>
+                            onMitgliedRolleAendern(mem.id, e.target.value as TeamRolle)
+                          )
                         }
                         className="rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                       >
@@ -453,9 +509,11 @@ export function TeamSettingsPage({
                                 type="checkbox"
                                 checked={aktiv}
                                 onChange={() =>
-                                  onMitgliedUnitsAendern(
-                                    mem.id,
-                                    toggleUnitInListe(mem.units, unit)
+                                  void fuehreAus(() =>
+                                    onMitgliedUnitsAendern(
+                                      mem.id,
+                                      toggleUnitInListe(mem.units, unit)
+                                    )
                                   )
                                 }
                                 className="h-3.5 w-3.5 accent-[#F59E0B]"
@@ -473,7 +531,7 @@ export function TeamSettingsPage({
                     <td className="py-3 text-right">
                       <button
                         type="button"
-                        onClick={() => onMitgliedEntfernen(mem.id)}
+                        onClick={() => void fuehreAus(() => onMitgliedEntfernen(mem.id))}
                         className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
                       >
                         Entfernen
@@ -547,9 +605,11 @@ export function TeamSettingsPage({
                             type="checkbox"
                             checked={anfrage.units.includes(unit)}
                             onChange={() =>
-                              onMitgliedUnitsAendern(
-                                anfrage.id,
-                                toggleUnitInListe(anfrage.units, unit)
+                              void fuehreAus(() =>
+                                onMitgliedUnitsAendern(
+                                  anfrage.id,
+                                  toggleUnitInListe(anfrage.units, unit)
+                                )
                               )
                             }
                             className="h-3.5 w-3.5 accent-[#F59E0B]"
@@ -560,7 +620,7 @@ export function TeamSettingsPage({
 
                       <button
                         type="button"
-                        onClick={() => onMitgliedBestaetigen(anfrage.id)}
+                        onClick={() => void fuehreAus(() => onMitgliedBestaetigen(anfrage.id))}
                         className="inline-flex items-center gap-1 rounded bg-[#F59E0B] px-2.5 py-1 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
                       >
                         <Check className="h-3.5 w-3.5" aria-hidden="true" />
@@ -568,7 +628,7 @@ export function TeamSettingsPage({
                       </button>
                       <button
                         type="button"
-                        onClick={() => onMitgliedEntfernen(anfrage.id)}
+                        onClick={() => void fuehreAus(() => onMitgliedEntfernen(anfrage.id))}
                         className="inline-flex items-center gap-1 rounded border border-[#232933] px-2.5 py-1 text-xs text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
                       >
                         <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -736,7 +796,7 @@ export function TeamSettingsPage({
                     </button>
                     <button
                       type="button"
-                      onClick={() => onEinladungWiderrufen(inv.id)}
+                      onClick={() => void fuehreAus(() => onEinladungWiderrufen(inv.id))}
                       title="Einladung widerrufen"
                       aria-label="Einladung widerrufen"
                       className="rounded p-1 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
@@ -794,7 +854,7 @@ export function TeamSettingsPage({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onProfilCustomFeldLoeschen(team.id, feld.key)}
+                  onClick={() => void fuehreAus(() => onProfilCustomFeldLoeschen(team.id, feld.key))}
                   aria-label={`Profilfeld ${feld.label} löschen`}
                   className="rounded p-1 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
                 >

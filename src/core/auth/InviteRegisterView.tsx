@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -7,28 +7,18 @@ import {
   ShieldCheck,
   UserPlus,
 } from 'lucide-react';
-import type {
-  BenutzerKonto,
-  SpielerUnit,
-  TeamEinladung,
-  TeamKontext,
-  TeamMitgliedschaft,
-} from '../../shared/types.ts';
+import type { SpielerUnit } from '../../shared/types.ts';
 import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
-import { authentifiziereBenutzer, pruefeEinladungsToken } from '../authService.ts';
+import {
+  CoreApiError,
+  coreApi,
+  type InviteAcceptResponse,
+  type InviteCheckResponse,
+} from '../apiClient.ts';
 
 interface InviteRegisterViewProps {
   token: string;
-  einladungen: TeamEinladung[];
-  teams: TeamKontext[];
-  benutzerListe: BenutzerKonto[];
-  passwoerter: ReadonlyMap<string, string>;
-  onRegistrierenUndBeitreten: (daten: {
-    benutzer: BenutzerKonto;
-    passwort: string;
-    mitgliedschaft: TeamMitgliedschaft;
-    istNeuesKonto: boolean;
-  }) => void;
+  onBeigetreten: (ergebnis: InviteAcceptResponse) => void;
   onZurueckZumLogin: () => void;
 }
 
@@ -36,44 +26,87 @@ const ALLE_UNITS: SpielerUnit[] = ['OFFENSE', 'DEFENSE', 'SPECIAL_TEAMS'];
 
 export function InviteRegisterView({
   token,
-  einladungen,
-  teams,
-  benutzerListe,
-  passwoerter,
-  onRegistrierenUndBeitreten,
+  onBeigetreten,
   onZurueckZumLogin,
 }: InviteRegisterViewProps) {
-  const pruefung = pruefeEinladungsToken(einladungen, token);
-  const einladung = pruefung.einladung;
-  const team = einladung ? teams.find((t) => t.id === einladung.teamId) : undefined;
+  const [ladePruefung, setLadePruefung] = useState(true);
+  const [pruefungFehler, setPruefungFehler] = useState<{ status: number; nachricht: string } | null>(
+    null
+  );
+  const [inviteInfo, setInviteInfo] = useState<InviteCheckResponse | null>(null);
 
   const [modus, setModus] = useState<'neu' | 'bestehend'>('neu');
   const [vollerName, setVollerName] = useState('');
   const [benutzername, setBenutzername] = useState('');
-  const [email, setEmail] = useState(einladung?.zielEmail ?? '');
+  const [email, setEmail] = useState('');
   const [passwort, setPasswort] = useState('');
   const [passwortWiederholung, setPasswortWiederholung] = useState('');
   const [trikotNummer, setTrikotNummer] = useState('');
   const [position, setPosition] = useState('');
   const [telefon, setTelefon] = useState('');
-  const [units, setUnits] = useState<SpielerUnit[]>(einladung?.units ?? ['OFFENSE']);
+  const [units, setUnits] = useState<SpielerUnit[]>(['OFFENSE']);
   const [customWerte, setCustomWerte] = useState<Record<string, string>>({});
 
   // Login-Daten für bestehendes Konto
   const [bestehendKennung, setBestehendKennung] = useState('');
   const [bestehendPasswort, setBestehendPasswort] = useState('');
 
+  const [sendet, setSendet] = useState(false);
   const [fehler, setFehler] = useState<string | null>(null);
   const [abgeschlossenStatus, setAbgeschlossenStatus] = useState<
     'AKTIV' | 'WARTET_AUF_FREIGABE' | null
   >(null);
 
+  useEffect(() => {
+    let aktiv = true;
+    setLadePruefung(true);
+    setPruefungFehler(null);
+    setInviteInfo(null);
+
+    coreApi
+      .pruefeEinladung(token)
+      .then((res) => {
+        if (!aktiv) return;
+        setInviteInfo(res);
+        setUnits(res.invitation.units.length > 0 ? res.invitation.units : ['OFFENSE']);
+        if (res.invitation.zielEmail) {
+          setEmail(res.invitation.zielEmail);
+        }
+      })
+      .catch((err) => {
+        if (!aktiv) return;
+        if (err instanceof CoreApiError) {
+          setPruefungFehler({ status: err.status, nachricht: err.message });
+        } else {
+          setPruefungFehler({
+            status: 500,
+            nachricht: 'Einladungslink konnte nicht geprüft werden.',
+          });
+        }
+      })
+      .finally(() => {
+        if (aktiv) setLadePruefung(false);
+      });
+
+    return () => {
+      aktiv = false;
+    };
+  }, [token]);
+
   const toggleUnit = (u: SpielerUnit) => {
     setUnits((alt) => (alt.includes(u) ? alt.filter((item) => item !== u) : [...alt, u]));
   };
 
-  if (!pruefung.ok || !einladung || !team) {
-    const ist410 = pruefung.status === 'EXPIRED' || pruefung.status === 'REVOKED';
+  if (ladePruefung) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-xs text-[#8B949E]">
+        Einladungslink wird geprüft…
+      </div>
+    );
+  }
+
+  if (pruefungFehler || !inviteInfo) {
+    const ist410 = pruefungFehler?.status === 410;
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
         <div className="w-full max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4 text-center">
@@ -85,7 +118,7 @@ export function InviteRegisterView({
           </div>
           <h1 className="text-base font-semibold text-white">Einladung nicht nutzbar</h1>
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            {pruefung.fehler ?? 'Das zugehörige Team konnte nicht gefunden werden.'}
+            {pruefungFehler?.nachricht ?? 'Das zugehörige Team konnte nicht gefunden werden.'}
           </p>
           <button
             type="button"
@@ -100,6 +133,8 @@ export function InviteRegisterView({
     );
   }
 
+  const { invitation: einladung, team } = inviteInfo;
+
   if (abgeschlossenStatus === 'WARTET_AUF_FREIGABE') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
@@ -109,8 +144,8 @@ export function InviteRegisterView({
           </div>
           <h1 className="text-lg font-semibold text-white">Registrierung eingegangen</h1>
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            Dein SidelineOS-Core-Konto wurde angelegt. Da dieser Team-Link eine Bestätigung
-            vorsieht, prüft ein Team Admin von{' '}
+            Dein SidelineOS-Core-Konto wurde in der Datenbank angelegt. Da dieser Team-Link eine
+            Bestätigung vorsieht, prüft ein Team Admin von{' '}
             <strong className="text-white">{team.name}</strong> nun deine Anfrage unter{' '}
             <span className="font-mono text-[#E6EDF3]">Team-Einstellungen → Einladungen</span>.
           </p>
@@ -119,75 +154,49 @@ export function InviteRegisterView({
             onClick={onZurueckZumLogin}
             className="w-full rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
           >
-            Zur Anmeldung (Team Admin prüfen lassen)
+            Zur Anmeldung
           </button>
         </div>
       </div>
     );
   }
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setFehler(null);
 
-    const status: TeamMitgliedschaft['status'] = einladung.bestaetigungErforderlich
-      ? 'WARTET_AUF_FREIGABE'
-      : 'AKTIV';
-
     if (modus === 'bestehend') {
-      const auth = authentifiziereBenutzer(
-        benutzerListe,
-        passwoerter,
-        bestehendKennung,
-        bestehendPasswort
-      );
-      if (!auth.ok || !auth.benutzer) {
-        setFehler(auth.fehler ?? 'Anmeldung fehlgeschlagen.');
+      if (!bestehendKennung.trim() || !bestehendPasswort) {
+        setFehler('Bitte Benutzername oder E-Mail sowie Passwort eingeben.');
         return;
       }
-
-      const mitgliedschaft: TeamMitgliedschaft = {
-        id: `mem-${Date.now()}`,
-        userUuid: auth.benutzer.uuid,
-        teamId: team.id,
-        rolle: einladung.rolle,
-        units: units.length > 0 ? units : ['OFFENSE'],
-        status,
-        beigetretenAm: new Date().toISOString().slice(0, 10),
-      };
-
-      onRegistrierenUndBeitreten({
-        benutzer: auth.benutzer,
-        passwort: bestehendPasswort,
-        mitgliedschaft,
-        istNeuesKonto: false,
-      });
-
-      if (status === 'WARTET_AUF_FREIGABE') {
-        setAbgeschlossenStatus('WARTET_AUF_FREIGABE');
+      setSendet(true);
+      try {
+        const res = await coreApi.akzeptiereEinladung(token, {
+          modus: 'bestehend',
+          kennung: bestehendKennung.trim(),
+          passwort: bestehendPasswort,
+          units: units.length > 0 ? units : ['OFFENSE'],
+        });
+        if (res.status === 'WARTET_AUF_FREIGABE') {
+          setAbgeschlossenStatus('WARTET_AUF_FREIGABE');
+        } else {
+          onBeigetreten(res);
+        }
+      } catch (err) {
+        setFehler(err instanceof Error ? err.message : 'Beitritt fehlgeschlagen.');
+      } finally {
+        setSendet(false);
       }
       return;
     }
 
-    // Neues Konto validieren
     const nameClean = vollerName.trim();
     const mailClean = email.trim();
     const userClean = (benutzername.trim() || mailClean.split('@')[0] || '').toLowerCase();
 
     if (!nameClean || !mailClean.includes('@') || !userClean) {
       setFehler('Bitte vollen Namen, gültige E-Mail-Adresse und Benutzername angeben.');
-      return;
-    }
-    if (
-      benutzerListe.some(
-        (b) =>
-          b.email.toLowerCase() === mailClean.toLowerCase() ||
-          b.benutzername.toLowerCase() === userClean
-      )
-    ) {
-      setFehler(
-        'E-Mail oder Benutzername ist bereits vergeben. Nutze „Bestehendes Konto verknüpfen“.'
-      );
       return;
     }
     if (passwort.length < 10) {
@@ -206,38 +215,29 @@ export function InviteRegisterView({
       }
     }
 
-    const neuerBenutzer: BenutzerKonto = {
-      uuid: `usr-${Date.now().toString(36)}`,
-      benutzername: userClean,
-      vollerName: nameClean,
-      email: mailClean,
-      telefon: telefon.trim(),
-      trikotNummer: trikotNummer.trim(),
-      position: position.trim(),
-      istSysadmin: false,
-      erstelltAm: new Date().toISOString().slice(0, 10),
-      customProfilWerte: { ...customWerte },
-    };
-
-    const mitgliedschaft: TeamMitgliedschaft = {
-      id: `mem-${Date.now()}`,
-      userUuid: neuerBenutzer.uuid,
-      teamId: team.id,
-      rolle: einladung.rolle,
-      units: units.length > 0 ? units : ['OFFENSE'],
-      status,
-      beigetretenAm: new Date().toISOString().slice(0, 10),
-    };
-
-    onRegistrierenUndBeitreten({
-      benutzer: neuerBenutzer,
-      passwort,
-      mitgliedschaft,
-      istNeuesKonto: true,
-    });
-
-    if (status === 'WARTET_AUF_FREIGABE') {
-      setAbgeschlossenStatus('WARTET_AUF_FREIGABE');
+    setSendet(true);
+    try {
+      const res = await coreApi.akzeptiereEinladung(token, {
+        modus: 'neu',
+        vollerName: nameClean,
+        benutzername: userClean,
+        email: mailClean,
+        passwort,
+        telefon: telefon.trim(),
+        trikotNummer: trikotNummer.trim(),
+        position: position.trim(),
+        units: units.length > 0 ? units : ['OFFENSE'],
+        customProfilWerte: { ...customWerte },
+      });
+      if (res.status === 'WARTET_AUF_FREIGABE') {
+        setAbgeschlossenStatus('WARTET_AUF_FREIGABE');
+      } else {
+        onBeigetreten(res);
+      }
+    } catch (err) {
+      setFehler(err instanceof Error ? err.message : 'Registrierung fehlgeschlagen.');
+    } finally {
+      setSendet(false);
     }
   };
 
@@ -277,7 +277,7 @@ export function InviteRegisterView({
           </p>
         </section>
 
-        {/* Modus-Umschalter: Neu vs. Bestehendes Konto (Konto-Erhalt) */}
+        {/* Modus-Umschalter */}
         <div className="grid grid-cols-2 gap-2 rounded-lg border border-[#232933] bg-[#13171D] p-1">
           <button
             type="button"
@@ -308,7 +308,7 @@ export function InviteRegisterView({
         </div>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={(e) => void handleSubmit(e)}
           className="rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4"
         >
           {modus === 'bestehend' ? (
@@ -419,7 +419,6 @@ export function InviteRegisterView({
                 </label>
               </div>
 
-              {/* Team-Custom-Felder */}
               {team.customProfilFelder.length > 0 && (
                 <div className="space-y-3 border-t border-[#232933] pt-3">
                   <div className="text-xs font-medium text-[#E6EDF3]">
@@ -465,7 +464,6 @@ export function InviteRegisterView({
             </>
           )}
 
-          {/* Unit-Mehrfachauswahl */}
           <div className="space-y-1.5 border-t border-[#232933] pt-3">
             <div className="text-xs text-[#8B949E]">Units (Mehrfachwahl für Two-Way-Spieler)</div>
             <div className="flex flex-wrap gap-3">
@@ -497,12 +495,15 @@ export function InviteRegisterView({
 
           <button
             type="submit"
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+            disabled={sendet}
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24] disabled:opacity-60"
           >
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {einladung.bestaetigungErforderlich
-              ? 'Registrieren & Freigabe anfragen'
-              : 'Registrieren & Team beitreten'}
+            {sendet
+              ? 'Wird gesendet…'
+              : einladung.bestaetigungErforderlich
+                ? 'Registrieren & Freigabe anfragen'
+                : 'Registrieren & Team beitreten'}
           </button>
         </form>
       </div>
