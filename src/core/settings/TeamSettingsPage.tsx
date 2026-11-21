@@ -63,7 +63,12 @@ interface TeamSettingsPageProps {
     units: SpielerUnit[];
     gueltigTage?: number;
     bestaetigungErforderlich?: boolean;
-  }) => Promise<ApiAktionErgebnis & { invitation?: TeamEinladung }>;
+  }) => Promise<
+    ApiAktionErgebnis & {
+      invitation?: TeamEinladung;
+      mailStatus?: { gesendet: boolean; modus: string; hinweis: string };
+    }
+  >;
   onEinladungWiderrufen: (einladungId: string) => Promise<ApiAktionErgebnis>;
   onProfilCustomFeldHinzufuegen: (
     teamId: string,
@@ -199,9 +204,10 @@ export function TeamSettingsPage({
     }
     setMailAdresse('');
     setEinladungHinweis(
-      `E-Mail-Einladung an ${ziel} angelegt (${res.invitation?.pfad ?? '/invite/…'}).`
+      res.mailStatus?.hinweis ??
+        `E-Mail-Einladung an ${ziel} angelegt (${res.invitation?.pfad ?? '/invite/…'}).`
     );
-    setTimeout(() => setEinladungHinweis(null), 3000);
+    setTimeout(() => setEinladungHinweis(null), 4000);
   };
 
   const handleTeamLinkErstellen = async () => {

@@ -549,8 +549,10 @@ export class CoreRepository {
     globalAktiviert: boolean
   ): Promise<void> {
     await this.db.query(
-      `INSERT INTO core.installed_plugins (plugin_id, manifest_json, source, release_tag, enabled_globally)
-       VALUES ($1, $2::jsonb, $3, $4, $5)
+      `INSERT INTO core.installed_plugins (
+         plugin_id, manifest_json, source, release_tag, enabled_globally,
+         installed_version, install_mode
+       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, 'CATALOG')
        ON CONFLICT (plugin_id) DO NOTHING`,
       [
         eintrag.manifest.id,
@@ -558,46 +560,160 @@ export class CoreRepository {
         eintrag.quelle,
         eintrag.releaseTag,
         globalAktiviert,
+        eintrag.manifest.version,
+      ]
+    );
+  }
+
+  async speicherePluginInstallation(params: {
+    manifest: PluginManifest;
+    source: string;
+    releaseTag: string;
+    enabledGlobally: boolean;
+    installMode: 'CATALOG' | 'RELEASE_BUNDLE' | 'OFFLINE_UPLOAD' | 'DEV_GIT';
+    packageSha256?: string | null;
+    devBranch?: string | null;
+  }): Promise<void> {
+    const bestehend = await this.findePluginStatus(params.manifest.id);
+    const previousVersion =
+      bestehend && bestehend.installedVersion !== params.manifest.version
+        ? bestehend.installedVersion
+        : bestehend?.previousVersion ?? null;
+
+    await this.db.query(
+      `INSERT INTO core.installed_plugins (
+         plugin_id, manifest_json, source, release_tag, enabled_globally,
+         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error
+       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+       ON CONFLICT (plugin_id) DO UPDATE SET
+         manifest_json = EXCLUDED.manifest_json,
+         source = EXCLUDED.source,
+         release_tag = EXCLUDED.release_tag,
+         installed_version = EXCLUDED.installed_version,
+         previous_version = EXCLUDED.previous_version,
+         install_mode = EXCLUDED.install_mode,
+         package_sha256 = EXCLUDED.package_sha256,
+         dev_branch = EXCLUDED.dev_branch,
+         last_error = NULL`,
+      [
+        params.manifest.id,
+        JSON.stringify(params.manifest),
+        params.source,
+        params.releaseTag,
+        bestehend ? bestehend.enabledGlobally : params.enabledGlobally,
+        params.manifest.version,
+        previousVersion,
+        params.installMode,
+        params.packageSha256 ?? null,
+        params.devBranch ?? null,
       ]
     );
   }
 
   async listeInstalliertePlugins(): Promise<
-    Array<{ manifest: PluginManifest; enabledGlobally: boolean; source: string; releaseTag: string }>
+    Array<{
+      manifest: PluginManifest;
+      enabledGlobally: boolean;
+      source: string;
+      releaseTag: string;
+      installedVersion: string;
+      previousVersion: string | null;
+      installMode: string;
+      packageSha256: string | null;
+      devBranch: string | null;
+    }>
   > {
     const res = await this.db.query<{
       manifest_json: unknown;
       enabled_globally: boolean;
       source: string;
       release_tag: string;
+      installed_version: string;
+      previous_version: string | null;
+      install_mode: string;
+      package_sha256: string | null;
+      dev_branch: string | null;
     }>(
-      `SELECT manifest_json, enabled_globally, source, release_tag
+      `SELECT manifest_json, enabled_globally, source, release_tag,
+              installed_version, previous_version, install_mode, package_sha256, dev_branch
        FROM core.installed_plugins
        ORDER BY installed_at ASC`
     );
-    return res.rows.map((r) => ({
-      manifest: parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest),
-      enabledGlobally: Boolean(r.enabled_globally),
-      source: r.source,
-      releaseTag: r.release_tag,
-    }));
+    return res.rows.map((r) => {
+      const manifest = parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest);
+      return {
+        manifest,
+        enabledGlobally: Boolean(r.enabled_globally),
+        source: r.source,
+        releaseTag: r.release_tag,
+        installedVersion: r.installed_version || manifest.version || '0.1.0',
+        previousVersion: r.previous_version ?? null,
+        installMode: r.install_mode || 'CATALOG',
+        packageSha256: r.package_sha256 ?? null,
+        devBranch: r.dev_branch ?? null,
+      };
+    });
   }
 
   async findePluginStatus(pluginId: string): Promise<{
     manifest: PluginManifest;
     enabledGlobally: boolean;
+    installedVersion: string;
+    previousVersion: string | null;
+    installMode: string;
+    source: string;
+    releaseTag: string;
   } | null> {
-    const res = await this.db.query<{ manifest_json: unknown; enabled_globally: boolean }>(
-      `SELECT manifest_json, enabled_globally
+    const res = await this.db.query<{
+      manifest_json: unknown;
+      enabled_globally: boolean;
+      installed_version: string;
+      previous_version: string | null;
+      install_mode: string;
+      source: string;
+      release_tag: string;
+    }>(
+      `SELECT manifest_json, enabled_globally, installed_version, previous_version, install_mode, source, release_tag
        FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
       [pluginId]
     );
     const r = res.rows[0];
     if (!r) return null;
+    const manifest = parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest);
     return {
-      manifest: parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest),
+      manifest,
       enabledGlobally: Boolean(r.enabled_globally),
+      installedVersion: r.installed_version || manifest.version || '0.1.0',
+      previousVersion: r.previous_version ?? null,
+      installMode: r.install_mode || 'CATALOG',
+      source: r.source,
+      releaseTag: r.release_tag,
     };
+  }
+
+  async rollbackPluginVersion(
+    pluginId: string,
+    manifest: PluginManifest,
+    zielVersion: string,
+    releaseTag: string
+  ): Promise<void> {
+    await this.db.query(
+      `UPDATE core.installed_plugins
+       SET manifest_json = $2::jsonb,
+           installed_version = $3,
+           release_tag = $4,
+           previous_version = NULL
+       WHERE plugin_id = $1`,
+      [pluginId, JSON.stringify(manifest), zielVersion, releaseTag]
+    );
+  }
+
+  async entferneInstalliertesPlugin(pluginId: string): Promise<boolean> {
+    const res = await this.db.query<{ plugin_id: string }>(
+      `DELETE FROM core.installed_plugins WHERE plugin_id = $1 RETURNING plugin_id`,
+      [pluginId]
+    );
+    return res.rows.length > 0;
   }
 
   async setzePluginGlobalAktiv(pluginId: string, aktiv: boolean): Promise<boolean> {
@@ -622,6 +738,27 @@ export class CoreRepository {
        VALUES ($1, $2, $3)
        ON CONFLICT (team_id, plugin_id) DO UPDATE SET enabled = EXCLUDED.enabled`,
       [teamId, pluginId, aktiv]
+    );
+  }
+
+  // --- System-Einstellungen (S3 & SMTP) ---
+
+  async holeSystemSetting<T>(key: string): Promise<T | null> {
+    const res = await this.db.query<{ value_json: unknown }>(
+      `SELECT value_json FROM core.system_settings WHERE key = $1 LIMIT 1`,
+      [key]
+    );
+    if (res.rows.length === 0) return null;
+    return parseJsonWert<T | null>(res.rows[0].value_json, null);
+  }
+
+  async speichereSystemSetting<T>(key: string, value: T): Promise<void> {
+    await this.db.query(
+      `INSERT INTO core.system_settings (key, value_json, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value_json = EXCLUDED.value_json, updated_at = NOW()`,
+      [key, JSON.stringify(value)]
     );
   }
 }

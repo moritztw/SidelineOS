@@ -96,11 +96,13 @@ Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
 | `renderPublicShareView({ token, onSchliessen })` | Nein | Öffentliche Empfänger-Ansicht für `/share/<token>` ohne Anmeldung – der Core delegiert direkt an diese Methode, sodass er keine Plugin-Typen kennen muss |
 | `settingsPanels` | Nein | Optionale UI-Panels `{ user, team, sysadmin }`, die automatisch in die Core-Einstellungen eingeblendet werden |
 
-### Strikte Entkopplungsregel
+### Strikte Entkopplungsregel & Eigenständiges Paket (`@sidelineos/plugin-sdk`)
 * Plugins importieren **niemals** interne Core-Dateien (`src/core/*`) und der Core importiert **niemals** Plugin-Interna (`src/plugins/*`).
-* Sämtliche Kommunikation zwischen Core und Plugin erfolgt über `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`).
+* Sämtliche Kommunikation zwischen Core und Plugin erfolgt über `@sidelineos/plugin-sdk` (kompilierbar über `npm run build:sdk` aus `packages/plugin-sdk/`).
 * Saison-Filterung nutzt generische SDK-Helper (`filtereNachSaison`, `ermittleEintragSaison`).
-* **Geplante SDK-Erweiterung (Core-Phase 3–5):** Ein gemeinsames Scope-Interface (`listExportableItems`, `exportScope`, `importScope` inkl. `mode: 'replace' | 'merge'` sowie `ExchangeTarget`-Adressierung `teamId@instanceId`), über das Plugins sowohl Peer-Federation als auch den Offline-Camp-Modus (inkl. Delta-Rück-Sync) ohne Core-Sonderlogik unterstützen.
+* **Cleanup- & Exchange-Contracts (vorbereitet für Phase 4/5):**
+  * `ctx.cleanupQueue?.enqueueOrphanedObjects(objectPaths, reason)` im Backend-Kontext (erfordert `s3:cleanup-queue`).
+  * Optionale Scope-Methoden auf `SidelineBackendPlugin`: `listExportableItems(ctx)`, `exportScope(ctx, itemIds, target: ExchangeTarget)` und `importScope(ctx, payload, { mode: 'replace' | 'merge', sourceTarget })` für `LOCAL` vs. `REMOTE` (`teamId@instanceId`).
 
 ---
 
@@ -121,10 +123,52 @@ Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. I
 
 ## 5. Sicherheits- & Build-Anforderungen für Store-Releases
 
-1. **Keine unkontrollierte Code-Ausführung im Server-Prozess:** Backend-Routen eines Plugins dürfen niemals über unsichere `eval()`/`Function()`-Konstrukte oder rohes SQL ohne Parameterbindung laufen. Externe Plugins werden als signiertes Release-Artefakt (`sideline-plugin-v1.tar.gz` + SHA256-Prüfsumme + `plugin.manifest.json`) über GitHub Releases verteilt.
+1. **Keine unkontrollierte Code-Ausführung im Server-Prozess:** Backend-Routen eines Plugins dürfen niemals über unsichere `eval()`/`Function()`-Konstrukte oder rohes SQL ohne Parameterbindung laufen. Externe Plugins werden im Produktionsbetrieb als signiertes Release-Artefakt (`sideline-plugin-v1.tar.gz` + SHA256-Prüfsumme + `plugin.manifest.json`) über GitHub Releases oder per Offline-`.tar.gz`-Upload installiert. Nur im expliziten Dev-Modus (`NODE_ENV !== 'production'` + `DEV_ALLOW_GIT_INSTALL=true`) steht zusätzlich `git clone --depth 1` + lokaler Build bereit.
 2. **Kein Cross-Site-Scripting (XSS):** UI-Komponenten verwenden ausschließlich sicheres React-Binding (`{wert}` statt `dangerouslySetInnerHTML`) und validieren JSON/CSV-Imports strikt vor der Übernahme.
 3. **Sichtbarkeit & Ausblendung:** Ist ein Plugin instanzweit (`ENABLED_MODULES`) oder für das gewählte Team deaktiviert, darf kein UI-Eintrag (weder Startseite noch Einstellungen) sichtbar sein und jeder API-/Routen-Zugriff liefert `403 Forbidden`.
 4. **Cross-Platform-Fähigkeit:** Services müssen frei von Browser-DOM-APIs bleiben (`window`, `document`), damit Capacitor (Android/iOS) und Tauri (Linux/Windows/macOS) dieselbe Domänenlogik nutzen können.
+
+### GitHub Actions Release-Vorlage (`.github/workflows/release.yml` für Plugin-Repos)
+
+Mit diesem Workflow baut jedes Tag `v*.*.*` automatisch ein vom Core direkt installierbares `sideline-plugin-v1.tar.gz` inklusive `.sha256`-Prüfsumme:
+
+```yaml
+name: SidelineOS Plugin Release
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Plugin-Bundle packen & SHA-256 erzeugen
+        run: |
+          mkdir -p .bundle
+          cp plugin.manifest.json .bundle/
+          cp -r dist .bundle/dist
+          if [ -d migrations ]; then cp -r migrations .bundle/migrations; fi
+          tar -czf sideline-plugin-v1.tar.gz -C .bundle .
+          sha256sum sideline-plugin-v1.tar.gz > sideline-plugin-v1.tar.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sideline-plugin-v1.tar.gz
+            sideline-plugin-v1.tar.gz.sha256
+            plugin.manifest.json
+```
 
 ---
 
@@ -134,5 +178,6 @@ Der Ordner `src/plugins/video-analysis/` ist bereits vollständig nach diesen Re
 
 1. Neues GitHub-Repository `sidelineos-plugin-video` mit GNU `AGPLv3` (`LICENSE`) anlegen.
 2. Gesamten Inhalt von `src/plugins/video-analysis/` inkl. `plugin.manifest.json`, `AI_HANDOFF.md` und zugehöriger Tests aus `tests/unit/` übernehmen.
-3. Importpfade von `../../../sdk/plugin.ts` auf das veröffentlichte Paket `@sidelineos/plugin-sdk` umstellen.
-4. `AI_HANDOFF.md` mit in das neue Repo legen – damit verfügt jede weiterarbeitende KI sofort über alle Design-Entscheidungen, Frame-Math-Details und offenen Paket-3/4-Aufgaben.
+3. Importpfade auf das gebaute SDK-Paket `@sidelineos/plugin-sdk` (`npm run build:sdk` in `SidelineOS-Core`) umstellen.
+4. Oben gezeigte `.github/workflows/release.yml` hinterlegen und per `git tag v0.2.0 && git push --tags` ein Release erstellen.
+5. `AI_HANDOFF.md` mit in das neue Repo legen – damit verfügt jede weiterarbeitende KI sofort über alle Design-Entscheidungen, Frame-Math-Details und offenen Paket-3/4-Aufgaben.

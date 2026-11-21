@@ -14,6 +14,7 @@ interface SettingsHubViewProps {
   konto: BenutzerProfil;
   aktiveTeamAnsicht: TeamRolle | null;
   ausstehendeAnfragenAnzahl: number;
+  ausstehendeUpdatesAnzahl?: number;
   onBereichOeffnen: (bereich: CoreBereich) => void;
 }
 
@@ -27,6 +28,7 @@ export function SettingsHubView({
   konto,
   aktiveTeamAnsicht,
   ausstehendeAnfragenAnzahl,
+  ausstehendeUpdatesAnzahl = 0,
   onBereichOeffnen,
 }: SettingsHubViewProps) {
   const hatTeamZugriff = aktiveTeamAnsicht !== null;
@@ -130,8 +132,16 @@ export function SettingsHubView({
             className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-[#232933] bg-[#13171D] p-6 text-left transition-colors hover:border-[#F59E0B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
           >
             <div>
-              <div className="inline-flex rounded-md border border-[#232933] bg-[#0B0E11] p-2.5 text-[#F59E0B]">
-                <Server className="h-5 w-5" aria-hidden="true" />
+              <div className="flex items-center justify-between gap-2">
+                <div className="inline-flex rounded-md border border-[#232933] bg-[#0B0E11] p-2.5 text-[#F59E0B]">
+                  <Server className="h-5 w-5" aria-hidden="true" />
+                </div>
+                {ausstehendeUpdatesAnzahl > 0 && (
+                  <span className="font-mono text-xs font-semibold text-[#F59E0B] tabular-nums">
+                    {ausstehendeUpdatesAnzahl}{' '}
+                    {ausstehendeUpdatesAnzahl === 1 ? 'Update' : 'Updates'}
+                  </span>
+                )}
               </div>
               <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
                 Sysadmin &amp; Instanz

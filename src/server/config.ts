@@ -20,6 +20,38 @@ export interface CoreServerConfig {
     password: string;
   };
   enabledModules: PluginId[];
+  s3: {
+    endpoint: string;
+    region: string;
+    bucket: string;
+    accessKey: string;
+    secretKey: string;
+    forcePathStyle: boolean;
+    cleanupRetentionDays: number;
+  };
+  smtp: {
+    host: string;
+    port: number;
+    benutzer: string;
+    passwort: string;
+    absender: string;
+    tlsAktiv: boolean;
+  };
+  coreVersion: string;
+  supportedSdkVersion: '1.0';
+  pluginDataDir: string;
+  devAllowGitInstall: boolean;
+  disableUpdateCheck: boolean;
+  coreGithubRepo: string;
+  githubApiBaseUrl: string;
+}
+
+function parseBool(wert: string | undefined, fallback: boolean): boolean {
+  if (!wert) return fallback;
+  const norm = wert.trim().toLowerCase();
+  if (norm === 'true' || norm === '1' || norm === 'yes') return true;
+  if (norm === 'false' || norm === '0' || norm === 'no') return false;
+  return fallback;
 }
 
 /**
@@ -59,6 +91,21 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     STANDARD_AKTIVIERTE_PLUGIN_IDS
   );
 
+  const rawS3Access = env.S3_ACCESS_KEY?.trim() || '';
+  const rawS3Secret = env.S3_SECRET_KEY?.trim() || '';
+  const s3AccessKey = rawS3Access === 'YOUR_S3_ACCESS_KEY' ? '' : rawS3Access;
+  const s3SecretKey = rawS3Secret === 'YOUR_S3_SECRET_KEY' ? '' : rawS3Secret;
+  const s3Retention = Number(env.S3_CLEANUP_RETENTION_DAYS);
+
+  const rawSmtpHost = env.SMTP_HOST?.trim() || '';
+  const rawSmtpPass = env.SMTP_PASSWORD?.trim() || '';
+  const smtpHost = rawSmtpHost === 'smtp.example.org' ? '' : rawSmtpHost;
+  const smtpPass = rawSmtpPass === 'YOUR_SMTP_PASSWORD' ? '' : rawSmtpPass;
+  const smtpPort = Number(env.SMTP_PORT);
+
+  const devAllowGitInstall =
+    nodeEnv !== 'production' && parseBool(env.DEV_ALLOW_GIT_INSTALL, nodeEnv === 'development');
+
   return {
     nodeEnv,
     port,
@@ -69,5 +116,32 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     sessionTtlStunden,
     initialSysadmin,
     enabledModules,
+    s3: {
+      endpoint: env.S3_ENDPOINT?.trim() || '',
+      region: env.S3_REGION?.trim() || 'eu-central-1',
+      bucket: env.S3_BUCKET?.trim() || '',
+      accessKey: s3AccessKey,
+      secretKey: s3SecretKey,
+      forcePathStyle: parseBool(env.S3_FORCE_PATH_STYLE, true),
+      cleanupRetentionDays: s3Retention > 0 ? Math.min(s3Retention, 365) : 14,
+    },
+    smtp: {
+      host: smtpHost,
+      port: smtpPort > 0 && smtpPort <= 65535 ? smtpPort : 587,
+      benutzer: env.SMTP_USER?.trim() || '',
+      passwort: smtpPass,
+      absender: env.SMTP_FROM?.trim() || 'SidelineOS <noreply@sidelineos.local>',
+      tlsAktiv: parseBool(env.SMTP_TLS, true),
+    },
+    coreVersion: env.CORE_VERSION?.trim() || '0.1.0',
+    supportedSdkVersion: '1.0',
+    pluginDataDir: env.PLUGIN_DATA_DIR?.trim() || '.sidelineos-data/plugins',
+    devAllowGitInstall,
+    disableUpdateCheck: parseBool(env.DISABLE_UPDATE_CHECK, false),
+    coreGithubRepo: env.CORE_GITHUB_REPO?.trim() || 'sidelineos/sidelineos-core',
+    githubApiBaseUrl: (env.GITHUB_API_BASE_URL?.trim() || 'https://api.github.com').replace(
+      /\/+$/,
+      ''
+    ),
   };
 }

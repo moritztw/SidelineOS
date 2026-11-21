@@ -4,22 +4,56 @@ import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth, requireSysadmin } from '../middleware/auth.ts';
 import { hashPasswort } from '../security.ts';
+import {
+  PluginInstallerFehler,
+  type PluginInstallerService,
+} from '../services/pluginInstaller.ts';
+import type { S3BrokerService } from '../services/s3Broker.ts';
+import type { S3CleanupService } from '../services/s3CleanupService.ts';
+import type { SmtpService } from '../services/smtpService.ts';
 
 const MIN_PASSWORT_LAENGE = 10;
 
-export function erstelleSysadminRouter(repo: CoreRepository, config: CoreServerConfig): Router {
+export function erstelleSysadminRouter(
+  repo: CoreRepository,
+  config: CoreServerConfig,
+  services?: {
+    s3Broker?: S3BrokerService;
+    s3Cleanup?: S3CleanupService;
+    smtpService?: SmtpService;
+    pluginInstaller?: PluginInstallerService;
+  }
+): Router {
   const router = Router();
   router.use(requireAuth(repo, config), requireSysadmin());
 
   router.get('/overview', async (_req, res, next) => {
     try {
-      const [teams, users, memberships, plugins] = await Promise.all([
-        repo.listeTeams(),
-        repo.listeBenutzer(),
-        repo.listeMitgliedschaften(),
-        repo.listeInstalliertePlugins(),
-      ]);
-      res.status(200).json({ teams, users, memberships, plugins });
+      const [teams, users, memberships, plugins, s3Config, smtpConfig, cleanupStats] =
+        await Promise.all([
+          repo.listeTeams(),
+          repo.listeBenutzer(),
+          repo.listeMitgliedschaften(),
+          repo.listeInstalliertePlugins(),
+          services?.s3Broker?.holeMaskierteKonfig(),
+          services?.smtpService?.holeMaskierteKonfig(),
+          services?.s3Cleanup?.holeAnonymisierteStatistik(),
+        ]);
+      res.status(200).json({
+        teams,
+        users,
+        memberships,
+        plugins,
+        capabilities: {
+          devGitInstallErlaubt: config.devAllowGitInstall && config.nodeEnv !== 'production',
+          disableUpdateCheck: config.disableUpdateCheck,
+          coreVersion: config.coreVersion,
+          supportedSdkVersion: config.supportedSdkVersion,
+        },
+        ...(s3Config ? { s3Config } : {}),
+        ...(smtpConfig ? { smtpConfig } : {}),
+        ...(cleanupStats ? { cleanupStats } : {}),
+      });
     } catch (err) {
       next(err);
     }
@@ -279,6 +313,277 @@ export function erstelleSysadminRouter(repo: CoreRepository, config: CoreServerC
 
       await repo.setzeTeamModulAktiv(teamId, pluginId, aktiv);
       res.status(200).json({ teamId, pluginId, enabled: aktiv });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Infrastruktur: S3 Object Storage & SMTP ---
+
+  router.get('/infrastructure', async (_req, res, next) => {
+    try {
+      const [s3Config, smtpConfig] = await Promise.all([
+        services?.s3Broker?.holeMaskierteKonfig(),
+        services?.smtpService?.holeMaskierteKonfig(),
+      ]);
+      res.status(200).json({ s3Config, smtpConfig });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put('/s3', async (req, res, next) => {
+    try {
+      if (!services?.s3Broker) {
+        res.status(503).json({ fehler: 'S3-Broker ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body ?? {};
+      const aktualisiert = await services.s3Broker.speichereKonfig({
+        endpoint: typeof body.endpoint === 'string' ? body.endpoint : '',
+        region: typeof body.region === 'string' ? body.region : 'eu-central-1',
+        bucket: typeof body.bucket === 'string' ? body.bucket : '',
+        accessKey: typeof body.accessKey === 'string' ? body.accessKey : '',
+        secretKey: typeof body.secretKey === 'string' ? body.secretKey : undefined,
+        clearSecretKey: Boolean(body.clearSecretKey),
+        forcePathStyle: body.forcePathStyle !== false,
+        cleanupRetentionDays:
+          typeof body.cleanupRetentionDays === 'number' ? body.cleanupRetentionDays : undefined,
+      });
+      res.status(200).json({ s3Config: aktualisiert });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('S3')) {
+        res.status(400).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/s3/test', async (req, res, next) => {
+    try {
+      if (!services?.s3Broker) {
+        res.status(503).json({ fehler: 'S3-Broker ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const ergebnis = await services.s3Broker.testeVerbindung({
+        endpoint: typeof body.endpoint === 'string' ? body.endpoint : undefined,
+        region: typeof body.region === 'string' ? body.region : undefined,
+        bucket: typeof body.bucket === 'string' ? body.bucket : undefined,
+        accessKey: typeof body.accessKey === 'string' ? body.accessKey : undefined,
+        secretKey: typeof body.secretKey === 'string' ? body.secretKey : undefined,
+        forcePathStyle: typeof body.forcePathStyle === 'boolean' ? body.forcePathStyle : undefined,
+      });
+      res.status(200).json(ergebnis);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put('/smtp', async (req, res, next) => {
+    try {
+      if (!services?.smtpService) {
+        res.status(503).json({ fehler: 'SMTP-Service ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body ?? {};
+      const aktualisiert = await services.smtpService.speichereKonfig({
+        host: typeof body.host === 'string' ? body.host : '',
+        port: Number(body.port) || 587,
+        absender: typeof body.absender === 'string' ? body.absender : '',
+        benutzer: typeof body.benutzer === 'string' ? body.benutzer : '',
+        passwort: typeof body.passwort === 'string' ? body.passwort : undefined,
+        clearPasswort: Boolean(body.clearPasswort),
+        tlsAktiv: body.tlsAktiv !== false,
+      });
+      res.status(200).json({ smtpConfig: aktualisiert });
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('SMTP')) {
+        res.status(400).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/smtp/test', async (req, res, next) => {
+    try {
+      if (!services?.smtpService) {
+        res.status(503).json({ fehler: 'SMTP-Service ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const ergebnis = await services.smtpService.testeVerbindung(
+        {
+          host: typeof body.host === 'string' ? body.host : undefined,
+          port: typeof body.port === 'number' ? body.port : undefined,
+          absender: typeof body.absender === 'string' ? body.absender : undefined,
+          benutzer: typeof body.benutzer === 'string' ? body.benutzer : undefined,
+          passwort: typeof body.passwort === 'string' ? body.passwort : undefined,
+          tlsAktiv: typeof body.tlsAktiv === 'boolean' ? body.tlsAktiv : undefined,
+        },
+        typeof body.testEmpfaenger === 'string' ? body.testEmpfaenger : undefined
+      );
+      res.status(200).json(ergebnis);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // --- Phase 3: Updates, Plugin-Installer (Release / Offline-Upload / Dev-Git) & S3-Cleanup ---
+
+  router.get('/updates', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      const forceRefresh = req.query.refresh === 'true';
+      const ergebnis = await services.pluginInstaller.pruefeUpdates({ forceRefresh });
+      res.status(200).json(ergebnis);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/plugins/install-release', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body ?? {};
+      const repoUrl = typeof body.repoUrl === 'string' ? body.repoUrl.trim() : '';
+      const tag = typeof body.tag === 'string' && body.tag.trim() ? body.tag.trim() : undefined;
+      if (!repoUrl) {
+        res.status(400).json({ fehler: 'Bitte eine gültige GitHub-Repository-URL angeben.' });
+        return;
+      }
+      const ergebnis = await services.pluginInstaller.installiereAusReleaseBundle({ repoUrl, tag });
+      res.status(200).json({ ok: true, ...ergebnis });
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/plugins/install-upload', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body ?? {};
+      const contentBase64 = typeof body.contentBase64 === 'string' ? body.contentBase64.trim() : '';
+      if (!contentBase64) {
+        res.status(400).json({ fehler: 'Keine Paketdaten (contentBase64) übermittelt.' });
+        return;
+      }
+      const tarGzBuffer = Buffer.from(contentBase64, 'base64');
+      const expectedSha256 =
+        typeof body.expectedSha256 === 'string' && body.expectedSha256.trim()
+          ? body.expectedSha256.trim()
+          : undefined;
+      const ergebnis = await services.pluginInstaller.installiereAusOfflineTarGz({
+        tarGzBuffer,
+        expectedSha256,
+        installMode: 'OFFLINE_UPLOAD',
+      });
+      res.status(200).json({ ok: true, ...ergebnis });
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/plugins/install-dev-git', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      const body = req.body ?? {};
+      const repoUrl = typeof body.repoUrl === 'string' ? body.repoUrl.trim() : '';
+      const branch =
+        typeof body.branch === 'string' && body.branch.trim() ? body.branch.trim() : undefined;
+      if (!repoUrl) {
+        res.status(400).json({ fehler: 'Bitte eine GitHub-Repository-URL angeben.' });
+        return;
+      }
+      const ergebnis = await services.pluginInstaller.installiereDevAusGit({ repoUrl, branch });
+      res.status(200).json({ ok: true, ...ergebnis });
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.post('/plugins/:pluginId/rollback', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      const ergebnis = await services.pluginInstaller.rollbackPlugin(String(req.params.pluginId));
+      res.status(200).json({ ok: true, ...ergebnis });
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.delete('/plugins/:pluginId', async (req, res, next) => {
+    try {
+      if (!services?.pluginInstaller) {
+        res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
+        return;
+      }
+      await services.pluginInstaller.deinstallierePlugin(String(req.params.pluginId));
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
+      next(err);
+    }
+  });
+
+  router.get('/s3/cleanup', async (_req, res, next) => {
+    try {
+      if (!services?.s3Cleanup) {
+        res.status(503).json({ fehler: 'S3-Cleanup-Service ist nicht initialisiert.' });
+        return;
+      }
+      const statistik = await services.s3Cleanup.holeAnonymisierteStatistik();
+      res.status(200).json({ statistik });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/s3/cleanup/run', async (req, res, next) => {
+    try {
+      if (!services?.s3Cleanup) {
+        res.status(503).json({ fehler: 'S3-Cleanup-Service ist nicht initialisiert.' });
+        return;
+      }
+      const auchVorfristig = Boolean(req.body?.auchVorfristig);
+      const ergebnis = await services.s3Cleanup.bereinigeFaellige({ auchVorfristig });
+      res.status(200).json(ergebnis);
     } catch (err) {
       next(err);
     }

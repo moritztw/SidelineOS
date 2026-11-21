@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {
   INITIALE_BENUTZER,
@@ -18,10 +19,47 @@ export interface BootstrapErgebnis {
   anzahlBenutzer: number;
 }
 
-const CORE_MIGRATION_001 = fs.readFileSync(
-  new URL('./db/migrations/001_core.sql', import.meta.url),
-  'utf8'
-);
+const CORE_MIGRATIONS: Array<{ name: string; sql: string }> = [
+  {
+    name: '001_core.sql',
+    sql: fs.readFileSync(new URL('./db/migrations/001_core.sql', import.meta.url), 'utf8'),
+  },
+  {
+    name: '002_system_settings.sql',
+    sql: fs.readFileSync(
+      new URL('./db/migrations/002_system_settings.sql', import.meta.url),
+      'utf8'
+    ),
+  },
+  {
+    name: '003_core_migrations_and_cleanup.sql',
+    sql: fs.readFileSync(
+      new URL('./db/migrations/003_core_migrations_and_cleanup.sql', import.meta.url),
+      'utf8'
+    ),
+  },
+];
+
+async function fuehreCoreMigrationenAus(db: CoreDatabaseClient): Promise<void> {
+  // 001..003 sind idempotent (IF NOT EXISTS) und legen `core.schema_migrations` an
+  for (const migration of CORE_MIGRATIONS) {
+    await db.exec(migration.sql);
+  }
+
+  for (const migration of CORE_MIGRATIONS) {
+    const checksum = crypto.createHash('sha256').update(migration.sql).digest('hex');
+    const vorhanden = await db.query<{ checksum: string }>(
+      `SELECT checksum FROM core.schema_migrations WHERE migration_name = $1 LIMIT 1`,
+      [migration.name]
+    );
+    if (vorhanden.rows.length === 0) {
+      await db.query(
+        `INSERT INTO core.schema_migrations (migration_name, checksum) VALUES ($1, $2)`,
+        [migration.name, checksum]
+      );
+    }
+  }
+}
 
 /**
  * Führt Core-Schema-Migrationen aus, registriert installierte Store-Plugins und
@@ -33,7 +71,7 @@ export async function bootstrapCoreInstance(
   config: CoreServerConfig,
   optionen: { seedDemoWennLeer?: boolean } = {}
 ): Promise<BootstrapErgebnis> {
-  await db.exec(CORE_MIGRATION_001);
+  await fuehreCoreMigrationenAus(db);
 
   const repo = new CoreRepository(db);
 

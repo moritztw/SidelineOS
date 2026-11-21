@@ -61,3 +61,40 @@ export function hashSessionToken(token: string, secret: string): string {
 export function generiereEinladungsToken(praefix = 'inv'): string {
   return `${praefix}-${crypto.randomBytes(9).toString('base64url')}`;
 }
+
+function leiteAesSchluesselAb(secret: string): Buffer {
+  return crypto.createHash('sha256').update(`sidelineos-settings:${secret}`).digest();
+}
+
+/**
+ * Verschlüsselt Infrastruktur-Geheimnisse (S3 Secret Key, SMTP Passwort)
+ * mittels AES-256-GCM für die persistente Ablage in `core.system_settings`.
+ */
+export function verschluesseleGeheimnis(klartext: string, secret: string): string {
+  if (!klartext) return '';
+  const iv = crypto.randomBytes(12);
+  const key = leiteAesSchluesselAb(secret);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(klartext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc$v1$${iv.toString('base64url')}$${tag.toString('base64url')}$${encrypted.toString('base64url')}`;
+}
+
+export function entschluesseleGeheimnis(chiffre: string, secret: string): string {
+  if (!chiffre) return '';
+  const teile = chiffre.split('$');
+  if (teile.length !== 5 || teile[0] !== 'enc' || teile[1] !== 'v1') {
+    return '';
+  }
+  try {
+    const iv = Buffer.from(teile[2], 'base64url');
+    const tag = Buffer.from(teile[3], 'base64url');
+    const data = Buffer.from(teile[4], 'base64url');
+    const key = leiteAesSchluesselAb(secret);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+  } catch {
+    return '';
+  }
+}

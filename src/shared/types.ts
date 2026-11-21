@@ -89,6 +89,9 @@ export interface S3Konfiguration {
   bucket: string;
   accessKey: string;
   forcePathStyle: boolean;
+  cleanupRetentionDays?: number;
+  hatSecretKey?: boolean;
+  konfiguriert?: boolean;
 }
 
 export interface SmtpKonfiguration {
@@ -97,6 +100,8 @@ export interface SmtpKonfiguration {
   absender: string;
   benutzer: string;
   tlsAktiv: boolean;
+  hatPasswort?: boolean;
+  konfiguriert?: boolean;
 }
 
 export interface TeamKontext {

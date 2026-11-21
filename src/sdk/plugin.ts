@@ -106,12 +106,63 @@ export interface PluginDbScope {
 }
 
 /**
+ * Isolierter S3-Zugriff für ein externes Plugin innerhalb seines Team-Präfixes
+ * (`teams/<teamId>/<s3Prefix>`). Der Core prüft Rechte und signiert Presigned URLs.
+ */
+export interface PluginS3Scope {
+  readonly prefix: string;
+  getSignedUploadUrl(params: {
+    objectPath: string;
+    contentType?: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+  getSignedDownloadUrl(params: {
+    objectPath: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+  deleteObject(objectPath: string): Promise<void>;
+}
+
+/**
+ * Isolierter S3-Cleanup-Queue-Zugriff für ein externes Plugin (`s3:cleanup-queue`).
+ * Das Plugin meldet lediglich verwaiste Objektpfade aus seinem eigenen Team-Präfix.
+ */
+export interface PluginCleanupQueueScope {
+  enqueueOrphanedObjects(objectPaths: string[], reason?: string): Promise<{ queued: number }>;
+}
+
+/**
+ * Ziel-Adressierung für Team-übergreifende Abfragen (Phase 4 Federation & Phase 5 Camp-Modus).
+ */
+export type ExchangeTarget =
+  | { mode: 'LOCAL'; teamId: string }
+  | { mode: 'REMOTE'; instanceId: string; teamId: string };
+
+export interface PluginScopeItem {
+  id: string;
+  title: string;
+  season?: string;
+  updatedAt: string;
+  assetKeys?: string[];
+}
+
+export interface PluginExportScopeResult {
+  schemaVersion: string;
+  pluginId: PluginId;
+  items: PluginScopeItem[];
+  payload: unknown;
+  assetKeys: string[];
+}
+
+/**
  * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
  */
 export interface PluginBackendKontext {
   readonly pluginId: PluginId;
   readonly manifest: PluginManifest;
   readonly db: PluginDbScope;
+  readonly s3?: PluginS3Scope;
+  readonly cleanupQueue?: PluginCleanupQueueScope;
   readonly user: BenutzerKonto;
   readonly team: TeamKontext;
   readonly teamRolle: TeamRolle;
@@ -143,6 +194,19 @@ export interface SidelineBackendPlugin {
     },
     db: PluginDbScope
   ) => Promise<{ status: number; body: unknown }>;
+  listExportableItems?: (
+    ctx: PluginBackendKontext,
+    options?: { season?: string }
+  ) => Promise<PluginScopeItem[]>;
+  exportScope?: (
+    ctx: PluginBackendKontext,
+    options?: { itemIds?: string[]; season?: string }
+  ) => Promise<PluginExportScopeResult>;
+  importScope?: (
+    ctx: PluginBackendKontext,
+    bundle: PluginExportScopeResult,
+    options?: { mode: 'replace' | 'merge' }
+  ) => Promise<{ imported: number; skipped: number }>;
 }
 
 /**

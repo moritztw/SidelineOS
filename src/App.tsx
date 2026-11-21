@@ -16,6 +16,10 @@ import {
   coreApi,
   type AuthSessionResponse,
   type InviteAcceptResponse,
+  type S3CleanupStatistikDTO,
+  type SysadminCapabilitiesDTO,
+  type SysadminPluginStatusDTO,
+  type UpdatePruefErgebnisDTO,
 } from './core/apiClient.ts';
 import {
   DEMO_STANDARD_PASSWORT,
@@ -40,6 +44,7 @@ import {
 import { ladeInstalliertePlugins } from './plugins/pluginLoader.ts';
 import type {
   PluginLaufzeitKontext,
+  PluginManifest,
   PluginStoreEintrag,
   SidelinePlugin,
 } from './sdk/plugin.ts';
@@ -99,6 +104,7 @@ interface SidelineShellProps {
   onPluginInstallieren: (pluginId: PluginId) => void;
   onPluginDeinstallieren: (pluginId: PluginId) => void;
   onCustomGitHubPluginHinzufuegen: (repoUrl: string, slug: string) => void;
+  onBackendPluginRegistrieren: (manifest: PluginManifest, releaseTag?: string) => void;
   onGlobalModulToggle: (modulId: PluginId) => void;
   onGlobalModuleSynchronisieren: (ids: PluginId[]) => void;
 }
@@ -111,6 +117,7 @@ function SidelineCoreShell({
   onPluginInstallieren,
   onPluginDeinstallieren,
   onCustomGitHubPluginHinzufuegen,
+  onBackendPluginRegistrieren,
   onGlobalModulToggle,
   onGlobalModuleSynchronisieren,
 }: SidelineShellProps) {
@@ -138,9 +145,15 @@ function SidelineCoreShell({
   const [mitgliedschaften, setMitgliedschaften] = useState<TeamMitgliedschaft[]>([]);
   const [einladungen, setEinladungen] = useState<TeamEinladung[]>([]);
 
-  // S3 & SMTP Konfiguration (folgen in Core-Phase 2 serverseitig)
+  // S3 & SMTP Konfiguration + Phase-3 Sysadmin-Status
   const [s3Konfig, setS3Konfig] = useState<S3Konfiguration>(INITIALE_S3_KONFIG);
   const [smtpKonfig, setSmtpKonfig] = useState<SmtpKonfiguration>(INITIALE_SMTP_KONFIG);
+  const [installedPluginsMeta, setInstalledPluginsMeta] = useState<SysadminPluginStatusDTO[]>([]);
+  const [sysCapabilities, setSysCapabilities] = useState<SysadminCapabilitiesDTO | undefined>(
+    undefined
+  );
+  const [updateStatus, setUpdateStatus] = useState<UpdatePruefErgebnisDTO | null>(null);
+  const [cleanupStats, setCleanupStats] = useState<S3CleanupStatistikDTO | null>(null);
 
   useEffect(() => {
     const onPopState = () => {
@@ -176,9 +189,22 @@ function SidelineCoreShell({
       setTeams(ov.teams);
       setBenutzerListe(ov.users);
       setMitgliedschaften(ov.memberships);
+      setInstalledPluginsMeta(ov.plugins);
+      if (ov.capabilities) setSysCapabilities(ov.capabilities);
+      if (ov.s3Config) setS3Konfig(ov.s3Config);
+      if (ov.smtpConfig) setSmtpKonfig(ov.smtpConfig);
+      if (ov.cleanupStats) setCleanupStats(ov.cleanupStats);
       onGlobalModuleSynchronisieren(
         ov.plugins.filter((p) => p.enabledGlobally).map((p) => p.manifest.id)
       );
+
+      // Update-Check asynchron nachladen, damit Sysadmin das Update-Badge sieht
+      coreApi
+        .holeUpdates(false)
+        .then((u) => setUpdateStatus(u))
+        .catch(() => {
+          // Offline / Deaktiviert -> still ignorieren
+        });
     } catch {
       // Ignorieren falls kein Sysadmin
     }
@@ -608,12 +634,17 @@ function SidelineCoreShell({
     units: SpielerUnit[];
     gueltigTage?: number;
     bestaetigungErforderlich?: boolean;
-  }): Promise<ApiAktionErgebnis & { invitation?: TeamEinladung }> => {
+  }): Promise<
+    ApiAktionErgebnis & {
+      invitation?: TeamEinladung;
+      mailStatus?: { gesendet: boolean; modus: string; hinweis: string };
+    }
+  > => {
     if (!aktivesTeam) return { ok: false, fehler: 'Kein Team gewählt.' };
     try {
       const res = await coreApi.erstelleEinladung(aktivesTeam.id, payload);
       setEinladungen((alt) => [res.invitation, ...alt]);
-      return { ok: true, invitation: res.invitation };
+      return { ok: true, invitation: res.invitation, mailStatus: res.mailStatus };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Einladung konnte nicht erstellt werden.');
     }
@@ -789,6 +820,147 @@ function SidelineCoreShell({
       setBereich('sysadmin');
     }
     onPluginDeinstallieren(pluginId);
+  };
+
+  const handleS3Speichern = async (
+    neu: S3Konfiguration & { secretKey?: string }
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.speichereS3Konfig(neu);
+      setS3Konfig(res.s3Config);
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'S3-Konfiguration konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleS3Testen = async (
+    kandidat: S3Konfiguration & { secretKey?: string }
+  ): Promise<{ ok: boolean; nachricht: string }> => {
+    try {
+      return await coreApi.testeS3Verbindung(kandidat);
+    } catch (err) {
+      return {
+        ok: false,
+        nachricht: err instanceof Error ? err.message : 'S3-Verbindungstest fehlgeschlagen.',
+      };
+    }
+  };
+
+  const handleSmtpSpeichern = async (
+    neu: SmtpKonfiguration & { passwort?: string }
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.speichereSmtpKonfig(neu);
+      setSmtpKonfig(res.smtpConfig);
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'SMTP-Konfiguration konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleSmtpTesten = async (
+    kandidat: SmtpKonfiguration & { passwort?: string; testEmpfaenger?: string }
+  ): Promise<{ ok: boolean; nachricht: string }> => {
+    try {
+      return await coreApi.testeSmtpVerbindung(kandidat);
+    } catch (err) {
+      return {
+        ok: false,
+        nachricht: err instanceof Error ? err.message : 'SMTP-Verbindungstest fehlgeschlagen.',
+      };
+    }
+  };
+
+  const handleUpdatesPruefen = async (): Promise<ApiAktionErgebnis> => {
+    try {
+      const ergebnis = await coreApi.holeUpdates(true);
+      setUpdateStatus(ergebnis);
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Update-Prüfung fehlgeschlagen.');
+    }
+  };
+
+  const handlePluginReleaseInstallieren = async (
+    repoUrl: string,
+    tag?: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.installierePluginRelease(repoUrl, tag);
+      onBackendPluginRegistrieren(res.manifest, res.releaseTag);
+      await ladeSysadminUebersicht();
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Release-Installation fehlgeschlagen.');
+    }
+  };
+
+  const handlePluginUploadInstallieren = async (
+    contentBase64: string,
+    expectedSha256?: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.installierePluginUpload(contentBase64, expectedSha256);
+      onBackendPluginRegistrieren(res.manifest, `v${res.manifest.version}`);
+      await ladeSysadminUebersicht();
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Offline-Paket konnte nicht installiert werden.');
+    }
+  };
+
+  const handlePluginDevGitInstallieren = async (
+    repoUrl: string,
+    branch?: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.installierePluginDevGit(repoUrl, branch);
+      onBackendPluginRegistrieren(res.manifest, `dev:${res.branch}`);
+      await ladeSysadminUebersicht();
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Dev-Git-Installation fehlgeschlagen.');
+    }
+  };
+
+  const handlePluginRollback = async (pluginId: string): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.rollbackPlugin(pluginId);
+      onBackendPluginRegistrieren(res.manifest, `v${res.version}`);
+      await ladeSysadminUebersicht();
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Rollback fehlgeschlagen.');
+    }
+  };
+
+  const handlePluginBackendDeinstallieren = async (
+    pluginId: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      await coreApi.deinstallierePlugin(pluginId);
+      if (aktivesPluginId === pluginId) {
+        setAktivesPluginId(null);
+        setBereich('sysadmin');
+      }
+      await ladeSysadminUebersicht();
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Plugin konnte nicht deinstalliert werden.');
+    }
+  };
+
+  const handleS3CleanupAusfuehren = async (
+    auchVorfristig = false
+  ): Promise<ApiAktionErgebnis & { geloescht?: number }> => {
+    try {
+      const res = await coreApi.bereinigeS3Cleanup(auchVorfristig);
+      setCleanupStats(res.statistik);
+      return { ok: true, geloescht: res.geloescht };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'S3-Cleanup konnte nicht ausgeführt werden.');
+    }
   };
 
   // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
@@ -1044,6 +1216,10 @@ function SidelineCoreShell({
             installiertePlugins={installiertePlugins}
             installiertePluginIds={installiertePluginIds}
             globalAktivierteModule={globalAktivierteModule}
+            installedPluginsMeta={installedPluginsMeta}
+            capabilities={sysCapabilities}
+            updateStatus={updateStatus}
+            cleanupStats={cleanupStats}
             teams={teams}
             benutzerListe={benutzerListe}
             mitgliedschaften={mitgliedschaften}
@@ -1052,6 +1228,13 @@ function SidelineCoreShell({
             onPluginInstallieren={onPluginInstallieren}
             onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
             onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
+            onUpdatesPruefen={handleUpdatesPruefen}
+            onPluginReleaseInstallieren={handlePluginReleaseInstallieren}
+            onPluginUploadInstallieren={handlePluginUploadInstallieren}
+            onPluginDevGitInstallieren={handlePluginDevGitInstallieren}
+            onPluginRollback={handlePluginRollback}
+            onPluginBackendDeinstallieren={handlePluginBackendDeinstallieren}
+            onS3CleanupAusfuehren={handleS3CleanupAusfuehren}
             onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
@@ -1059,8 +1242,10 @@ function SidelineCoreShell({
             onBenutzerErstellen={handleBenutzerErstellen}
             onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
             onBenutzerLoeschen={handleBenutzerLoeschen}
-            onS3Speichern={setS3Konfig}
-            onSmtpSpeichern={setSmtpKonfig}
+            onS3Speichern={handleS3Speichern}
+            onS3Testen={handleS3Testen}
+            onSmtpSpeichern={handleSmtpSpeichern}
+            onSmtpTesten={handleSmtpTesten}
             onZurueck={
               aktiveTeamAnsicht !== null && aktivesTeam
                 ? () => handleBereichWechseln('settings-hub')
@@ -1074,6 +1259,10 @@ function SidelineCoreShell({
               installiertePlugins={installiertePlugins}
               installiertePluginIds={installiertePluginIds}
               globalAktivierteModule={globalAktivierteModule}
+              installedPluginsMeta={installedPluginsMeta}
+              capabilities={sysCapabilities}
+              updateStatus={updateStatus}
+              cleanupStats={cleanupStats}
               teams={teams}
               benutzerListe={benutzerListe}
               mitgliedschaften={mitgliedschaften}
@@ -1082,6 +1271,13 @@ function SidelineCoreShell({
               onPluginInstallieren={onPluginInstallieren}
               onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
               onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
+              onUpdatesPruefen={handleUpdatesPruefen}
+              onPluginReleaseInstallieren={handlePluginReleaseInstallieren}
+              onPluginUploadInstallieren={handlePluginUploadInstallieren}
+              onPluginDevGitInstallieren={handlePluginDevGitInstallieren}
+              onPluginRollback={handlePluginRollback}
+              onPluginBackendDeinstallieren={handlePluginBackendDeinstallieren}
+              onS3CleanupAusfuehren={handleS3CleanupAusfuehren}
               onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
               onTeamModulToggle={handleTeamModulToggle}
               onTeamErstellen={handleTeamErstellen}
@@ -1089,8 +1285,10 @@ function SidelineCoreShell({
               onBenutzerErstellen={handleBenutzerErstellen}
               onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
               onBenutzerLoeschen={handleBenutzerLoeschen}
-              onS3Speichern={setS3Konfig}
-              onSmtpSpeichern={setSmtpKonfig}
+              onS3Speichern={handleS3Speichern}
+              onS3Testen={handleS3Testen}
+              onSmtpSpeichern={handleSmtpSpeichern}
+              onSmtpTesten={handleSmtpTesten}
             />
           ) : (
             <div className="mx-auto max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center space-y-3">
@@ -1116,6 +1314,7 @@ function SidelineCoreShell({
             konto={konto}
             aktiveTeamAnsicht={aktiveTeamAnsicht}
             ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
+            ausstehendeUpdatesAnzahl={updateStatus?.anzahlVerfuegbar ?? 0}
             onBereichOeffnen={handleBereichWechseln}
           />
         ) : bereich === 'settings' ? (
@@ -1210,6 +1409,27 @@ export default function App() {
     setGlobalAktivierteModule((alt) => [...alt, manifest.id]);
   };
 
+  const handleBackendPluginRegistrieren = (
+    manifest: PluginManifest,
+    releaseTag?: string
+  ) => {
+    setStoreKatalog((alt) => {
+      const eintrag: PluginStoreEintrag = {
+        manifest,
+        quelle: 'CUSTOM_GITHUB',
+        verifiziert: true,
+        releaseTag: releaseTag || `v${manifest.version}`,
+        paketFormat: 'sideline-plugin-v1',
+      };
+      if (alt.some((k) => k.manifest.id === manifest.id)) {
+        return alt.map((k) => (k.manifest.id === manifest.id ? { ...k, manifest, releaseTag: eintrag.releaseTag } : k));
+      }
+      return [...alt, eintrag];
+    });
+    setInstalliertePluginIds((alt) => (alt.includes(manifest.id) ? alt : [...alt, manifest.id]));
+    setGlobalAktivierteModule((alt) => (alt.includes(manifest.id) ? alt : [...alt, manifest.id]));
+  };
+
   const handleGlobalModulToggle = (modulId: PluginId) => {
     setGlobalAktivierteModule((alt) =>
       alt.includes(modulId) ? alt.filter((id) => id !== modulId) : [...alt, modulId]
@@ -1226,6 +1446,7 @@ export default function App() {
         onPluginInstallieren={handlePluginInstallieren}
         onPluginDeinstallieren={handlePluginDeinstallieren}
         onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
+        onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
         onGlobalModulToggle={handleGlobalModulToggle}
         onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
       />

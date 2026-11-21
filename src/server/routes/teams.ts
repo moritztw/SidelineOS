@@ -1,10 +1,12 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import type { SpielerUnit, TeamRolle } from '../../shared/types.ts';
+import { TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth, requireTeamRolle } from '../middleware/auth.ts';
 import { generiereEinladungsToken } from '../security.ts';
+import type { SmtpService } from '../services/smtpService.ts';
 
 const GUELTIGE_ROLLEN = new Set<TeamRolle>(['TEAM_ADMIN', 'COACH', 'PLAYER']);
 const GUELTIGE_UNITS = new Set<SpielerUnit>(['OFFENSE', 'DEFENSE', 'SPECIAL_TEAMS']);
@@ -15,7 +17,11 @@ function bereinigeUnits(raw: unknown, fallback: SpielerUnit[] = ['OFFENSE']): Sp
   return gefiltert.length > 0 ? Array.from(new Set(gefiltert)) : fallback;
 }
 
-export function erstelleTeamRouter(repo: CoreRepository, config: CoreServerConfig): Router {
+export function erstelleTeamRouter(
+  repo: CoreRepository,
+  config: CoreServerConfig,
+  smtpService?: SmtpService
+): Router {
   const router = Router();
   const auth = requireAuth(repo, config);
 
@@ -285,7 +291,30 @@ export function erstelleTeamRouter(repo: CoreRepository, config: CoreServerConfi
           aktiv: true,
         });
 
-        res.status(201).json({ invitation: einladung });
+        let mailStatus:
+          | { gesendet: boolean; modus: 'SMTP' | 'OFFLINE_FALLBACK' | 'NICHT_ANGEFORDERT'; hinweis: string }
+          | undefined;
+
+        if (typ === 'EMAIL' && einladung.zielEmail && smtpService) {
+          const team = await repo.findeTeamNachId(teamId);
+          const versand = await smtpService.sendeEinladungsMail({
+            empfaenger: einladung.zielEmail,
+            teamName: team?.name ?? teamId,
+            rolleLabel: TEAM_ROLLEN_LABELS[einladung.rolle],
+            einladungsPfad: einladung.pfad,
+            gueltigBis: einladung.gueltigBis,
+          });
+          mailStatus = {
+            gesendet: versand.gesendet,
+            modus: versand.modus,
+            hinweis: versand.hinweis,
+          };
+        }
+
+        res.status(201).json({
+          invitation: einladung,
+          ...(mailStatus ? { mailStatus } : {}),
+        });
       } catch (err) {
         next(err);
       }

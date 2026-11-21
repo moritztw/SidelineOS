@@ -7,11 +7,19 @@ import { erstelleAuthRouter } from './routes/auth.ts';
 import { erstellePluginGatewayRouter } from './routes/pluginGateway.ts';
 import { erstelleSysadminRouter } from './routes/sysadmin.ts';
 import { erstelleTeamRouter } from './routes/teams.ts';
+import { PluginInstallerService } from './services/pluginInstaller.ts';
+import { S3BrokerService } from './services/s3Broker.ts';
+import { S3CleanupService } from './services/s3CleanupService.ts';
+import { SmtpService } from './services/smtpService.ts';
 
 export interface CreateCoreAppOptionen {
   db: CoreDatabaseClient;
   config: CoreServerConfig;
   pluginHost?: PluginBackendHost;
+  s3Broker?: S3BrokerService;
+  s3Cleanup?: S3CleanupService;
+  smtpService?: SmtpService;
+  pluginInstaller?: PluginInstallerService;
 }
 
 /**
@@ -22,30 +30,63 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
   app: Express;
   repo: CoreRepository;
   pluginHost: PluginBackendHost;
+  s3Broker: S3BrokerService;
+  s3Cleanup: S3CleanupService;
+  smtpService: SmtpService;
+  pluginInstaller: PluginInstallerService;
 } {
   const { db, config } = optionen;
   const repo = new CoreRepository(db);
-  const pluginHost = optionen.pluginHost ?? new PluginBackendHost(db);
+  const s3Broker = optionen.s3Broker ?? new S3BrokerService(repo, config);
+  const s3Cleanup = optionen.s3Cleanup ?? new S3CleanupService(db, s3Broker);
+  const smtpService = optionen.smtpService ?? new SmtpService(repo, config);
+  const pluginInstaller =
+    optionen.pluginInstaller ?? new PluginInstallerService(db, repo, config);
+  const pluginHost = optionen.pluginHost ?? new PluginBackendHost(db, s3Broker, s3Cleanup);
 
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
-  app.use(express.json({ limit: '2mb' }));
+
+  const jsonStandard = express.json({ limit: '2mb' });
+  const jsonUpload = express.json({ limit: '35mb' });
+  app.use((req, res, next) => {
+    if (req.path === '/api/v1/sysadmin/plugins/install-upload') {
+      jsonUpload(req, res, next);
+      return;
+    }
+    jsonStandard(req, res, next);
+  });
 
   app.get('/api/v1/health', (_req, res) => {
     res.status(200).json({
       status: 'ok',
       service: 'sidelineos-core',
+      version: config.coreVersion,
       db: db.dialekt,
       plugins: pluginHost.listeRegistrierteIds(),
     });
   });
 
   app.use('/api/v1/auth', erstelleAuthRouter(repo, config));
-  app.use('/api/v1/teams', erstelleTeamRouter(repo, config));
-  app.use('/api/v1/sysadmin', erstelleSysadminRouter(repo, config));
+  app.use('/api/v1/teams', erstelleTeamRouter(repo, config, smtpService));
+  app.use(
+    '/api/v1/sysadmin',
+    erstelleSysadminRouter(repo, config, {
+      s3Broker,
+      s3Cleanup,
+      smtpService,
+      pluginInstaller,
+    })
+  );
 
-  const { protectedRouter, publicRouter } = erstellePluginGatewayRouter(repo, config, pluginHost);
+  const { protectedRouter, publicRouter } = erstellePluginGatewayRouter(
+    repo,
+    config,
+    pluginHost,
+    s3Broker,
+    s3Cleanup
+  );
   app.use('/api/v1/plugins', protectedRouter);
   app.use('/api/v1/public/plugins', publicRouter);
 
@@ -64,5 +105,5 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
     res.status(500).json({ fehler: 'Interner Serverfehler.' });
   });
 
-  return { app, repo, pluginHost };
+  return { app, repo, pluginHost, s3Broker, s3Cleanup, smtpService, pluginInstaller };
 }

@@ -2,6 +2,8 @@ import type {
   BenutzerKonto,
   PluginId,
   ProfilCustomFeld,
+  S3Konfiguration,
+  SmtpKonfiguration,
   SpielerUnit,
   TeamEinladung,
   TeamKontext,
@@ -71,16 +73,77 @@ export interface TeamMemberEintrag {
   } | null;
 }
 
+export interface SysadminPluginStatusDTO {
+  manifest: PluginManifest;
+  enabledGlobally: boolean;
+  source: string;
+  releaseTag: string;
+  installedVersion?: string;
+  previousVersion?: string | null;
+  installMode?: string;
+  packageSha256?: string | null;
+  devBranch?: string | null;
+}
+
+export interface SysadminCapabilitiesDTO {
+  devGitInstallErlaubt: boolean;
+  disableUpdateCheck: boolean;
+  coreVersion: string;
+  supportedSdkVersion: string;
+}
+
+export interface S3CleanupStatistikDTO {
+  wartendeObjekte: number;
+  faelligeObjekte: number;
+  gesamtBytes: number;
+  faelligeBytes: number;
+  schonfristTage: number;
+  naechsterLoeschzeitpunkt: string | null;
+}
+
+export interface CoreUpdateInfoDTO {
+  aktuell: string;
+  verfuegbar: string | null;
+  updateVerfuegbar: boolean;
+  releaseUrl: string | null;
+  veroeffentlichtAm: string | null;
+  hinweis?: string;
+}
+
+export interface PluginUpdateEintragDTO {
+  pluginId: string;
+  name: string;
+  aktuell: string;
+  verfuegbar: string | null;
+  updateVerfuegbar: boolean;
+  sdkKompatibel: boolean;
+  releaseTag: string | null;
+  releaseUrl: string | null;
+}
+
+export interface UpdatePruefErgebnisDTO {
+  deaktiviert: boolean;
+  geprueftAm: string;
+  coreUpdate: CoreUpdateInfoDTO | null;
+  pluginUpdates: PluginUpdateEintragDTO[];
+  anzahlVerfuegbar: number;
+}
+
 export interface SysadminOverviewResponse {
   teams: TeamKontext[];
   users: BenutzerKonto[];
   memberships: TeamMitgliedschaft[];
-  plugins: Array<{
-    manifest: PluginManifest;
-    enabledGlobally: boolean;
-    source: string;
-    releaseTag: string;
-  }>;
+  plugins: SysadminPluginStatusDTO[];
+  capabilities?: SysadminCapabilitiesDTO;
+  s3Config?: S3Konfiguration;
+  smtpConfig?: SmtpKonfiguration;
+  cleanupStats?: S3CleanupStatistikDTO;
+}
+
+export interface MailVersandStatus {
+  gesendet: boolean;
+  modus: 'SMTP' | 'OFFLINE_FALLBACK' | 'NICHT_ANGEFORDERT';
+  hinweis: string;
 }
 
 /**
@@ -272,7 +335,7 @@ export const coreApi = {
       gueltigTage?: number;
       bestaetigungErforderlich?: boolean;
     }
-  ): Promise<{ invitation: TeamEinladung }> {
+  ): Promise<{ invitation: TeamEinladung; mailStatus?: MailVersandStatus }> {
     return apiRequest(`/api/v1/teams/${encodeURIComponent(teamId)}/invitations`, {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -366,5 +429,121 @@ export const coreApi = {
         body: JSON.stringify({ enabled }),
       }
     );
+  },
+
+  speichereS3Konfig(
+    payload: S3Konfiguration & { secretKey?: string; clearSecretKey?: boolean }
+  ): Promise<{ s3Config: S3Konfiguration }> {
+    return apiRequest('/api/v1/sysadmin/s3', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  testeS3Verbindung(
+    payload?: Partial<S3Konfiguration> & { secretKey?: string }
+  ): Promise<{ ok: boolean; nachricht: string }> {
+    return apiRequest('/api/v1/sysadmin/s3/test', {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  speichereSmtpKonfig(
+    payload: SmtpKonfiguration & { passwort?: string; clearPasswort?: boolean }
+  ): Promise<{ smtpConfig: SmtpKonfiguration }> {
+    return apiRequest('/api/v1/sysadmin/smtp', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  testeSmtpVerbindung(
+    payload?: Partial<SmtpKonfiguration> & { passwort?: string; testEmpfaenger?: string }
+  ): Promise<{ ok: boolean; nachricht: string }> {
+    return apiRequest('/api/v1/sysadmin/smtp/test', {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  // --- Phase 3: Updates, Plugin-Installer & S3-Cleanup ---
+  holeUpdates(refresh = false): Promise<UpdatePruefErgebnisDTO> {
+    return apiRequest(`/api/v1/sysadmin/updates${refresh ? '?refresh=true' : ''}`);
+  },
+
+  installierePluginRelease(
+    repoUrl: string,
+    tag?: string
+  ): Promise<{
+    ok: boolean;
+    manifest: PluginManifest;
+    sha256: string;
+    releaseTag: string;
+    migrationenAusgefuehrt: number;
+  }> {
+    return apiRequest('/api/v1/sysadmin/plugins/install-release', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl, ...(tag ? { tag } : {}) }),
+    });
+  },
+
+  installierePluginUpload(
+    contentBase64: string,
+    expectedSha256?: string
+  ): Promise<{
+    ok: boolean;
+    manifest: PluginManifest;
+    sha256: string;
+    migrationenAusgefuehrt: number;
+  }> {
+    return apiRequest('/api/v1/sysadmin/plugins/install-upload', {
+      method: 'POST',
+      body: JSON.stringify({
+        contentBase64,
+        ...(expectedSha256 ? { expectedSha256 } : {}),
+      }),
+    });
+  },
+
+  installierePluginDevGit(
+    repoUrl: string,
+    branch?: string
+  ): Promise<{
+    ok: boolean;
+    manifest: PluginManifest;
+    branch: string;
+    migrationenAusgefuehrt: number;
+  }> {
+    return apiRequest('/api/v1/sysadmin/plugins/install-dev-git', {
+      method: 'POST',
+      body: JSON.stringify({ repoUrl, ...(branch ? { branch } : {}) }),
+    });
+  },
+
+  rollbackPlugin(
+    pluginId: string
+  ): Promise<{ ok: boolean; manifest: PluginManifest; version: string }> {
+    return apiRequest(`/api/v1/sysadmin/plugins/${encodeURIComponent(pluginId)}/rollback`, {
+      method: 'POST',
+    });
+  },
+
+  deinstallierePlugin(pluginId: string): Promise<{ ok: boolean }> {
+    return apiRequest(`/api/v1/sysadmin/plugins/${encodeURIComponent(pluginId)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  bereinigeS3Cleanup(auchVorfristig = false): Promise<{
+    geloescht: number;
+    fehler: number;
+    freigegebeneBytes: number;
+    statistik: S3CleanupStatistikDTO;
+  }> {
+    return apiRequest('/api/v1/sysadmin/s3/cleanup/run', {
+      method: 'POST',
+      body: JSON.stringify({ auchVorfristig }),
+    });
   },
 };

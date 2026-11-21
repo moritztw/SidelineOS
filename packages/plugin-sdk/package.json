@@ -1,0 +1,21 @@
+{
+  "name": "@sidelineos/plugin-sdk",
+  "version": "1.0.0",
+  "description": "Offizielles SDK und Typverträge für externe SidelineOS-Plugins",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/sdk/plugin.js",
+  "types": "./dist/sdk/plugin.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk/plugin.d.ts",
+      "import": "./dist/sdk/plugin.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  }
+}
