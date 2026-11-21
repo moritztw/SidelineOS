@@ -144,7 +144,7 @@ export function InviteRegisterView({
           </div>
           <h1 className="text-lg font-semibold text-white">Registrierung eingegangen</h1>
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            Dein SidelineOS-Core-Konto wurde in der Datenbank angelegt. Da dieser Team-Link eine
+            Dein SidelineOS-Konto wurde in der Datenbank angelegt. Da dieser Team-Link eine
             Bestätigung vorsieht, prüft ein Team Admin von{' '}
             <strong className="text-white">{team.name}</strong> nun deine Anfrage unter{' '}
             <span className="font-mono text-[#E6EDF3]">Team-Einstellungen → Einladungen</span>.
@@ -247,7 +247,6 @@ export function InviteRegisterView({
         <div className="flex items-center justify-between">
           <div className="font-display text-lg font-bold tracking-tight text-white">
             Sideline<span className="text-[#F59E0B]">OS</span>
-            <span className="font-medium text-[#8B949E]">-Core</span>
           </div>
           <button
             type="button"
@@ -315,7 +314,7 @@ export function InviteRegisterView({
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs font-semibold text-white">
                 <ShieldCheck className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-                Mit vorhandenem SidelineOS-Core-Konto beitreten
+                Mit vorhandenem SidelineOS-Konto beitreten
               </div>
               <label className="block space-y-1 text-xs text-[#8B949E]">
                 <span>E-Mail oder Benutzername</span>

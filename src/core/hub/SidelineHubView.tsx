@@ -42,7 +42,7 @@ export function SidelineHubView({
 
   return (
     <section
-      aria-label="SidelineOS-Core Module und Einstellungen"
+      aria-label="SidelineOS Module und Einstellungen"
       className="mx-auto max-w-5xl py-4 sm:py-8"
     >
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">

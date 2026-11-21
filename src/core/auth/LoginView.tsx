@@ -52,7 +52,6 @@ export function LoginView({
         <div className="text-center space-y-1.5">
           <div className="font-display text-2xl font-bold tracking-tight text-white">
             Sideline<span className="text-[#F59E0B]">OS</span>
-            <span className="font-medium text-[#8B949E]">-Core</span>
           </div>
           <p className="text-xs text-[#8B949E]">
             Selbstgehostete Multi-Tenant-Plattform für Teams &amp; Coaches

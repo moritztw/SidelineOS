@@ -62,7 +62,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zu SidelineOS-Core
+            Zurück zu SidelineOS
           </button>
         </div>
       </div>
@@ -90,7 +90,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zu SidelineOS-Core
+            Zurück zu SidelineOS
           </button>
         </div>
       </div>
