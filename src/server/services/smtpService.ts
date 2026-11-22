@@ -134,7 +134,8 @@ export class SmtpService {
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('SMTP-Port muss zwischen 1 und 65535 liegen.');
     }
-    const absender = input.absender.trim() || 'SidelineOS <noreply@sidelineos.local>';
+    const absender =
+      input.absender.trim() || `${this.config.brandName} <noreply@sidelineos.local>`;
     const benutzer = input.benutzer.trim();
 
     const aktuell = await this.holeEffektiveKonfig();
@@ -201,8 +202,8 @@ export class SmtpService {
         await transport.sendMail({
           from: kandidat.absender,
           to: ziel,
-          subject: 'SidelineOS · SMTP-Verbindungstest',
-          text: `Der SMTP-Versand deiner SidelineOS-Instanz (${kandidat.host}:${kandidat.port}) funktioniert.`,
+          subject: `${this.config.brandName} · SMTP-Verbindungstest`,
+          text: `Der SMTP-Versand deiner ${this.config.brandName}-Instanz (${kandidat.host}:${kandidat.port}) funktioniert.`,
         });
         return {
           ok: true,
@@ -253,9 +254,9 @@ export class SmtpService {
       const info = await transport.sendMail({
         from: konfig.absender,
         to: params.empfaenger,
-        subject: `SidelineOS Einladung · ${params.teamName}`,
+        subject: `${this.config.brandName} Einladung · ${params.teamName}`,
         text: [
-          `Du wurdest als ${params.rolleLabel} zum Team "${params.teamName}" in SidelineOS eingeladen.`,
+          `Du wurdest als ${params.rolleLabel} zum Team "${params.teamName}" in ${this.config.brandName} eingeladen.`,
           '',
           `Einladungslink öffnen: ${einladungsUrl}`,
           `Gültig bis: ${params.gueltigBis}`,

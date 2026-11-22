@@ -6,10 +6,12 @@ import type {
   TagFeldKonfig,
   TagFeldTyp,
 } from '../types.ts';
+import { createVideoTranslator, holeVideoGruppeLabel } from '../i18n.ts';
 
 interface TaggingSchemaSettingsProps {
   teamRolle: TeamRolle;
   tagSchema: TagFeldKonfig[];
+  locale?: string;
   onFeldToggle: (feldKey: BreakdownFeldKey) => void;
   onDefinitionHinzufuegen: (feldKey: BreakdownFeldKey, begriff: string) => void;
   onDefinitionLoeschen: (feldKey: BreakdownFeldKey, begriff: string) => void;
@@ -17,23 +19,17 @@ interface TaggingSchemaSettingsProps {
   onCustomFeldLoeschen: (feldKey: BreakdownFeldKey) => void;
 }
 
-const GRUPPEN_LABELS: Record<TagFeldKonfig['gruppe'], string> = {
-  SITUATION: 'Situation & Feldposition',
-  OFFENSE: 'Offense',
-  RESULT: 'Ergebnis & Yards',
-  DEFENSE: 'Defense',
-  CUSTOM: 'Eigene Custom-Felder',
-};
-
 export function TaggingSchemaSettings({
   teamRolle,
   tagSchema,
+  locale,
   onFeldToggle,
   onDefinitionHinzufuegen,
   onDefinitionLoeschen,
   onCustomFeldErstellen,
   onCustomFeldLoeschen,
 }: TaggingSchemaSettingsProps) {
+  const t = createVideoTranslator(locale);
   const istTeamAdmin = teamRolle === 'TEAM_ADMIN';
 
   const [ausgewaehltesFeldKey, setAusgewaehltesFeldKey] = useState<string>('off_form');
@@ -62,7 +58,7 @@ export function TaggingSchemaSettings({
     const titel = customLabel.trim();
     const kurz = (customKurz.trim() || titel.slice(0, 10)).toUpperCase();
     if (!titel) {
-      setCustomFehler('Bitte einen Feldnamen angeben.');
+      setCustomFehler(t('tagging.errNameRequired'));
       return;
     }
 
@@ -73,7 +69,7 @@ export function TaggingSchemaSettings({
     const key = `custom_${slug || Date.now()}`;
 
     if (tagSchema.some((f) => f.key === key)) {
-      setCustomFehler('Ein Feld mit diesem Schlüssel existiert bereits.');
+      setCustomFehler(t('tagging.errKeyExists'));
       return;
     }
 
@@ -123,19 +119,17 @@ export function TaggingSchemaSettings({
             </div>
             <div>
               <h1 className="text-base font-semibold text-white">
-                Team-Einstellungen · Tagging-Schema &amp; Wörterbuch
+                {t('tagging.title')}
               </h1>
               <p className="mt-1 max-w-2xl text-xs text-[#8B949E]">
-                Zentrale Team-Admin-Konfiguration für alle Coaches im Team: Aktiviere oder
-                deaktiviere Breakdown-Spalten, lege eigene Custom-Felder an und bereinige
-                Fehleinträge im dauerhaften Team-Wörterbuch.
+                {t('tagging.subtitle')}
               </p>
             </div>
           </div>
 
           {!istTeamAdmin && (
             <span className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E]">
-              Nur Lesezugriff · Änderungen erfordern Rolle Team Admin
+              {t('tagging.readOnlyBadge')}
             </span>
           )}
         </div>
@@ -145,9 +139,9 @@ export function TaggingSchemaSettings({
         {/* Linke Spalte: Felder aktivieren/deaktivieren + Custom-Feld anlegen */}
         <div className="space-y-6">
           <section className="rounded-lg border border-[#232933] bg-[#13171D] p-5">
-            <h2 className="text-sm font-semibold text-white">Aktive Breakdown-Felder</h2>
+            <h2 className="text-sm font-semibold text-white">{t('tagging.activeFieldsTitle')}</h2>
             <p className="mt-1 text-xs text-[#8B949E]">
-              Deaktivierte Felder verschwinden aus Quick-Tags, Breakdown-Tabelle und CSV-Export.
+              {t('tagging.activeFieldsDesc')}
             </p>
 
             <div className="mt-4 space-y-5">
@@ -158,7 +152,7 @@ export function TaggingSchemaSettings({
                 return (
                   <div key={gruppe} className="space-y-2">
                     <h3 className="text-xs font-medium text-[#8B949E]">
-                      {GRUPPEN_LABELS[gruppe]}
+                      {holeVideoGruppeLabel(gruppe, locale)}
                     </h3>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {felder.map((feld) => {
@@ -198,14 +192,16 @@ export function TaggingSchemaSettings({
                                   onClick={() => setAusgewaehltesFeldKey(feld.key)}
                                   className="rounded border border-[#232933] px-2 py-0.5 font-mono text-[10px] text-[#8B949E] hover:border-[#F59E0B] hover:text-white"
                                 >
-                                  {feld.definitionen?.length ?? 0} Werte
+                                  {t('tagging.valuesCount', {
+                                    count: feld.definitionen?.length ?? 0,
+                                  })}
                                 </button>
                               )}
                               {feld.istCustom && istTeamAdmin && (
                                 <button
                                   type="button"
                                   onClick={() => onCustomFeldLoeschen(feld.key)}
-                                  aria-label={`Custom-Feld ${feld.label} löschen`}
+                                  aria-label={t('tagging.deleteCustomAria', { label: feld.label })}
                                   className="rounded p-1 text-[#8B949E] hover:text-[#FCA5A5]"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -225,57 +221,56 @@ export function TaggingSchemaSettings({
           {/* Neues Custom-Feld anlegen */}
           {istTeamAdmin && (
             <section className="rounded-lg border border-[#232933] bg-[#13171D] p-5">
-              <h2 className="text-sm font-semibold text-white">Eigenes Custom-Feld hinzufügen</h2>
+              <h2 className="text-sm font-semibold text-white">{t('tagging.addCustomTitle')}</h2>
               <p className="mt-1 text-xs text-[#8B949E]">
-                Erweitere das Breakdown-Schema um vereins- oder unit-spezifische Spalten (z. B.
-                Protection, QB Read, Tackler).
+                {t('tagging.addCustomDesc')}
               </p>
 
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Feldname</span>
+                  <span>{t('tagging.fieldName')}</span>
                   <input
                     type="text"
                     value={customLabel}
                     onChange={(e) => setCustomLabel(e.target.value)}
-                    placeholder="z. B. Pass Protection"
+                    placeholder={t('tagging.fieldNamePlaceholder')}
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                   />
                 </label>
 
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Tabellen-Kürzel</span>
+                  <span>{t('tagging.shortCode')}</span>
                   <input
                     type="text"
                     value={customKurz}
                     onChange={(e) => setCustomKurz(e.target.value)}
-                    placeholder="z. B. PROT"
+                    placeholder={t('tagging.shortCodePlaceholder')}
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 font-mono text-xs uppercase text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                   />
                 </label>
 
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Feldtyp</span>
+                  <span>{t('tagging.fieldType')}</span>
                   <select
                     value={customTyp}
                     onChange={(e) => setCustomTyp(e.target.value as TagFeldTyp)}
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                   >
-                    <option value="combobox">Wörterbuch (lernend)</option>
-                    <option value="text">Freitext</option>
-                    <option value="number">Zahl</option>
+                    <option value="combobox">{t('tagging.typeCombobox')}</option>
+                    <option value="text">{t('tagging.typeText')}</option>
+                    <option value="number">{t('tagging.typeNumber')}</option>
                   </select>
                 </label>
               </div>
 
               {customTyp === 'combobox' && (
                 <label className="mt-3 block space-y-1 text-xs text-[#8B949E]">
-                  <span>Start-Definitionen (kommagetrennt, optional)</span>
+                  <span>{t('tagging.startValues')}</span>
                   <input
                     type="text"
                     value={customStartWerte}
                     onChange={(e) => setCustomStartWerte(e.target.value)}
-                    placeholder="z. B. Half Slide, Full Slide, 6-Man, Play Action"
+                    placeholder={t('tagging.startValuesPlaceholder')}
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                   />
                 </label>
@@ -290,7 +285,7 @@ export function TaggingSchemaSettings({
                   className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-1.5 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24]"
                 >
                   <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  Custom-Feld anlegen
+                  {t('tagging.addCustomBtn')}
                 </button>
               </div>
             </section>
@@ -299,14 +294,13 @@ export function TaggingSchemaSettings({
 
         {/* Rechte Spalte: Wörterbuch-Verwaltung (Definitionen pflegen & Fehleinträge löschen) */}
         <aside className="rounded-lg border border-[#232933] bg-[#13171D] p-5">
-          <h2 className="text-sm font-semibold text-white">Wörterbuch-Definitionen</h2>
+          <h2 className="text-sm font-semibold text-white">{t('tagging.dictTitle')}</h2>
           <p className="mt-1 text-xs text-[#8B949E]">
-            Wähle ein Feld links oder unten, um gespeicherte Begriffe zu prüfen oder Fehleinträge
-            zu löschen.
+            {t('tagging.dictDesc')}
           </p>
 
           <label className="mt-4 block space-y-1 text-xs text-[#8B949E]">
-            <span>Feld wählen</span>
+            <span>{t('tagging.selectField')}</span>
             <select
               value={ausgewaehltesFeld?.key ?? ''}
               onChange={(e) => setAusgewaehltesFeldKey(e.target.value)}
@@ -333,7 +327,7 @@ export function TaggingSchemaSettings({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleBegriffSpeichern();
                     }}
-                    placeholder={`Neuer Eintrag für ${ausgewaehltesFeld.kurz}...`}
+                    placeholder={t('tagging.newEntryPlaceholder', { short: ausgewaehltesFeld.kurz })}
                     className="min-w-0 flex-1 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                   />
                   <button
@@ -349,7 +343,7 @@ export function TaggingSchemaSettings({
               <ul className="max-h-[380px] divide-y divide-[#232933] overflow-y-auto rounded-md border border-[#232933] bg-[#0B0E11]">
                 {(ausgewaehltesFeld.definitionen ?? []).length === 0 ? (
                   <li className="px-3 py-6 text-center text-xs text-[#6E7681]">
-                    Noch keine Definitionen gespeichert.
+                    {t('tagging.noDefinitions')}
                   </li>
                 ) : (
                   (ausgewaehltesFeld.definitionen ?? []).map((begriff) => (
@@ -362,8 +356,8 @@ export function TaggingSchemaSettings({
                         <button
                           type="button"
                           onClick={() => onDefinitionLoeschen(ausgewaehltesFeld.key, begriff)}
-                          title={`Fehleintrag "${begriff}" löschen`}
-                          aria-label={`Eintrag ${begriff} löschen`}
+                          title={t('tagging.deleteEntryTitle', { term: begriff })}
+                          aria-label={t('tagging.deleteEntryAria', { term: begriff })}
                           className="rounded p-0.5 text-[#8B949E] transition-colors hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
                         >
                           <X className="h-3.5 w-3.5" aria-hidden="true" />

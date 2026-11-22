@@ -74,6 +74,7 @@ export class PluginBackendHost {
       ...(s3 ? { s3 } : {}),
       ...(cleanupQueue ? { cleanupQueue } : {}),
       user: params.user,
+      locale: params.user.preferredLocale ?? 'de',
       team: params.team,
       teamRolle: params.teamRolle,
       hasPermission(permission: PluginPermission): boolean {

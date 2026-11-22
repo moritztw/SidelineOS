@@ -4,12 +4,17 @@ import {
   OFFIZIELLER_PLUGIN_KATALOG,
   STANDARD_AKTIVIERTE_PLUGIN_IDS,
 } from '../core/pluginStoreCatalog.ts';
+import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
+import { normalisiereSprache, type UnterstuetzteSprache } from '../shared/i18n.ts';
 import type { PluginId } from '../shared/types.ts';
 
 export interface CoreServerConfig {
   nodeEnv: string;
   port: number;
   appUrl: string;
+  brandName: string;
+  coreName: string;
+  defaultLocale: UnterstuetzteSprache;
   databaseUrl?: string;
   pgliteDataDir?: string;
   sessionSecret: string;
@@ -61,6 +66,8 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
   const nodeEnv = env.NODE_ENV?.trim() || 'development';
   const port = Number(env.PORT) > 0 ? Number(env.PORT) : 3000;
   const appUrl = env.APP_URL?.trim() || `http://localhost:${port}`;
+  const brandKonfig = holeAktuelleBrandKonfig(env.APP_BRAND_NAME);
+  const defaultLocale = normalisiereSprache(env.DEFAULT_LOCALE, 'de');
   const databaseUrl = env.DATABASE_URL?.trim() || undefined;
   const pgliteDataDir = env.PGLITE_DATA_DIR?.trim() || undefined;
 
@@ -110,6 +117,9 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     nodeEnv,
     port,
     appUrl,
+    brandName: brandKonfig.produktName,
+    coreName: brandKonfig.coreName,
+    defaultLocale,
     databaseUrl,
     pgliteDataDir,
     sessionSecret,
@@ -130,7 +140,7 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
       port: smtpPort > 0 && smtpPort <= 65535 ? smtpPort : 587,
       benutzer: env.SMTP_USER?.trim() || '',
       passwort: smtpPass,
-      absender: env.SMTP_FROM?.trim() || 'SidelineOS <noreply@sidelineos.local>',
+      absender: env.SMTP_FROM?.trim() || `${brandKonfig.produktName} <noreply@sidelineos.local>`,
       tlsAktiv: parseBool(env.SMTP_TLS, true),
     },
     coreVersion: env.CORE_VERSION?.trim() || '0.1.0',

@@ -1,6 +1,7 @@
 import type { PluginLaufzeitKontext, PluginTab, SidelinePlugin } from '../../sdk/plugin.ts';
 import type { VideoModulTab } from './types.ts';
 import { VIDEO_PLUGIN_MANIFEST } from './manifest.ts';
+import { createVideoTranslator } from './i18n.ts';
 import { VideoAnalysisProvider, useVideoAnalysis } from './VideoAnalysisContext.tsx';
 import { DashboardView } from './components/DashboardView.tsx';
 import { FilmRoomView } from './components/FilmRoomView.tsx';
@@ -27,6 +28,7 @@ function VideoAnalysisMainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
         key={aktivesReel.id}
         reel={aktivesReel}
         teamRolle={ctx.aktiveTeamAnsicht}
+        locale={ctx.locale}
         tagSchema={video.tagSchema}
         nutzerEinstellungen={video.nutzerEinstellungen}
         onZurueck={() => ctx.onTabWechseln('dashboard')}
@@ -51,6 +53,7 @@ function VideoAnalysisMainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
     return (
       <VideoCutSyncPlaceholder
         ansicht={aktiverTab}
+        locale={ctx.locale}
         ausgewaehltesReel={aktivesReel}
         onZurueckZumDashboard={() => ctx.onTabWechseln('dashboard')}
       />
@@ -63,6 +66,7 @@ function VideoAnalysisMainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
       gewaehlteSaison={ctx.gewaehlteSaison}
       teamAktiveSaison={ctx.team.aktiveSaison}
       teamRolle={ctx.aktiveTeamAnsicht}
+      locale={ctx.locale}
       tagSchema={video.tagSchema}
       reels={video.reels}
       uploadHervorgehoben={video.uploadHervorgehoben}
@@ -87,6 +91,7 @@ function VideoPrimaerAktionButton({
   className: string;
 }) {
   const video = useVideoAnalysis();
+  const t = createVideoTranslator(ctx.locale);
   const istCoach = ctx.aktiveTeamAnsicht === 'COACH' || ctx.aktiveTeamAnsicht === 'TEAM_ADMIN';
 
   return (
@@ -102,7 +107,7 @@ function VideoPrimaerAktionButton({
       }}
       className={className}
     >
-      {istCoach ? 'Tapes hochladen' : 'Film Room öffnen'}
+      {istCoach ? t('primaryAction.upload') : t('primaryAction.openFilmRoom')}
     </button>
   );
 }
@@ -115,20 +120,21 @@ export const videoAnalysisPlugin: SidelinePlugin = {
   manifest: VIDEO_PLUGIN_MANIFEST,
   Provider: VideoAnalysisProvider,
   defaultTab: 'dashboard',
-  getTabs: ({ teamRolle }) => {
+  getTabs: ({ teamRolle, locale }) => {
+    const t = createVideoTranslator(locale);
     const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
-    const tabs: PluginTab[] = [{ id: 'dashboard', label: 'Bibliothek' }];
+    const tabs: PluginTab[] = [{ id: 'dashboard', label: t('tab.dashboard') }];
     if (istCoach) {
-      tabs.push({ id: 'cut-sync', label: 'Cut & Sync' });
+      tabs.push({ id: 'cut-sync', label: t('tab.cutSync') });
     }
-    tabs.push({ id: 'film-room', label: 'Film Room' });
-    tabs.push({ id: 'playlists', label: 'Playlists' });
+    tabs.push({ id: 'film-room', label: t('tab.filmRoom') });
+    tabs.push({ id: 'playlists', label: t('tab.playlists') });
     return tabs;
   },
   PrimaerAktion: VideoPrimaerAktionButton,
   renderMainView: (ctx) => <VideoAnalysisMainView ctx={ctx} />,
-  renderPublicShareView: ({ token, onSchliessen }) => (
-    <PublicShareView token={token} onSchliessen={onSchliessen} />
+  renderPublicShareView: ({ token, locale, onSchliessen }) => (
+    <PublicShareView token={token} locale={locale} onSchliessen={onSchliessen} />
   ),
   settingsPanels: {
     user: VideoUserSettingsPanel,

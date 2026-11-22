@@ -9,6 +9,7 @@ import type {
   TeamMitgliedschaft,
   TeamRolle,
 } from '../../shared/types.ts';
+import { normalisiereSprache } from '../../shared/i18n.ts';
 import type { PluginManifest, PluginStoreEintrag } from '../../sdk/plugin.ts';
 import type { CoreDatabaseClient } from './client.ts';
 
@@ -52,6 +53,7 @@ interface UserRow {
   jersey_number: string;
   position: string;
   is_sysadmin: boolean;
+  preferred_locale?: string;
   custom_profile_values: unknown;
   created_at: unknown;
 }
@@ -69,6 +71,7 @@ function mapUserRow(row: UserRow): DbBenutzerMitHash {
       position: row.position || undefined,
       istSysadmin: Boolean(row.is_sysadmin),
       erstelltAm: toIsoDate(row.created_at),
+      preferredLocale: normalisiereSprache(row.preferred_locale, 'de'),
       customProfilWerte: parseJsonWert<Record<string, string>>(row.custom_profile_values, {}),
     },
   };
@@ -89,7 +92,7 @@ export class CoreRepository {
   async listeBenutzer(): Promise<BenutzerKonto[]> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
        FROM core.users
        ORDER BY created_at ASC, full_name ASC`
     );
@@ -101,7 +104,7 @@ export class CoreRepository {
     if (!norm) return null;
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
        FROM core.users
        WHERE LOWER(email) = $1 OR LOWER(username) = $1
        LIMIT 1`,
@@ -113,7 +116,7 @@ export class CoreRepository {
   async findeBenutzerNachUuid(uuid: string): Promise<DbBenutzerMitHash | null> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
        FROM core.users
        WHERE uuid = $1
        LIMIT 1`,
@@ -141,10 +144,10 @@ export class CoreRepository {
     const res = await this.db.query<UserRow>(
       `INSERT INTO core.users (
          uuid, username, full_name, email, password_hash,
-         phone, jersey_number, position, is_sysadmin, custom_profile_values, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)
+         phone, jersey_number, position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -155,6 +158,7 @@ export class CoreRepository {
         konto.trikotNummer ?? '',
         konto.position ?? '',
         konto.istSysadmin,
+        normalisiereSprache(konto.preferredLocale, 'de'),
         JSON.stringify(konto.customProfilWerte ?? {}),
         konto.erstelltAm || new Date().toISOString().slice(0, 10),
       ]
@@ -172,11 +176,12 @@ export class CoreRepository {
            jersey_number = $6,
            position = $7,
            is_sysadmin = $8,
-           custom_profile_values = $9::jsonb,
+           preferred_locale = $9,
+           custom_profile_values = $10::jsonb,
            updated_at = NOW()
        WHERE uuid = $1
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -186,6 +191,7 @@ export class CoreRepository {
         konto.trikotNummer ?? '',
         konto.position ?? '',
         konto.istSysadmin,
+        normalisiereSprache(konto.preferredLocale, 'de'),
         JSON.stringify(konto.customProfilWerte ?? {}),
       ]
     );

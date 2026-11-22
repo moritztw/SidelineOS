@@ -7,6 +7,7 @@ import {
   Upload,
 } from 'lucide-react';
 import type { VideoReel } from '../types.ts';
+import { createVideoTranslator } from '../i18n.ts';
 import {
   bundleZuReel,
   erstelleBeispielBundle,
@@ -17,6 +18,7 @@ import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 interface UploadPanelProps {
   teamId: string;
   saison: string;
+  locale?: string;
   hervorgehoben: boolean;
   onNeuesReelHinzufuegen: (reel: VideoReel) => void;
 }
@@ -31,9 +33,11 @@ interface UploadProtokoll {
 export function UploadPanel({
   teamId,
   saison,
+  locale,
   hervorgehoben,
   onNeuesReelHinzufuegen,
 }: UploadPanelProps) {
+  const t = createVideoTranslator(locale);
   const dateiInputRef = useRef<HTMLInputElement | null>(null);
   const [dragAktiv, setDragAktiv] = useState(false);
   const [fehlerListe, setFehlerListe] = useState<string[]>([]);
@@ -72,7 +76,7 @@ export function UploadPanel({
           fuegeProtokollHinzu({
             id: `err-${Date.now()}`,
             titel: jsonDatei.name,
-            details: `${ergebnis.fehler.length} Validierungsfehler`,
+            details: t('upload.validationErrors', { count: ergebnis.fehler.length }),
             status: 'fehler',
           });
           return;
@@ -84,17 +88,21 @@ export function UploadPanel({
         };
         onNeuesReelHinzufuegen(neuesReel);
         setHinweisListe([
-          `Bundle "${neuesReel.title}" importiert (${neuesReel.playCount} Plays, ${neuesReel.taggedCount} vorgetaggt).`,
+          t('upload.bundleImported', {
+            title: neuesReel.title,
+            plays: neuesReel.playCount,
+            tagged: neuesReel.taggedCount,
+          }),
           ...ergebnis.hinweise,
         ]);
         fuegeProtokollHinzu({
           id: neuesReel.id,
           titel: neuesReel.title,
-          details: `${neuesReel.playCount} Plays via JSON-Bundle`,
+          details: t('upload.bundleLog', { count: neuesReel.playCount }),
           status: 'ok',
         });
       } catch {
-        setFehlerListe(['Die ausgewählte JSON-Datei konnte nicht gelesen werden.']);
+        setFehlerListe([t('upload.errJsonRead')]);
       }
       return;
     }
@@ -106,7 +114,9 @@ export function UploadPanel({
         id: `reel-${Date.now()}`,
         teamId,
         saison,
-        title: istEinzeldatei ? basisName : `Clip-Upload (${videoDateien.length} Dateien)`,
+        title: istEinzeldatei
+          ? basisName
+          : t('upload.clipUploadTitle', { count: videoDateien.length }),
         category: 'GAME',
         eventDate: new Date().toISOString().slice(0, 10),
         thumbnailUrl: istEinzeldatei ? THUMB_ENDZONE : THUMB_SIDELINE,
@@ -136,23 +146,21 @@ export function UploadPanel({
       onNeuesReelHinzufuegen(neuesReel);
       setHinweisListe([
         istEinzeldatei
-          ? 'Einzeldatei-Tape angelegt (TIME_SLICE-Modus) – bereit für den Fast-Cut Editor.'
-          : `${videoDateien.length} Einzelclips ohne erzwungenen Offset übernommen.`,
+          ? t('upload.msgTimeSliceCreated')
+          : t('upload.msgClipsCreated', { count: videoDateien.length }),
       ]);
       fuegeProtokollHinzu({
         id: neuesReel.id,
         titel: neuesReel.title,
         details: istEinzeldatei
-          ? 'Einzeldatei (Fast-Cut bereit)'
-          : `${videoDateien.length} Einzelclips`,
+          ? t('upload.logTimeSlice')
+          : t('upload.logClips', { count: videoDateien.length }),
         status: 'ok',
       });
       return;
     }
 
-    setFehlerListe([
-      'Bitte MP4/MOV-Videodateien oder eine sideline-bundle.json-Datei auswählen.',
-    ]);
+    setFehlerListe([t('upload.errUnsupportedFiles')]);
   };
 
   const handleBeispielImport = () => {
@@ -169,7 +177,7 @@ export function UploadPanel({
     };
     onNeuesReelHinzufuegen(reel);
     setHinweisListe([
-      `Companion-Demo "${reel.title}" importiert (${reel.playCount} Plays, inkl. Lücke in Endzone & optionalem Offset).`,
+      t('upload.demoImported', { title: reel.title, count: reel.playCount }),
       ...validiert.hinweise,
     ]);
     fuegeProtokollHinzu({
@@ -201,12 +209,13 @@ export function UploadPanel({
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-white">Upload &amp; JSON-Import</h2>
+        <h2 className="text-sm font-semibold text-white">{t('upload.title')}</h2>
         <span className="font-mono text-[11px] text-[#8B949E]">v1.0</span>
       </div>
       <p className="mt-1 text-xs text-[#8B949E]">
-        Einzelclips, komplette Raw-Tapes oder ein Companion-App-Bundle (
-        <span className="font-mono text-[#E6EDF3]">sideline-bundle.json</span>).
+        {t('upload.subtitleBefore')}
+        <span className="font-mono text-[#E6EDF3]">sideline-bundle.json</span>
+        {t('upload.subtitleAfter')}
       </p>
 
       {/* Dropzone */}
@@ -237,12 +246,8 @@ export function UploadPanel({
         }`}
       >
         <Upload className="h-5 w-5 text-[#8B949E]" aria-hidden="true" />
-        <span className="mt-2.5 text-sm font-medium text-[#E6EDF3]">
-          Dateien hier ablegen
-        </span>
-        <span className="mt-1 text-xs text-[#8B949E]">
-          MP4 / MOV oder sideline-bundle.json
-        </span>
+        <span className="mt-2.5 text-sm font-medium text-[#E6EDF3]">{t('upload.dropTitle')}</span>
+        <span className="mt-1 text-xs text-[#8B949E]">{t('upload.dropHint')}</span>
         <input
           ref={dateiInputRef}
           type="file"
@@ -264,7 +269,7 @@ export function UploadPanel({
           className="inline-flex items-center justify-center gap-2 rounded-md border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs font-medium text-[#E6EDF3] transition-colors hover:border-[#F59E0B] hover:text-white"
         >
           <FileJson className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-          Companion-Demo-Bundle importieren
+          {t('upload.importDemo')}
         </button>
         <button
           type="button"
@@ -272,7 +277,7 @@ export function UploadPanel({
           className="inline-flex items-center justify-center gap-2 rounded-md border border-[#232933] bg-transparent px-3 py-2 text-xs font-medium text-[#8B949E] transition-colors hover:border-[#36404F] hover:text-[#E6EDF3]"
         >
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
-          JSON-Vorlage herunterladen
+          {t('upload.downloadTemplate')}
         </button>
       </div>
 
@@ -284,7 +289,7 @@ export function UploadPanel({
         >
           <div className="flex items-center gap-1.5 font-semibold">
             <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Import abgelehnt
+            {t('upload.rejected')}
           </div>
           <ul className="list-disc space-y-0.5 pl-4">
             {fehlerListe.map((meldung, idx) => (
@@ -301,7 +306,7 @@ export function UploadPanel({
         >
           <div className="flex items-center gap-1.5 font-semibold">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Import erfolgreich
+            {t('upload.succeeded')}
           </div>
           <ul className="space-y-0.5">
             {hinweisListe.map((hinweis, idx) => (
@@ -313,7 +318,7 @@ export function UploadPanel({
 
       {/* Letzte Uploads */}
       <div className="mt-5 border-t border-[#232933] pt-4">
-        <h3 className="text-xs font-medium text-[#8B949E]">Letzte Vorgänge</h3>
+        <h3 className="text-xs font-medium text-[#8B949E]">{t('upload.recent')}</h3>
         <ul className="mt-2.5 space-y-2.5">
           {protokoll.map((eintrag) => (
             <li
@@ -329,7 +334,7 @@ export function UploadPanel({
                   eintrag.status === 'ok' ? 'text-[#4ADE80]' : 'text-[#FCA5A5]'
                 }`}
               >
-                {eintrag.status === 'ok' ? 'OK' : 'Fehler'}
+                {eintrag.status === 'ok' ? t('upload.statusOk') : t('upload.statusError')}
               </span>
             </li>
           ))}

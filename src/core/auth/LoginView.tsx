@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, KeyRound, Link2, Lock, Share2, ShieldCheck } from 'lucide-react';
 import { DEMO_STANDARD_PASSWORT } from '../authService.ts';
+import { BrandWortmarke, SprachUmschalter, useI18n } from '../i18n/I18nContext.tsx';
 
 interface LoginViewProps {
   onAnmelden: (kennung: string, passwort: string) => Promise<{ ok: boolean; fehler?: string }>;
@@ -12,8 +13,8 @@ interface LoginViewProps {
 const DEMO_SCHNELLZUGANG_KONTEN = [
   { id: 'demo-admin', label: 'Team Admin + Sysadmin', kennung: 'm.brenner' },
   { id: 'demo-coach', label: 'Coach', kennung: 't.richter' },
-  { id: 'demo-player', label: 'Spieler', kennung: 'l.weber' },
-  { id: 'demo-sysadmin', label: 'Nur Sysadmin', kennung: 'sysadmin' },
+  { id: 'demo-player', label: 'Spieler / Player', kennung: 'l.weber' },
+  { id: 'demo-sysadmin', label: 'Sysadmin', kennung: 'sysadmin' },
 ] as const;
 
 export function LoginView({
@@ -22,6 +23,7 @@ export function LoginView({
   onShareOeffnen,
   demoSchnellzugangErlaubt = true,
 }: LoginViewProps) {
+  const { t } = useI18n();
   const [kennung, setKennung] = useState('headcoach@stallions-football.de');
   const [passwort, setPasswort] = useState(DEMO_STANDARD_PASSWORT);
   const [laedt, setLaedt] = useState(false);
@@ -33,7 +35,7 @@ export function LoginView({
     try {
       const res = await onAnmelden(zielKennung, zielPasswort);
       if (!res.ok) {
-        setFehler(res.fehler ?? 'Anmeldung fehlgeschlagen.');
+        setFehler(res.fehler ?? t('login.failed'));
       }
     } finally {
       setLaedt(false);
@@ -48,40 +50,42 @@ export function LoginView({
   return (
     <div className="flex min-h-screen flex-col justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
       <div className="mx-auto w-full max-w-md space-y-6">
+        <div className="flex justify-end">
+          <SprachUmschalter />
+        </div>
+
         {/* Wortmarke */}
-        <div className="text-center space-y-1.5">
+        <div className="space-y-1.5 text-center">
           <div className="font-display text-2xl font-bold tracking-tight text-white">
-            Sideline<span className="text-[#F59E0B]">OS</span>
+            <BrandWortmarke />
           </div>
-          <p className="text-xs text-[#8B949E]">
-            Selbstgehostete Multi-Tenant-Plattform für Teams &amp; Coaches
-          </p>
+          <p className="text-xs text-[#8B949E]">{t('login.tagline')}</p>
         </div>
 
         {/* Login-Karte */}
         <form
           onSubmit={handleSubmit}
-          className="rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4"
+          className="space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6"
         >
           <div className="flex items-center gap-2 border-b border-[#232933] pb-3">
             <Lock className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-            <h1 className="text-sm font-semibold text-white">Anmelden</h1>
+            <h1 className="text-sm font-semibold text-white">{t('login.title')}</h1>
           </div>
 
           <label className="block space-y-1 text-xs text-[#8B949E]">
-            <span>E-Mail-Adresse oder Benutzername</span>
+            <span>{t('login.identifierLabel')}</span>
             <input
               type="text"
               autoComplete="username"
               value={kennung}
               onChange={(e) => setKennung(e.target.value)}
-              placeholder="coach@verein.de oder m.brenner"
+              placeholder={t('login.identifierPlaceholder')}
               className="w-full rounded-md border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
             />
           </label>
 
           <label className="block space-y-1 text-xs text-[#8B949E]">
-            <span>Passwort</span>
+            <span>{t('login.passwordLabel')}</span>
             <input
               type="password"
               autoComplete="current-password"
@@ -105,13 +109,13 @@ export function LoginView({
             disabled={laedt}
             className="flex w-full items-center justify-center gap-2 rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:opacity-60"
           >
-            {laedt ? 'Wird angemeldet…' : 'Anmelden'}
+            {laedt ? t('login.submitting') : t('login.submit')}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
 
           {demoSchnellzugangErlaubt && (
             <div className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-[11px] text-[#8B949E]">
-              Demo-Passwort (Dev/Preview):{' '}
+              {t('login.demoPassword')}{' '}
               <code className="font-mono text-[#E6EDF3]">{DEMO_STANDARD_PASSWORT}</code>
             </div>
           )}
@@ -120,12 +124,12 @@ export function LoginView({
         {/* Demo-Schnellzugang (führt echte Backend-Session-Anmeldung durch) */}
         {demoSchnellzugangErlaubt && (
           <section
-            aria-label="Demo-Schnellzugang"
-            className="rounded-xl border border-[#232933] bg-[#13171D] p-5 space-y-3"
+            aria-label={t('login.demoQuickAria')}
+            className="space-y-3 rounded-xl border border-[#232933] bg-[#13171D] p-5"
           >
             <div className="flex items-center gap-2 text-xs font-semibold text-white">
               <ShieldCheck className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-              <span>Demo-Schnellzugang (Backend-Session)</span>
+              <span>{t('login.demoQuickTitle')}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {DEMO_SCHNELLZUGANG_KONTEN.map((eintrag) => (
@@ -148,12 +152,12 @@ export function LoginView({
 
         {/* Direktzugriff auf öffentliche Flows (/invite & /share) */}
         <section
-          aria-label="Öffentliche Routen testen"
-          className="rounded-xl border border-[#232933] bg-[#13171D] p-4 space-y-2.5"
+          aria-label={t('login.publicRoutesAria')}
+          className="space-y-2.5 rounded-xl border border-[#232933] bg-[#13171D] p-4"
         >
           <div className="flex items-center gap-2 text-xs font-medium text-[#8B949E]">
             <KeyRound className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-            <span>Öffentliche Routen direkt aufrufen</span>
+            <span>{t('login.publicRoutesTitle')}</span>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button

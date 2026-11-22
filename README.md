@@ -6,16 +6,17 @@
 
 **SidelineOS-Core** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Der schlanke **SidelineOS-Core** übernimmt Benutzerkonten, Teams/Saisons, Auth/Einladungen, S3-Infrastruktur und einen **Plugin Store**, über den eigenständige GitHub-Module (wie die Videoanalyse) unabhängig entwickelt und installiert werden.
 
-> **Projektstatus:** **SidelineOS-Core** verfügt über ein produktionsnahes Backend-Fundament (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), einen **S3-Broker** (Presigned-URLs, Präfix-Isolation, AES-256-GCM-verschlüsselte Konfiguration, anonymisierte **S3-Cleanup-Queue** mit Schonfrist), einen **SMTP-Service** (`nodemailer` mit Offline-Link-Fallback) sowie das eigenständige `@sidelineos/plugin-sdk`-Paket samt Dual-Mode Plugin-Installer (verifizierte GitHub-Releases + SHA-256, Offline-`.tar.gz`-Upload, Dev-Git-Clone & Update-/Rollback-Center). Als nächstes folgt **Core-Phase 4** (Instanz-Federation `team@instance`).
+> **Projektstatus:** **SidelineOS-Core** verfügt über ein produktionsnahes Backend-Fundament (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), einen **S3-Broker** (Presigned-URLs, Präfix-Isolation, AES-256-GCM-verschlüsselte Konfiguration, anonymisierte **S3-Cleanup-Queue** mit Schonfrist), einen **SMTP-Service** (`nodemailer` mit Offline-Link-Fallback), das eigenständige `@sidelineos/plugin-sdk`-Paket samt Dual-Mode Plugin-Installer (GitHub-Releases + SHA-256, Offline-`.tar.gz`, Dev-Git-Clone & Update-/Rollback-Center) sowie die **Rebranding-Vorbereitung** (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) und das **i18n-Fundament (DE/EN)** inkl. automatischer Sprachweitergabe an Plugins. Als nächstes folgt **R2 (Basis-Deployment)** für das erste **Alpha-Release (`v0.1.0-alpha.1`)**.
 
 ---
 
 ## Kernfunktionen
 
-* **Schlanker Core & GitHub Plugin Store:** SidelineOS-Core enthält nur Authentifizierung, Einladungen, Mandanten/Teams, S3/SMTP, Hub, Einstellungs-Hub und den **Plugin Store**. Fachmodule implementieren das verbindliche `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`), werden über den Store (inkl. eigener GitHub-URLs) installiert und pro Team freigeschaltet.
+* **Schlanker Core & GitHub Plugin Store:** SidelineOS-Core enthält nur Authentifizierung, Einladungen, Mandanten/Teams, S3/SMTP, i18n, Hub, Einstellungs-Hub und den **Plugin Store**. Fachmodule implementieren das verbindliche `@sidelineos/plugin-sdk` (`src/sdk/plugin.ts`), werden über den Store (inkl. eigener GitHub-URLs) installiert und pro Team freigeschaltet.
 * **Aufgeräumte Startseite & Einstellungs-Hub:** Die Startseite zeigt ausschließlich Kacheln für die freigeschalteten Plugins des Teams sowie eine Kachel `Einstellungen`. Aktive Plugins klinken eigene Einstellungs-Kategorien dynamisch in die drei zentralen Einstellungsbereiche (`Persönliche Einstellungen`, `Team-Einstellungen`, `Sysadmin`) ein.
+* **Zentrale Spracheinstellung (DE / EN):** Benutzer wählen ihre UI-Sprache einmalig in den persönlichen Einstellungen (`preferred_locale`). Core und alle installierten Plugins erhalten die gewählte Sprache einheitlich über den SDK-Kontext (`locale`).
 * **Dauerhafte Multi-Saison-Teams:** Teams bleiben saisonübergreifend bestehen (`2026`, `2025`, `2024`, …). Alte Spielzeiten bleiben abrufbar, ohne Kader oder Einstellungen neu anzulegen.
-* **Deployment-unabhängige Ersteinrichtung per `.env`:** Kein unsicherer UI-Installations-Wizard – Initial-Sysadmin, `ENABLED_MODULES`, Datenbank, S3 und SMTP werden einheitlich über Umgebungsvariablen konfiguriert.
+* **Deployment-unabhängige Ersteinrichtung per `.env`:** Kein unsicherer UI-Installations-Wizard – Initial-Sysadmin, `APP_BRAND_NAME`, `DEFAULT_LOCALE`, `ENABLED_MODULES`, Datenbank, S3 und SMTP werden einheitlich über Umgebungsvariablen konfiguriert.
 * **Spielerprofile, Multi-Units & Einladungen:** Spieler pflegen vollen Namen, Trikotnummer, Position, Kontakte und vom Team Admin definierte Custom-Felder. Two-Way-Spieler tragen mehrere Units (`Offense`, `Defense`, `Special Teams`). Team Admins laden per E-Mail (via SMTP oder Offline-Link-Fallback) oder teilbarem Team-Link inkl. Freigabe-Warteliste ein.
 * **Gekapseltes Videoanalyse-Plugin (`src/plugins/video-analysis/`):**
   * **Frame-genauer Film Room:** Editierbares Vektor-Canvas mit strikter Bindung an **exakten 25fps-Frame und Kamerawinkel**, race-freiem Auto-Stop, Vollbildmodus, editierbaren Kommentaren in verschiebbarer Ecke und konfigurierbaren Nutzer-Hotkeys.
@@ -57,7 +58,7 @@ npm run build:sdk
 
 ```text
 sidelineos/
-├── .env.example                       # ENV-Bootstrap (Sysadmin, ENABLED_MODULES, DB, S3, SMTP)
+├── .env.example                       # ENV-Bootstrap (Sysadmin, Brand, Sprache, DB, S3, SMTP)
 ├── LICENSE                            # GNU AGPLv3
 ├── README.md                          # Projektübersicht & Quickstart
 ├── docs/                              # Ausführliche Projektdokumentation
@@ -67,7 +68,7 @@ sidelineos/
 ├── src/
 │   ├── sdk/
 │   │   └── plugin.ts                  # Verbindlicher Plugin-Vertrag (@sidelineos/plugin-sdk)
-│   ├── core/                          # Core-Hub, Auth/Invite, Plugin Store, SettingsShell, RBAC
+│   ├── core/                          # Core-Hub, Auth/Invite, i18n, Plugin Store, SettingsShell, RBAC
 │   ├── server/                        # Express API, PostgreSQL/PGlite, Plugin-Gateway, S3-Broker & SMTP
 │   ├── plugins/
 │   │   ├── pluginLoader.ts            # Lädt installierte Store-Plugins in den Core
@@ -76,10 +77,11 @@ sidelineos/
 │   │       ├── plugin.manifest.json   # Deklaratives Store-Manifest
 │   │       ├── AI_HANDOFF.md          # Übergabe-Dokumentation für die Videoanalyse-Weiterentwicklung
 │   │       ├── index.tsx              # SidelinePlugin-Einstiegspunkt (inkl. renderPublicShareView)
+│   │       ├── locales/               # Sprachpakete (de.json, en.json)
 │   │       ├── VideoAnalysisContext.tsx
 │   │       ├── components/            # Dashboard, Film Room, Canvas, Breakdown, PublicShare, Settings
 │   │       └── services/              # Tagging-Engine, Bundle-Schema, Frame-Math & Hotkeys
-│   └── shared/                        # Übergreifende Core-Typen (Benutzer, Team, S3, SMTP)
+│   └── shared/                        # Übergreifende Core-Typen, Brand-Config & i18n-Helfer
 └── tests/
     └── unit/                          # Automatisierte Unit- & API-Tests (node:test)
 ```
@@ -98,18 +100,29 @@ sidelineos/
 
 > **Hinweis zur Modultrennung:** In diesem Repository wird **ausschließlich der Core** (Auth, Mandanten, Infrastruktur, `@sidelineos/plugin-sdk`, Plugin Store) weiterentwickelt. Fachliche Modul-Features (z. B. Cut & Multi-Angle Sync oder Smart Playlists in der Videoanalyse) liegen in der Roadmap der jeweiligen Plugin-Repositories (siehe [`src/plugins/video-analysis/AI_HANDOFF.md`](src/plugins/video-analysis/AI_HANDOFF.md)).
 
-### Abgeschlossen
+### Abgeschlossen (Core-Phasen 1–3 & R1)
 - [x] **Core-Grundstruktur & Entkopplung:** SidelineOS-Hub, Einstellungs-Hub mit offenem Seitenmenü, dauerhafte Multi-Saison-Teams, Multi-Unit-Kader, Einladungsmanagement & `@sidelineos/plugin-sdk` (`v1.0`) inkl. GitHub Plugin Store
 - [x] **Core-Auth & Öffentliche Routen:** Login-Maske (`/login`), Einladungs-Registrierung (`/invite/<token>` inkl. Bestätigungs-Warteliste) sowie SDK-Delegation für öffentliche Plugin-Routen (`/share/<token>`)
 - [x] **Plugin-Migration vorbereitet:** Bisheriger Videoanalyse-Prototyp vollständig in `src/plugins/video-analysis/` gekapselt und für die Auslagerung nach `sidelineos-plugin-video` dokumentiert
 - [x] **Core-Phase 1 – Backend-Fundament & `.env`-Bootstrap:** Stateless Node.js/Express-API (`/api/v1/*`), PostgreSQL-Schema (+ `PGlite`-Dev-Fallback) für Core-Tabellen & isolierte `plugin_<slug>`-Schemas, `scrypt`-Passwort-Hashing & Session-Auth, deployment-unabhängiges `.env`-Bootstrap (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`)
 - [x] **Core-Phase 2 – S3-Broker & SMTP-Service:** Serverseitig signierte Presigned-URLs auf Team-/Plugin-Präfixe (`teams/{teamId}/plugins/{slug}/`, kompatibel mit MinIO & Garage-S3), AES-256-GCM-verschlüsselte Infrastruktur-Einstellungen (`core.system_settings`), S3-/SMTP-Verbindungstests im Sysadmin-UI sowie E-Mail-Einladungsversand via `nodemailer` inkl. Offline-Link-Fallback
 - [x] **Core-Phase 3 – Eigenständiges SDK & GitHub Plugin-Installer:** Auskopplung von `@sidelineos/plugin-sdk` (`packages/plugin-sdk/` inkl. `ExchangeTarget` & Scope-Export/Import-Vertrag), Dual-Mode Plugin-Installer (verifizierte GitHub-Releases + SHA-256, Offline-`.tar.gz`-Upload, Dev-Git-Clone mit `403`-Production-Sperre, `previous_version`-Rollback), Core-/Plugin-Update-Checker mit Sysadmin-Badge & Banner sowie `core.schema_migrations` + anonymisierte `core.s3_cleanup_queue` mit Schonfrist
+- [x] **R1 – Rebranding-Vorbereitung & i18n-Fundament (DE/EN + Plugin-Sprachpakete):** Zentrale Brand-Konfiguration (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) für UI, E-Mails und Header ohne Umbau technischer IDs; typsicheres Core-i18n (`de` Standard, `en` erweiterbar), persistente Benutzer-Sprache (`preferred_locale`) sowie Weiterleitung über `@sidelineos/plugin-sdk` (`locale` + `createPluginTranslator`) inkl. vollständig lokalisierter Videoanalyse
 
-### Nächste Core-Meilensteine
-- [ ] **Core-Phase 4 – Instanz-Federation (`team@instance`):** Gegenseitiges Sysadmin-Pairing zweier SidelineOS-Core-Instanzen per Pairing-Token (Ed25519-/HMAC-signierte Server-to-Server-API), Synchronisation minimaler Team-Metadaten und transparente SDK-Adressierung (`ExchangeTarget`: `LOCAL` | `REMOTE`), sodass fremde Teams wie lokale Teams angesprochen werden können
-- [ ] **Core-Phase 5 – Lokale Teamkopie & Camp-Modus (Offline / Raspberry Pi):** Selektive Teamkopie (Sysadmin für alle Teams, Team Admin für eigenes Team) inkl. optionaler Mitnahme der Benutzer-Passwort-Hashes, granularer Modul-Auswahl (Alle / Gefiltert / Keine) und selektiver S3-Medienübertragung (Alle / Ausgewählte / Keine; fehlende Dateien sauber markiert). Unterstützt sowohl direkten Core-to-Core-Transfer als auch `.sideline-camp.tar`-Archive (USB/Air-Gapped) inklusive **Delta-Rück-Sync** (`origin_instance_id` + UUID-Merge) nach dem Trainingslager
-- [ ] **Abschluss – Deployment & Konto-Portabilität:** Multi-Arch-Container (`linux/amd64` + `linux/arm64` für Raspberry Pi), `Docker Compose`-Setup, Export-/Migrations-Token für globale Benutzerkonten sowie Capacitor-/Tauri-Wrapper für Mobile & Desktop
+### Kurzfristig: Alpha-Release (`v0.1.0-alpha.1` – Einzelnutzer-Selbsttest)
+- [ ] **R2 – Basis-Deployment (Docker, Docker Compose, Postgres & MinIO):** Produktionsreifes Container-Image + `docker-compose.yml` (Core, PostgreSQL, MinIO, S3-/Healthcheck-Bootstrap & Dokumentation) für den Einzelnutzer-Selbsttest
+
+### Post-Alpha: Core-Ausbau vor Testnutzern → Closed Beta (`v0.1.0-beta.1`)
+- [ ] **Zentrales Upload- & File-Handling:** Einheitlicher S3-Upload-Proxy / Presigned-Multipart-Service, Quotas/Limits, Upload-Fortschritt sowie sichere Datei-Validierung für alle Plugins
+- [ ] **Benachrichtigungs-System:** In-App-Notification-Center, E-Mail-Versand via SMTP (z. B. Team-Freigaben, neue Einladungen, Updates) und `@sidelineos/plugin-sdk`-Hooks für Plugin-Benachrichtigungen
+
+### Spätere `v1.x`-Meilensteine
+- [ ] **Core-Phase 4 – Instanz-Federation (`team@instance`):** Gegenseitiges Sysadmin-Pairing zweier SidelineOS-Core-Instanzen per Pairing-Token (Ed25519-/HMAC-signierte Server-to-Server-API), Synchronisation minimaler Team-Metadaten und transparente SDK-Adressierung (`ExchangeTarget`: `LOCAL` | `REMOTE`)
+- [ ] **Core-Phase 5 – Lokale Teamkopie & Camp-Modus (Offline / Raspberry Pi):** Selektive Teamkopie (Sysadmin / Team Admin) inkl. optionaler Passwort-Hashes, Modul-/S3-Medien-Filter sowie `.sideline-camp.tar`-Transfer & Delta-Rück-Sync (`origin_instance_id` + UUID-Merge)
+- [ ] **Konto-Portabilität & Multi-Arch-Extras:** Export-/Migrations-Token für globale Benutzerkonten sowie optionale Mobile-/Desktop-Wrapper (Capacitor/Tauri)
+
+### Später (ganz am Schluss)
+- [ ] **Widgets (Dashboard & Extern):** Konfigurierbare Dashboard-Widgets im Hub sowie sicher signierte, extern einbettbare HTML-/iframe-Widgets für Vereinswebsites & Apps
 
 ---
 

@@ -1,5 +1,6 @@
 import type { BenutzerProfil, CoreBereich, TeamRolle } from '../../shared/types.ts';
 import type { PluginLaufzeitKontext, PluginTab, SidelinePlugin } from '../../sdk/plugin.ts';
+import { BrandWortmarke, useI18n } from '../i18n/I18nContext.tsx';
 
 interface CoreTopBarProps {
   bereich: CoreBereich;
@@ -38,6 +39,7 @@ export function CoreTopBar({
   onBereichWechseln,
   onPluginTabWechseln,
 }: CoreTopBarProps) {
+  const { t } = useI18n();
   const hatTeamZugriff = aktiveTeamAnsicht !== null;
   const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
 
@@ -48,17 +50,17 @@ export function CoreTopBar({
   const coreLinks: Array<{ id: CoreBereich; label: string; aktiv: boolean; badge?: number }> = [];
   if (!imPlugin) {
     if (hatTeamZugriff) {
-      coreLinks.push({ id: 'hub', label: 'Start', aktiv: bereich === 'hub' });
+      coreLinks.push({ id: 'hub', label: t('nav.start'), aktiv: bereich === 'hub' });
       coreLinks.push({
         id: 'settings-hub',
-        label: 'Einstellungen',
+        label: t('nav.settings'),
         aktiv: inEinstellungen,
         badge: istTeamAdmin && ausstehendeAnfragenAnzahl > 0 ? ausstehendeAnfragenAnzahl : undefined,
       });
     } else if (konto.istSysadmin) {
       coreLinks.push({
         id: 'sysadmin',
-        label: 'Sysadmin',
+        label: t('nav.sysadmin'),
         aktiv: bereich === 'sysadmin' || bereich === 'settings-hub',
       });
     }
@@ -72,10 +74,10 @@ export function CoreTopBar({
           <button
             type="button"
             onClick={onLogoKlick}
-            title="Zurück zur SidelineOS-Startseite"
+            title={t('nav.homeTitle')}
             className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#F59E0B]"
           >
-            Sideline<span className="text-[#F59E0B]">OS</span>
+            <BrandWortmarke />
           </button>
 
           {imPlugin && aktivesPlugin && (
@@ -91,7 +93,7 @@ export function CoreTopBar({
         </div>
 
         {/* Zone 2: Einzeilige Text-Navigation */}
-        <nav aria-label="Hauptnavigation" className="flex items-center gap-6 overflow-x-auto">
+        <nav aria-label={t('nav.mainAria')} className="flex items-center gap-6 overflow-x-auto">
           {imPlugin
             ? pluginTabs.map((eintrag) => {
                 const istAktiv = aktiverPluginTab === eintrag.id;

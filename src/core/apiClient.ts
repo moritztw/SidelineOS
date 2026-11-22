@@ -1,3 +1,4 @@
+import type { UnterstuetzteSprache } from '../shared/i18n.ts';
 import type {
   BenutzerKonto,
   PluginId,
@@ -90,6 +91,8 @@ export interface SysadminCapabilitiesDTO {
   disableUpdateCheck: boolean;
   coreVersion: string;
   supportedSdkVersion: string;
+  brandName?: string;
+  defaultLocale?: UnterstuetzteSprache;
 }
 
 export interface S3CleanupStatistikDTO {
@@ -224,6 +227,7 @@ export const coreApi = {
     telefon?: string;
     trikotNummer?: string;
     position?: string;
+    preferredLocale?: UnterstuetzteSprache;
     customProfilWerte?: Record<string, string>;
     altesPasswort?: string;
     neuesPasswort?: string;
@@ -253,6 +257,7 @@ export const coreApi = {
           telefon?: string;
           trikotNummer?: string;
           position?: string;
+          preferredLocale?: UnterstuetzteSprache;
           units: SpielerUnit[];
           customProfilWerte?: Record<string, string>;
         }
@@ -380,6 +385,7 @@ export const coreApi = {
     email: string;
     passwort: string;
     istSysadmin: boolean;
+    preferredLocale?: UnterstuetzteSprache;
     teamZuweisung?: { teamId: string; rolle: TeamRolle };
   }): Promise<{ user: BenutzerKonto; membership?: TeamMitgliedschaft }> {
     return apiRequest('/api/v1/sysadmin/users', {

@@ -37,7 +37,6 @@ import type {
   VideoReel,
   ZeichenWerkzeug,
 } from '../types.ts';
-import { FREIGABE_LABELS } from '../types.ts';
 import {
   FRAME_MS,
   findeNaechstenAutoStopFrame,
@@ -47,6 +46,11 @@ import {
 } from '../services/frameAndHotkeys.ts';
 import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 import { leseBreakdownWert } from '../services/taggingEngine.ts';
+import {
+  createVideoTranslator,
+  holeVideoEckeLabel,
+  holeVideoFreigabeLabel,
+} from '../i18n.ts';
 import { BreakdownGrid } from './BreakdownGrid.tsx';
 import { TelestrationCanvas } from './TelestrationCanvas.tsx';
 
@@ -55,6 +59,7 @@ interface FilmRoomViewProps {
   teamRolle: TeamRolle;
   tagSchema: TagFeldKonfig[];
   nutzerEinstellungen: NutzerEinstellungen;
+  locale?: string;
   onZurueck: () => void;
   onSchemaSettingsOeffnen: () => void;
   onFreigabeAendern: (reelId: string, freigabe: SpielerFreigabe) => void;
@@ -88,12 +93,12 @@ interface FilmRoomViewProps {
 }
 
 const TEAM_FARBEN = [
-  { id: 'amber', hex: '#F59E0B', label: 'Highlight Amber' },
-  { id: 'offense', hex: '#3B82F6', label: 'Offense Blau' },
-  { id: 'defense', hex: '#EF4444', label: 'Defense Rot' },
-  { id: 'route', hex: '#22C55E', label: 'Route Grün' },
-  { id: 'white', hex: '#FFFFFF', label: 'Weiß' },
-];
+  { id: 'amber', hex: '#F59E0B', labelKey: 'filmRoom.colorAmber' },
+  { id: 'offense', hex: '#3B82F6', labelKey: 'filmRoom.colorOffense' },
+  { id: 'defense', hex: '#EF4444', labelKey: 'filmRoom.colorDefense' },
+  { id: 'route', hex: '#22C55E', labelKey: 'filmRoom.colorRoute' },
+  { id: 'white', hex: '#FFFFFF', labelKey: 'filmRoom.colorWhite' },
+] as const;
 
 const FREIGABE_OPTIONEN: SpielerFreigabe[] = [
   'COACHES_ONLY',
@@ -110,11 +115,11 @@ const ECKEN_POSITION_KLASSEN: Record<KommentarEcke, string> = {
   'bottom-right': 'bottom-16 right-3',
 };
 
-const ECKEN_BUTTONS: Array<{ id: KommentarEcke; titel: string; kurz: string }> = [
-  { id: 'top-left', titel: 'Oben links', kurz: '↖' },
-  { id: 'top-right', titel: 'Oben rechts', kurz: '↗' },
-  { id: 'bottom-left', titel: 'Unten links', kurz: '↙' },
-  { id: 'bottom-right', titel: 'Unten rechts', kurz: '↘' },
+const ECKEN_BUTTONS: Array<{ id: KommentarEcke; kurz: string }> = [
+  { id: 'top-left', kurz: '↖' },
+  { id: 'top-right', kurz: '↗' },
+  { id: 'bottom-left', kurz: '↙' },
+  { id: 'bottom-right', kurz: '↘' },
 ];
 
 function formatiereZeit(ms: number): string {
@@ -131,6 +136,7 @@ export function FilmRoomView({
   teamRolle,
   tagSchema,
   nutzerEinstellungen,
+  locale,
   onZurueck,
   onSchemaSettingsOeffnen,
   onFreigabeAendern,
@@ -146,6 +152,7 @@ export function FilmRoomView({
   onAlleZeichnungenLeeren,
   onSessionVeroeffentlichen,
 }: FilmRoomViewProps) {
+  const t = createVideoTranslator(locale);
   const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const istTeamAdmin = teamRolle === 'TEAM_ADMIN';
   const hotkeys = nutzerEinstellungen.hotkeys;
@@ -392,7 +399,10 @@ export function FilmRoomView({
           setZeitMs(treffer.zielMs);
           setLaeuft(false);
           setAutoStopMeldung(
-            `Auto-Stop · Frame ${treffer.zielFrame} (${formatiereZeit(treffer.zielMs)})`
+            t('filmRoom.autoStopMessage', {
+              frame: treffer.zielFrame,
+              time: formatiereZeit(treffer.zielMs),
+            })
           );
           return;
         }
@@ -418,7 +428,7 @@ export function FilmRoomView({
       aktiv = false;
       cancelAnimationFrame(rafId);
     };
-  }, [laeuft, geschwindigkeit, dauerMs, autoStop, winkelZeichnungen]);
+  }, [laeuft, geschwindigkeit, dauerMs, autoStop, winkelZeichnungen, t]);
 
   // Konfigurierbare Benutzer-Hotkeys + feste Transport-Tasten im Film Room
   useEffect(() => {
@@ -552,7 +562,7 @@ export function FilmRoomView({
     if (gesamtEntwuerfe === 0) return;
     const anzahl = gesamtEntwuerfe;
     onSessionVeroeffentlichen(reel.id);
-    setPublishBestaetigung(`${anzahl} Entwurf/Entwürfe für das Team freigeschaltet.`);
+    setPublishBestaetigung(t('filmRoom.publishConfirmed', { count: anzahl }));
     setTimeout(() => setPublishBestaetigung(null), 2600);
   };
 
@@ -590,14 +600,19 @@ export function FilmRoomView({
             className="inline-flex items-center gap-1.5 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-[#8B949E] transition-colors hover:border-[#36404F] hover:text-white whitespace-nowrap"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Bibliothek
+            {t('filmRoom.backLibrary')}
           </button>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold text-white">{reel.title}</h1>
             <div className="text-[11px] text-[#8B949E]">
               {aktiverPlay
-                ? `Play #${aktiverPlay.play_number} von ${reel.plays.length} · ${aktuelleQuelle?.file ?? 'Kein Clip im Winkel'} · Zeichnungen nur für ${aktiverWinkel}`
-                : 'Keine Plays vorhanden'}
+                ? t('filmRoom.playMeta', {
+                    play: aktiverPlay.play_number,
+                    total: reel.plays.length,
+                    file: aktuelleQuelle?.file ?? t('filmRoom.noClipInAngle'),
+                    angle: aktiverWinkel,
+                  })
+                : t('filmRoom.noPlays')}
             </div>
           </div>
         </div>
@@ -612,7 +627,7 @@ export function FilmRoomView({
                   <Users className="h-3.5 w-3.5 text-[#4ADE80]" aria-hidden="true" />
                 )}
                 <select
-                  aria-label="Spieler-Freigabe für dieses Reel"
+                  aria-label={t('filmRoom.visibilityAria')}
                   value={reel.visibility}
                   onChange={(e) =>
                     onFreigabeAendern(reel.id, e.target.value as SpielerFreigabe)
@@ -625,7 +640,9 @@ export function FilmRoomView({
                 >
                   {FREIGABE_OPTIONEN.map((opt) => (
                     <option key={opt} value={opt} className="bg-[#13171D] text-[#E6EDF3]">
-                      Freigabe: {FREIGABE_LABELS[opt]}
+                      {t('dashboard.visibilityOption', {
+                        label: holeVideoFreigabeLabel(opt, locale),
+                      })}
                     </option>
                   ))}
                 </select>
@@ -638,7 +655,7 @@ export function FilmRoomView({
                 className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-1.5 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:cursor-not-allowed disabled:bg-[#232933] disabled:text-[#6E7681] whitespace-nowrap"
               >
                 <Send className="h-3.5 w-3.5" aria-hidden="true" />
-                Publish Session ({gesamtEntwuerfe})
+                {t('filmRoom.publishSession', { count: gesamtEntwuerfe })}
               </button>
             </>
           )}
@@ -684,10 +701,13 @@ export function FilmRoomView({
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center bg-[#0B0E11] px-6 text-center">
                 <p className="text-sm font-medium text-[#E6EDF3]">
-                  Kein {aktiverWinkel}-Clip für Play #{aktiverPlay?.play_number} vorhanden
+                  {t('filmRoom.noClipTitle', {
+                    angle: aktiverWinkel,
+                    play: aktiverPlay?.play_number ?? '',
+                  })}
                 </p>
                 <p className="mt-1 text-xs text-[#8B949E]">
-                  Wechsle unten auf einen verfügbaren Kamerawinkel.
+                  {t('filmRoom.noClipHint')}
                 </p>
               </div>
             )}
@@ -700,6 +720,7 @@ export function FilmRoomView({
                 aktiveFarbe={farbe}
                 bearbeitbar={istCoach}
                 ausgewaehlteId={ausgewaehlteZeichnungId}
+                textPlaceholder={t('hotkey.text.label')}
                 onAuswaehlen={setAusgewaehlteZeichnungId}
                 onZeichnungHinzufuegen={(teil) => {
                   const frameZeit = frameZuZeit(zeitZuFrame(zeitMsRef.current));
@@ -730,25 +751,28 @@ export function FilmRoomView({
               >
                 <div className="flex items-center justify-between gap-3 border-b border-[#232933] pb-1.5">
                   <span className="text-[10px] font-semibold text-[#F59E0B]">
-                    Kommentare · P#{aktiverPlay?.play_number}
+                    {t('filmRoom.commentsTitle', { play: aktiverPlay?.play_number ?? '–' })}
                   </span>
-                  <div className="flex items-center gap-0.5" title="Overlay-Ecke wechseln">
-                    {ECKEN_BUTTONS.map((btn) => (
-                      <button
-                        key={btn.id}
-                        type="button"
-                        title={btn.titel}
-                        aria-label={`Kommentare nach ${btn.titel} verschieben`}
-                        onClick={() => setKommentarEcke(btn.id)}
-                        className={`rounded px-1 text-[10px] leading-4 transition-colors ${
-                          kommentarEcke === btn.id
-                            ? 'bg-[#F59E0B] font-semibold text-[#0B0E11]'
-                            : 'text-[#8B949E] hover:bg-[#232933] hover:text-white'
-                        }`}
-                      >
-                        {btn.kurz}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-0.5" title={t('filmRoom.switchCornerTitle')}>
+                    {ECKEN_BUTTONS.map((btn) => {
+                      const eckeTitel = holeVideoEckeLabel(btn.id, locale);
+                      return (
+                        <button
+                          key={btn.id}
+                          type="button"
+                          title={eckeTitel}
+                          aria-label={t('filmRoom.moveCommentsAria', { corner: eckeTitel })}
+                          onClick={() => setKommentarEcke(btn.id)}
+                          className={`rounded px-1 text-[10px] leading-4 transition-colors ${
+                            kommentarEcke === btn.id
+                              ? 'bg-[#F59E0B] font-semibold text-[#0B0E11]'
+                              : 'text-[#8B949E] hover:bg-[#232933] hover:text-white'
+                          }`}
+                        >
+                          {btn.kurz}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <ul className="mt-1.5 space-y-1.5">
@@ -766,13 +790,13 @@ export function FilmRoomView({
                                 if (e.key === 'Enter') speichereNotizBearbeitung();
                                 if (e.key === 'Escape') brecheNotizBearbeitungAb();
                               }}
-                              aria-label="Kommentar bearbeiten"
+                              aria-label={t('filmRoom.editCommentAria')}
                               className="min-w-0 flex-1 rounded border border-[#F59E0B] bg-[#13171D] px-1.5 py-0.5 text-[11px] text-white focus:outline-none"
                             />
                             <button
                               type="button"
                               onClick={speichereNotizBearbeitung}
-                              aria-label="Kommentar speichern"
+                              aria-label={t('filmRoom.saveCommentAria')}
                               className="rounded bg-[#F59E0B] p-0.5 text-[#0B0E11]"
                             >
                               <Check className="h-3 w-3" aria-hidden="true" />
@@ -780,7 +804,7 @@ export function FilmRoomView({
                             <button
                               type="button"
                               onClick={brecheNotizBearbeitungAb}
-                              aria-label="Abbrechen"
+                              aria-label={t('filmRoom.cancelAria')}
                               className="rounded p-0.5 text-[#8B949E] hover:text-white"
                             >
                               <X className="h-3 w-3" aria-hidden="true" />
@@ -803,8 +827,8 @@ export function FilmRoomView({
                               <button
                                 type="button"
                                 onClick={() => starteNotizBearbeitung(n)}
-                                title="Kommentar bearbeiten"
-                                aria-label="Kommentar bearbeiten"
+                                title={t('filmRoom.editCommentAria')}
+                                aria-label={t('filmRoom.editCommentAria')}
                                 className="shrink-0 rounded p-0.5 text-[#8B949E] hover:bg-[#232933] hover:text-white"
                               >
                                 <Pencil className="h-2.5 w-2.5" aria-hidden="true" />
@@ -831,11 +855,11 @@ export function FilmRoomView({
               <div className="absolute bottom-3 left-1/2 z-20 flex max-w-[96%] -translate-x-1/2 flex-wrap items-center gap-1.5 rounded-md border border-[#303846] bg-[#0B0E11]/92 px-2.5 py-1.5 backdrop-blur-sm">
                 {(
                   [
-                    { id: 'select', label: 'Bearbeiten', Icon: MousePointer2, taste: hotkeys.select },
-                    { id: 'pen', label: 'Stift', Icon: Pencil, taste: hotkeys.pen },
-                    { id: 'arrow', label: 'Pfeil', Icon: ArrowUpRight, taste: hotkeys.arrow },
-                    { id: 'spotlight', label: 'Spot', Icon: CircleDot, taste: hotkeys.spotlight },
-                    { id: 'text', label: 'Text', Icon: Type, taste: hotkeys.text },
+                    { id: 'select', label: t('filmRoom.toolSelect'), Icon: MousePointer2, taste: hotkeys.select },
+                    { id: 'pen', label: t('filmRoom.toolPen'), Icon: Pencil, taste: hotkeys.pen },
+                    { id: 'arrow', label: t('filmRoom.toolArrow'), Icon: ArrowUpRight, taste: hotkeys.arrow },
+                    { id: 'spotlight', label: t('filmRoom.toolSpotlight'), Icon: CircleDot, taste: hotkeys.spotlight },
+                    { id: 'text', label: t('filmRoom.toolText'), Icon: Type, taste: hotkeys.text },
                   ] as const
                 ).map(({ id, label, Icon, taste }) => {
                   const aktiv = werkzeug === id;
@@ -870,21 +894,24 @@ export function FilmRoomView({
 
                 {/* Farbpalette */}
                 <div className="flex items-center gap-1">
-                  {TEAM_FARBEN.map((swatch) => (
-                    <button
-                      key={swatch.id}
-                      type="button"
-                      title={swatch.label}
-                      aria-label={swatch.label}
-                      onClick={() => setFarbe(swatch.hex)}
-                      style={{ backgroundColor: swatch.hex }}
-                      className={`h-4 w-4 rounded border transition-transform ${
-                        farbe === swatch.hex
-                          ? 'scale-115 border-white ring-1 ring-white'
-                          : 'border-[#232933]'
-                      }`}
-                    />
-                  ))}
+                  {TEAM_FARBEN.map((swatch) => {
+                    const swatchLabel = t(swatch.labelKey);
+                    return (
+                      <button
+                        key={swatch.id}
+                        type="button"
+                        title={swatchLabel}
+                        aria-label={swatchLabel}
+                        onClick={() => setFarbe(swatch.hex)}
+                        style={{ backgroundColor: swatch.hex }}
+                        className={`h-4 w-4 rounded border transition-transform ${
+                          farbe === swatch.hex
+                            ? 'scale-115 border-white ring-1 ring-white'
+                            : 'border-[#232933]'
+                        }`}
+                      />
+                    );
+                  })}
                 </div>
 
                 <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[#232933]" />
@@ -896,11 +923,11 @@ export function FilmRoomView({
                       onZeichnungEntfernen(reel.id, aktiverPlay.play_number, ausgewaehlteZeichnungId);
                       setAusgewaehlteZeichnungId(null);
                     }}
-                    title="Ausgewähltes Objekt löschen (Entf)"
+                    title={t('filmRoom.deleteObjectTitle')}
                     className="inline-flex items-center gap-1 rounded border border-[#DC2626]/40 bg-[#DC2626]/15 px-2 py-1 text-[11px] text-[#FCA5A5] hover:bg-[#DC2626]/25"
                   >
                     <Trash2 className="h-3 w-3" aria-hidden="true" />
-                    Objekt
+                    {t('filmRoom.deleteObjectLabel')}
                   </button>
                 )}
 
@@ -910,7 +937,7 @@ export function FilmRoomView({
                   onClick={() =>
                     onLetzteZeichnungEntfernen(reel.id, aktiverPlay.play_number, aktiverWinkel)
                   }
-                  title={`Letzte Zeichnung in diesem Winkel rückgängig (${hotkeys.undo.toUpperCase()})`}
+                  title={t('filmRoom.undoTitle', { key: hotkeys.undo.toUpperCase() })}
                   className="rounded p-1 text-[#8B949E] hover:bg-[#1E2530] hover:text-white disabled:opacity-35"
                 >
                   <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -922,7 +949,7 @@ export function FilmRoomView({
                     onAlleZeichnungenLeeren(reel.id, aktiverPlay.play_number, aktiverWinkel);
                     setAusgewaehlteZeichnungId(null);
                   }}
-                  title="Alle Zeichnungen dieses Winkels leeren"
+                  title={t('filmRoom.clearTitle')}
                   className="rounded p-1 text-[#8B949E] hover:bg-[#1E2530] hover:text-[#FCA5A5] disabled:opacity-35"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -935,7 +962,7 @@ export function FilmRoomView({
                     onChange={(e) => setAutoStop(e.target.checked)}
                     className="h-3.5 w-3.5 accent-[#F59E0B]"
                   />
-                  <span>Auto-Stop</span>
+                  <span>{t('filmRoom.autoStop')}</span>
                 </label>
               </div>
             )}
@@ -953,7 +980,7 @@ export function FilmRoomView({
 
               <input
                 type="range"
-                aria-label="Videoposition"
+                aria-label={t('filmRoom.timelineAria')}
                 min={0}
                 max={dauerMs}
                 step={FRAME_MS}
@@ -975,7 +1002,11 @@ export function FilmRoomView({
                   <button
                     key={z.id}
                     type="button"
-                    title={`Zeichnung (${z.angle}) · Frame ${zeichnungsFrame} (${formatiereZeit(z.timestamp_ms)})`}
+                    title={t('filmRoom.markerTitle', {
+                      angle: z.angle,
+                      frame: zeichnungsFrame,
+                      time: formatiereZeit(z.timestamp_ms),
+                    })}
                     onClick={(e) => {
                       e.stopPropagation();
                       setLaeuft(false);
@@ -1005,7 +1036,7 @@ export function FilmRoomView({
                 type="button"
                 disabled={sichererIndex === 0}
                 onClick={() => wechslePlay(sichererIndex - 1)}
-                aria-label="Vorheriges Play"
+                aria-label={t('filmRoom.prevPlayAria')}
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white disabled:opacity-35"
               >
                 <SkipBack className="h-4 w-4" aria-hidden="true" />
@@ -1017,8 +1048,8 @@ export function FilmRoomView({
                   setAutoStopMeldung(null);
                   setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) - 1));
                 }}
-                aria-label="Exakt 1 Frame zurück"
-                title="Exakt 1 Frame zurück (←)"
+                aria-label={t('filmRoom.prevFrameAria')}
+                title={t('filmRoom.prevFrameTitle')}
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
               >
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -1026,7 +1057,7 @@ export function FilmRoomView({
               <button
                 type="button"
                 onClick={toggleAbspielen}
-                aria-label={laeuft ? 'Pause' : 'Abspielen'}
+                aria-label={laeuft ? t('filmRoom.pauseAria') : t('filmRoom.playAria')}
                 className="rounded-md bg-[#F59E0B] p-1.5 text-[#0B0E11] hover:bg-[#FBBF24]"
               >
                 {laeuft ? (
@@ -1042,8 +1073,8 @@ export function FilmRoomView({
                   setAutoStopMeldung(null);
                   setzeZeitExakt(frameZuZeit(zeitZuFrame(zeitMsRef.current) + 1));
                 }}
-                aria-label="Exakt 1 Frame vor"
-                title="Exakt 1 Frame vor (→)"
+                aria-label={t('filmRoom.nextFrameAria')}
+                title={t('filmRoom.nextFrameTitle')}
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
               >
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -1052,7 +1083,7 @@ export function FilmRoomView({
                 type="button"
                 disabled={sichererIndex >= reel.plays.length - 1}
                 onClick={() => wechslePlay(sichererIndex + 1)}
-                aria-label="Nächstes Play"
+                aria-label={t('filmRoom.nextPlayAria')}
                 className="rounded p-1.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white disabled:opacity-35"
               >
                 <SkipForward className="h-4 w-4" aria-hidden="true" />
@@ -1079,8 +1110,8 @@ export function FilmRoomView({
               {/* Multi-Angle-Switcher */}
               <div
                 role="group"
-                aria-label="Kamerawinkel wählen"
-                title={`Kamerawinkel wechseln (${hotkeys.switchAngle.toUpperCase()})`}
+                aria-label={t('filmRoom.angleGroupAria')}
+                title={t('filmRoom.angleGroupTitle', { key: hotkeys.switchAngle.toUpperCase() })}
                 className="flex items-center gap-0.5 rounded border border-[#232933] bg-[#13171D] p-0.5"
               >
                 {reel.angles.map((winkel) => {
@@ -1121,7 +1152,7 @@ export function FilmRoomView({
                 <button
                   type="button"
                   onClick={() => setZeichenOverlaySichtbar((v) => !v)}
-                  title={`Zeichenwerkzeuge über dem Video ein-/ausblenden (${hotkeys.toggleDrawBar.toUpperCase()})`}
+                  title={`${t('hotkey.toggleDrawBar.label')} (${hotkeys.toggleDrawBar.toUpperCase()})`}
                   className={`rounded border p-1.5 transition-colors ${
                     zeichenOverlaySichtbar
                       ? 'border-[#F59E0B]/60 bg-[#F59E0B]/10 text-[#F59E0B]'
@@ -1135,7 +1166,7 @@ export function FilmRoomView({
               <button
                 type="button"
                 onClick={() => setKommentarOverlaySichtbar((v) => !v)}
-                title="Kommentar-Overlay über dem Video ein-/ausblenden"
+                title={t('filmRoom.commentsTitle', { play: aktiverPlay?.play_number ?? '–' })}
                 className={`rounded border p-1.5 transition-colors ${
                   kommentarOverlaySichtbar
                     ? 'border-[#F59E0B]/60 bg-[#F59E0B]/10 text-[#F59E0B]'
@@ -1151,10 +1182,10 @@ export function FilmRoomView({
                 onClick={() => void toggleVollbild()}
                 title={
                   vollbildAktiv
-                    ? `Vollbild beenden (Esc / ${hotkeys.toggleFullscreen.toUpperCase()})`
-                    : `Vollbildmodus aktivieren (${hotkeys.toggleFullscreen.toUpperCase()})`
+                    ? `${t('filmRoom.fullscreenExit')} (Esc / ${hotkeys.toggleFullscreen.toUpperCase()})`
+                    : `${t('filmRoom.fullscreenEnter')} (${hotkeys.toggleFullscreen.toUpperCase()})`
                 }
-                aria-label={vollbildAktiv ? 'Vollbild beenden' : 'Vollbildmodus aktivieren'}
+                aria-label={vollbildAktiv ? t('filmRoom.fullscreenExit') : t('filmRoom.fullscreenEnter')}
                 className="rounded border border-[#232933] bg-[#13171D] p-1.5 text-[#E6EDF3] hover:border-[#F59E0B] hover:text-white"
               >
                 {vollbildAktiv ? (
@@ -1172,7 +1203,7 @@ export function FilmRoomView({
           <section className="rounded-lg border border-[#232933] bg-[#13171D] p-4">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-xs font-semibold text-white">
-                Play #{aktiverPlay?.play_number ?? '–'} · Tagging
+                {t('filmRoom.taggingHeading', { play: aktiverPlay?.play_number ?? '–' })}
               </h2>
               {istTeamAdmin && (
                 <button
@@ -1181,7 +1212,7 @@ export function FilmRoomView({
                   className="inline-flex items-center gap-1 text-[11px] text-[#8B949E] hover:text-[#F59E0B]"
                 >
                   <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
-                  Felder verwalten
+                  {t('filmRoom.manageFields')}
                 </button>
               )}
             </div>
@@ -1190,10 +1221,10 @@ export function FilmRoomView({
             <div className="mt-2.5 flex items-center gap-1 rounded border border-[#232933] bg-[#0B0E11] p-0.5 text-[11px]">
               {(
                 [
-                  { id: 'ALLE', label: 'Alle' },
-                  { id: 'SITUATION', label: 'Situation' },
-                  { id: 'OFFENSE', label: 'Offense' },
-                  { id: 'DEFENSE', label: 'Defense' },
+                  { id: 'ALLE', label: t('filmRoom.groupAll') },
+                  { id: 'SITUATION', label: t('filmRoom.groupSituation') },
+                  { id: 'OFFENSE', label: t('filmRoom.groupOffense') },
+                  { id: 'DEFENSE', label: t('filmRoom.groupDefense') },
                 ] as const
               ).map((tab) => (
                 <button
@@ -1213,7 +1244,7 @@ export function FilmRoomView({
 
             {istFlagPlay && (
               <p className="mt-2 text-[11px] text-[#F59E0B]">
-                FLAG aktiv: Automatische YD LN ↔ GN/LS Berechnung ist für dieses Play pausiert.
+                {t('filmRoom.flagPauseNotice')}
               </p>
             )}
 
@@ -1291,7 +1322,7 @@ export function FilmRoomView({
                               onDefinitionLernen(feld.key, e.target.value);
                             }
                           }}
-                          placeholder="Wählen oder neu..."
+                          placeholder={t('filmRoom.comboPlaceholder')}
                           className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none disabled:opacity-60"
                         />
                       )}
@@ -1305,16 +1336,16 @@ export function FilmRoomView({
           {/* Notizen & Kommentare */}
           <section className="flex flex-1 flex-col rounded-lg border border-[#232933] bg-[#13171D] p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold text-white">Notizen &amp; Kommentare</h2>
+              <h2 className="text-xs font-semibold text-white">{t('filmRoom.notesHeading')}</h2>
               <span className="font-mono text-[11px] text-[#8B949E] tabular-nums">
-                {playNotizen.length} Einträge
+                {t('filmRoom.notesCount', { count: playNotizen.length })}
               </span>
             </div>
 
             <div className="mt-2.5 max-h-40 flex-1 space-y-2 overflow-y-auto">
               {playNotizen.length === 0 ? (
                 <p className="py-3 text-center text-xs text-[#6E7681]">
-                  Noch keine Notizen für Play #{aktiverPlay?.play_number ?? '–'}.
+                  {t('filmRoom.notesEmpty', { play: aktiverPlay?.play_number ?? '–' })}
                 </p>
               ) : (
                 playNotizen.map((notiz, idx) => {
@@ -1334,7 +1365,7 @@ export function FilmRoomView({
                             setAutoStopMeldung(null);
                             setzeZeitExakt(notiz.timestamp_ms);
                           }}
-                          title="Zu diesem Zeitpunkt springen"
+                          title={t('filmRoom.jumpToTimeTitle')}
                           className="text-[#8B949E] hover:text-white tabular-nums"
                         >
                           {formatiereZeit(notiz.timestamp_ms)}
@@ -1349,7 +1380,7 @@ export function FilmRoomView({
                             {notiz.status === 'DRAFT'
                               ? 'DRAFT'
                               : notiz.autorRolle === 'PLAYER'
-                                ? 'Eigene Notiz'
+                                ? t('filmRoom.noteOwn')
                                 : 'PUBLISHED'}
                           </span>
 
@@ -1358,8 +1389,8 @@ export function FilmRoomView({
                               <button
                                 type="button"
                                 onClick={() => starteNotizBearbeitung(notiz)}
-                                title="Kommentar bearbeiten"
-                                aria-label="Kommentar bearbeiten"
+                                title={t('filmRoom.editCommentAria')}
+                                aria-label={t('filmRoom.editCommentAria')}
                                 className="rounded p-0.5 text-[#8B949E] hover:bg-[#1E2530] hover:text-white"
                               >
                                 <Pencil className="h-3 w-3" aria-hidden="true" />
@@ -1371,8 +1402,8 @@ export function FilmRoomView({
                                     onNotizLoeschen(reel.id, aktiverPlay.play_number, notiz.id);
                                   }
                                 }}
-                                title="Kommentar löschen"
-                                aria-label="Kommentar löschen"
+                                title={t('filmRoom.deleteCommentAria')}
+                                aria-label={t('filmRoom.deleteCommentAria')}
                                 className="rounded p-0.5 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
                               >
                                 <Trash2 className="h-3 w-3" aria-hidden="true" />
@@ -1392,13 +1423,13 @@ export function FilmRoomView({
                               if (e.key === 'Enter') speichereNotizBearbeitung();
                               if (e.key === 'Escape') brecheNotizBearbeitungAb();
                             }}
-                            aria-label="Kommentartext bearbeiten"
+                            aria-label={t('filmRoom.editCommentAria')}
                             className="min-w-0 flex-1 rounded border border-[#F59E0B] bg-[#13171D] px-2 py-1 text-xs text-white focus:outline-none"
                           />
                           <button
                             type="button"
                             onClick={speichereNotizBearbeitung}
-                            aria-label="Änderung speichern"
+                            aria-label={t('filmRoom.saveEditAria')}
                             className="rounded bg-[#F59E0B] p-1 text-[#0B0E11] hover:bg-[#FBBF24]"
                           >
                             <Check className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1406,7 +1437,7 @@ export function FilmRoomView({
                           <button
                             type="button"
                             onClick={brecheNotizBearbeitungAb}
-                            aria-label="Bearbeitung abbrechen"
+                            aria-label={t('filmRoom.cancelEditAria')}
                             className="rounded border border-[#232933] p-1 text-[#8B949E] hover:text-white"
                           >
                             <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1442,8 +1473,8 @@ export function FilmRoomView({
                   }}
                   placeholder={
                     istCoach
-                      ? `Kommentar bei ${formatiereZeit(zeitMs)} (Draft)...`
-                      : `Eigene Notiz bei ${formatiereZeit(zeitMs)}...`
+                      ? t('filmRoom.noteDraftPlaceholder', { time: formatiereZeit(zeitMs) })
+                      : t('filmRoom.notePlayerPlaceholder', { time: formatiereZeit(zeitMs) })
                   }
                   className="min-w-0 flex-1 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                 />
@@ -1467,6 +1498,7 @@ export function FilmRoomView({
         aktiverPlayIndex={sichererIndex}
         teamRolle={teamRolle}
         tagSchema={tagSchema}
+        locale={locale}
         onPlayWaehlen={wechslePlay}
         onFeldAendern={(playNumber, feldKey, wert, istCustom) =>
           onFeldAendern(reel.id, playNumber, feldKey, wert, istCustom)

@@ -757,7 +757,7 @@ export class PluginInstallerService {
         veroeffentlichtAm: coreRelease.published_at ?? null,
         ...(istNeuer
           ? {
-              hinweis: `SidelineOS-Core ${neusteCore} verfügbar (aktuell ${this.config.coreVersion}). Deployment-Image bzw. Release aktualisieren.`,
+              hinweis: `${this.config.coreName} ${neusteCore} verfügbar (aktuell ${this.config.coreVersion}). Deployment-Image bzw. Release aktualisieren.`,
             }
           : {}),
       };

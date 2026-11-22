@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
+import type { UnterstuetzteSprache } from '../shared/i18n.ts';
 import type {
   BenutzerKonto,
   PluginId,
@@ -14,6 +15,16 @@ export type {
   TeamKontext,
   TeamRolle,
 } from '../shared/types.ts';
+
+export type {
+  SprachPaket,
+  SprachWoerterbuecher,
+  UnterstuetzteSprache,
+} from '../shared/i18n.ts';
+
+export type { BrandKonfiguration } from '../shared/brand.ts';
+export { holeAktuelleBrandKonfig, teileWortmarke } from '../shared/brand.ts';
+export { createPluginTranslator, uebersetzeSchluessel } from '../shared/i18n.ts';
 
 /**
  * Granulare Berechtigungen, die ein externes Plugin in seinem `plugin.manifest.json`
@@ -76,6 +87,7 @@ export interface PluginLaufzeitKontext {
   aktiveTeamAnsicht: TeamRolle;
   gewaehlteSaison: string;
   benutzer: BenutzerKonto;
+  locale: string;
   aktuellerTab: string;
   onTabWechseln: (tabId: string) => void;
   onTeamSettingsOeffnen: () => void;
@@ -91,6 +103,7 @@ export interface PluginSettingsKontext {
   benutzer: BenutzerKonto;
   aktiveTeamAnsicht: TeamRolle | null;
   s3Konfig: S3Konfiguration;
+  locale: string;
 }
 
 /**
@@ -164,6 +177,7 @@ export interface PluginBackendKontext {
   readonly s3?: PluginS3Scope;
   readonly cleanupQueue?: PluginCleanupQueueScope;
   readonly user: BenutzerKonto;
+  readonly locale: string;
   readonly team: TeamKontext;
   readonly teamRolle: TeamRolle;
   hasPermission(permission: PluginPermission): boolean;
@@ -218,12 +232,16 @@ export interface SidelinePlugin {
   /** Optionaler State-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
   Provider?: ComponentType<{ children: ReactNode }>;
   defaultTab: string;
-  getTabs: (ctx: { teamRolle: TeamRolle }) => PluginTab[];
+  getTabs: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
   /** Optionale Primäraktion rechts in der TopBar (als eigenständige React-Komponente) */
   PrimaerAktion?: ComponentType<{ ctx: PluginLaufzeitKontext; className: string }>;
   renderMainView: (ctx: PluginLaufzeitKontext) => ReactNode;
   /** Optionaler öffentlicher Empfänger-View für /share/<token> ohne Anmeldung */
-  renderPublicShareView?: (ctx: { token: string; onSchliessen: () => void }) => ReactNode;
+  renderPublicShareView?: (ctx: {
+    token: string;
+    locale?: string;
+    onSchliessen: () => void;
+  }) => ReactNode;
   settingsPanels?: {
     user?: ComponentType<{ ctx: PluginSettingsKontext }>;
     team?: ComponentType<{ ctx: PluginSettingsKontext }>;
@@ -250,6 +268,29 @@ export const PERMISSION_BESCHREIBUNGEN: Record<PluginPermission, string> = {
   'db:plugin-tables': 'Verwaltet eigene isolierte PostgreSQL-Tabellen',
   'share:public-links': 'Erzeugt zeitlich befristete öffentliche /share/-Links',
 };
+
+export const PERMISSION_BESCHREIBUNGEN_I18N: Record<
+  UnterstuetzteSprache,
+  Record<PluginPermission, string>
+> = {
+  de: PERMISSION_BESCHREIBUNGEN,
+  en: {
+    'team:read': 'Reads team metadata, seasons, and active role',
+    'team:roster-read': 'Reads roster members, units, and player profiles',
+    's3:team-rw': 'Stores/streams files within the plugin S3 team prefix',
+    's3:cleanup-queue': 'Registers orphaned S3 objects in the sysadmin retention queue',
+    'db:plugin-tables': 'Manages isolated PostgreSQL plugin tables',
+    'share:public-links': 'Creates time-limited public /share/ links',
+  },
+};
+
+export function holePermissionBeschreibung(
+  permission: PluginPermission,
+  locale?: string
+): string {
+  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
+  return PERMISSION_BESCHREIBUNGEN_I18N[code][permission];
+}
 
 /**
  * Ermittelt die zugehörige Saison eines saisongebundenen Eintrags (Fallback: Jahr aus eventDate).

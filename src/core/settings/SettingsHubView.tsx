@@ -6,7 +6,8 @@ import type {
   TeamKontext,
   TeamRolle,
 } from '../../shared/types.ts';
-import { TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
+import { holeRollenLabel } from '../../shared/types.ts';
+import { useI18n } from '../i18n/I18nContext.tsx';
 
 interface SettingsHubViewProps {
   team: TeamKontext;
@@ -31,6 +32,7 @@ export function SettingsHubView({
   ausstehendeUpdatesAnzahl = 0,
   onBereichOeffnen,
 }: SettingsHubViewProps) {
+  const { locale, t } = useI18n();
   const hatTeamZugriff = aktiveTeamAnsicht !== null;
   const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
 
@@ -45,16 +47,16 @@ export function SettingsHubView({
               className="mb-1 inline-flex items-center gap-1.5 text-xs font-medium text-[#8B949E] transition-colors hover:text-[#F59E0B]"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-              Zurück zur Startseite
+              {t('settingsHub.backHome')}
             </button>
           )}
-          <h1 className="text-xl font-bold tracking-tight text-white">Einstellungen</h1>
+          <h1 className="text-xl font-bold tracking-tight text-white">{t('settingsHub.title')}</h1>
           <p className="text-xs text-[#8B949E]">
             {benutzer ? benutzer.vollerName : konto.label}
             {hatTeamZugriff && (
               <>
                 {' '}
-                · {team.name} · {TEAM_ROLLEN_LABELS[aktiveTeamAnsicht]}
+                · {team.name} · {holeRollenLabel(aktiveTeamAnsicht, locale)}
               </>
             )}
           </p>
@@ -73,15 +75,14 @@ export function SettingsHubView({
                 <Sliders className="h-5 w-5" aria-hidden="true" />
               </div>
               <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
-                Persönliche Einstellungen
+                {t('settingsHub.userTitle')}
               </h2>
               <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
-                Spielerprofil (Nummer, Position, Kontakte &amp; Custom-Felder), Zugangsdaten,
-                Passwort sowie persönliche Modul-Optionen.
+                {t('settingsHub.userDesc')}
               </p>
             </div>
             <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
-              <span>Öffnen</span>
+              <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
                 className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
                 aria-hidden="true"
@@ -103,20 +104,19 @@ export function SettingsHubView({
                 </div>
                 {ausstehendeAnfragenAnzahl > 0 && (
                   <span className="font-mono text-xs font-semibold text-[#F59E0B] tabular-nums">
-                    {ausstehendeAnfragenAnzahl} offen
+                    {t('hub.openCount', { count: ausstehendeAnfragenAnzahl })}
                   </span>
                 )}
               </div>
               <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
-                Team-Einstellungen
+                {t('settingsHub.teamTitle')}
               </h2>
               <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
-                Saisons verwalten, Mitglieder &amp; Multi-Units, Einladungen inkl. Freigaben,
-                Spieler-Custom-Felder und Tagging-Schema.
+                {t('settingsHub.teamDesc')}
               </p>
             </div>
             <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
-              <span>Öffnen</span>
+              <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
                 className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
                 aria-hidden="true"
@@ -139,20 +139,21 @@ export function SettingsHubView({
                 {ausstehendeUpdatesAnzahl > 0 && (
                   <span className="font-mono text-xs font-semibold text-[#F59E0B] tabular-nums">
                     {ausstehendeUpdatesAnzahl}{' '}
-                    {ausstehendeUpdatesAnzahl === 1 ? 'Update' : 'Updates'}
+                    {ausstehendeUpdatesAnzahl === 1
+                      ? t('settingsHub.updateSingular')
+                      : t('settingsHub.updatePlural')}
                   </span>
                 )}
               </div>
               <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
-                Sysadmin &amp; Instanz
+                {t('settingsHub.sysadminTitle')}
               </h2>
               <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
-                Module pro Team freischalten, Mandanten &amp; globale Benutzer verwalten,
-                S3-Storage, SMTP und Cleanup-Schonfrist konfigurieren.
+                {t('settingsHub.sysadminDesc')}
               </p>
             </div>
             <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
-              <span>Öffnen</span>
+              <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
                 className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
                 aria-hidden="true"

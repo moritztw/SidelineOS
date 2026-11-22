@@ -8,13 +8,14 @@ import {
   UserPlus,
 } from 'lucide-react';
 import type { SpielerUnit } from '../../shared/types.ts';
-import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
+import { holeRollenLabel, holeUnitLabel } from '../../shared/types.ts';
 import {
   CoreApiError,
   coreApi,
   type InviteAcceptResponse,
   type InviteCheckResponse,
 } from '../apiClient.ts';
+import { BrandWortmarke, SprachUmschalter, useI18n } from '../i18n/I18nContext.tsx';
 
 interface InviteRegisterViewProps {
   token: string;
@@ -29,6 +30,7 @@ export function InviteRegisterView({
   onBeigetreten,
   onZurueckZumLogin,
 }: InviteRegisterViewProps) {
+  const { locale, t } = useI18n();
   const [ladePruefung, setLadePruefung] = useState(true);
   const [pruefungFehler, setPruefungFehler] = useState<{ status: number; nachricht: string } | null>(
     null
@@ -80,7 +82,7 @@ export function InviteRegisterView({
         } else {
           setPruefungFehler({
             status: 500,
-            nachricht: 'Einladungslink konnte nicht geprüft werden.',
+            nachricht: t('invite.invalidFallback'),
           });
         }
       })
@@ -91,7 +93,7 @@ export function InviteRegisterView({
     return () => {
       aktiv = false;
     };
-  }, [token]);
+  }, [token, t]);
 
   const toggleUnit = (u: SpielerUnit) => {
     setUnits((alt) => (alt.includes(u) ? alt.filter((item) => item !== u) : [...alt, u]));
@@ -100,7 +102,7 @@ export function InviteRegisterView({
   if (ladePruefung) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-xs text-[#8B949E]">
-        Einladungslink wird geprüft…
+        {t('invite.checking')}
       </div>
     );
   }
@@ -109,16 +111,16 @@ export function InviteRegisterView({
     const ist410 = pruefungFehler?.status === 410;
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
-        <div className="w-full max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4 text-center">
+        <div className="w-full max-w-md space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
           <div className="mx-auto inline-flex rounded-full border border-[#DC2626]/40 bg-[#DC2626]/10 p-3 text-[#FCA5A5]">
             <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="font-mono text-xs text-[#FCA5A5]">
             {ist410 ? 'HTTP 410 Gone' : 'HTTP 404 Not Found'}
           </div>
-          <h1 className="text-base font-semibold text-white">Einladung nicht nutzbar</h1>
+          <h1 className="text-base font-semibold text-white">{t('invite.invalidTitle')}</h1>
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            {pruefungFehler?.nachricht ?? 'Das zugehörige Team konnte nicht gefunden werden.'}
+            {pruefungFehler?.nachricht ?? t('invite.invalidFallback')}
           </p>
           <button
             type="button"
@@ -126,7 +128,7 @@ export function InviteRegisterView({
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zur Anmeldung
+            {t('invite.backToLogin')}
           </button>
         </div>
       </div>
@@ -138,23 +140,22 @@ export function InviteRegisterView({
   if (abgeschlossenStatus === 'WARTET_AUF_FREIGABE') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
-        <div className="w-full max-w-md rounded-xl border border-[#F59E0B]/40 bg-[#13171D] p-6 space-y-4">
+        <div className="w-full max-w-md space-y-4 rounded-xl border border-[#F59E0B]/40 bg-[#13171D] p-6">
           <div className="inline-flex rounded-lg border border-[#F59E0B]/40 bg-[#F59E0B]/10 p-2.5 text-[#F59E0B]">
             <Clock className="h-5 w-5" aria-hidden="true" />
           </div>
-          <h1 className="text-lg font-semibold text-white">Registrierung eingegangen</h1>
+          <h1 className="text-lg font-semibold text-white">{t('invite.pendingTitle')}</h1>
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            Dein SidelineOS-Konto wurde in der Datenbank angelegt. Da dieser Team-Link eine
-            Bestätigung vorsieht, prüft ein Team Admin von{' '}
-            <strong className="text-white">{team.name}</strong> nun deine Anfrage unter{' '}
-            <span className="font-mono text-[#E6EDF3]">Team-Einstellungen → Einladungen</span>.
+            {t('invite.pendingBodyBefore')}{' '}
+            <strong className="text-white">{team.name}</strong> {t('invite.pendingBodyAfter')}{' '}
+            <span className="font-mono text-[#E6EDF3]">{t('invite.pendingPath')}</span>.
           </p>
           <button
             type="button"
             onClick={onZurueckZumLogin}
             className="w-full rounded-md bg-[#F59E0B] py-2 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
           >
-            Zur Anmeldung
+            {t('invite.toLogin')}
           </button>
         </div>
       </div>
@@ -167,7 +168,7 @@ export function InviteRegisterView({
 
     if (modus === 'bestehend') {
       if (!bestehendKennung.trim() || !bestehendPasswort) {
-        setFehler('Bitte Benutzername oder E-Mail sowie Passwort eingeben.');
+        setFehler(t('invite.errExistingRequired'));
         return;
       }
       setSendet(true);
@@ -184,7 +185,7 @@ export function InviteRegisterView({
           onBeigetreten(res);
         }
       } catch (err) {
-        setFehler(err instanceof Error ? err.message : 'Beitritt fehlgeschlagen.');
+        setFehler(err instanceof Error ? err.message : t('invite.errJoinFailed'));
       } finally {
         setSendet(false);
       }
@@ -196,21 +197,21 @@ export function InviteRegisterView({
     const userClean = (benutzername.trim() || mailClean.split('@')[0] || '').toLowerCase();
 
     if (!nameClean || !mailClean.includes('@') || !userClean) {
-      setFehler('Bitte vollen Namen, gültige E-Mail-Adresse und Benutzername angeben.');
+      setFehler(t('invite.errProfileRequired'));
       return;
     }
     if (passwort.length < 10) {
-      setFehler('Das Passwort muss mindestens 10 Zeichen lang sein.');
+      setFehler(t('invite.errPasswordLength'));
       return;
     }
     if (passwort !== passwortWiederholung) {
-      setFehler('Die Passwörter stimmen nicht überein.');
+      setFehler(t('invite.errPasswordMismatch'));
       return;
     }
 
     for (const feld of team.customProfilFelder) {
       if (feld.pflicht && !(customWerte[feld.key] ?? '').trim()) {
-        setFehler(`Bitte das Pflichtfeld „${feld.label}“ ausfüllen.`);
+        setFehler(t('invite.errCustomRequired', { label: feld.label }));
         return;
       }
     }
@@ -226,6 +227,7 @@ export function InviteRegisterView({
         telefon: telefon.trim(),
         trikotNummer: trikotNummer.trim(),
         position: position.trim(),
+        preferredLocale: locale,
         units: units.length > 0 ? units : ['OFFENSE'],
         customProfilWerte: { ...customWerte },
       });
@@ -235,7 +237,7 @@ export function InviteRegisterView({
         onBeigetreten(res);
       }
     } catch (err) {
-      setFehler(err instanceof Error ? err.message : 'Registrierung fehlgeschlagen.');
+      setFehler(err instanceof Error ? err.message : t('invite.errRegisterFailed'));
     } finally {
       setSendet(false);
     }
@@ -244,35 +246,41 @@ export function InviteRegisterView({
   return (
     <div className="min-h-screen bg-[#0B0E11] px-4 py-8 text-[#E6EDF3]">
       <div className="mx-auto max-w-xl space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div className="font-display text-lg font-bold tracking-tight text-white">
-            Sideline<span className="text-[#F59E0B]">OS</span>
+            <BrandWortmarke />
           </div>
-          <button
-            type="button"
-            onClick={onZurueckZumLogin}
-            className="inline-flex items-center gap-1.5 text-xs text-[#8B949E] hover:text-white"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zur Anmeldung
-          </button>
+          <div className="flex items-center gap-3">
+            <SprachUmschalter />
+            <button
+              type="button"
+              onClick={onZurueckZumLogin}
+              className="inline-flex items-center gap-1.5 text-xs text-[#8B949E] hover:text-white"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('invite.toLogin')}
+            </button>
+          </div>
         </div>
 
         {/* Einladungs-Banner */}
-        <section className="rounded-xl border border-[#F59E0B]/40 bg-[#13171D] p-5 space-y-2">
+        <section className="space-y-2 rounded-xl border border-[#F59E0B]/40 bg-[#13171D] p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="inline-flex items-center gap-2 text-xs font-semibold text-[#F59E0B]">
               <UserPlus className="h-4 w-4" aria-hidden="true" />
-              Teameinladung · {team.name}
+              {t('invite.bannerPrefix')} {team.name}
             </div>
             <span className="font-mono text-[11px] text-[#8B949E]">
-              Rolle: {TEAM_ROLLEN_LABELS[einladung.rolle]} · Saison {team.aktiveSaison}
+              {t('invite.roleSeason', {
+                role: holeRollenLabel(einladung.rolle, locale),
+                season: team.aktiveSaison,
+              })}
             </span>
           </div>
           <p className="text-xs text-[#8B949E]">
             {einladung.bestaetigungErforderlich
-              ? 'Nach der Registrierung prüft und bestätigt ein Team Admin deinen Beitritt.'
-              : 'Direkte Einladung: Nach Abschluss bist du sofort im Team freigeschaltet.'}
+              ? t('invite.approvalRequired')
+              : t('invite.directJoin')}
           </p>
         </section>
 
@@ -288,7 +296,7 @@ export function InviteRegisterView({
               modus === 'neu' ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-white'
             }`}
           >
-            Neues Konto erstellen
+            {t('invite.modeNew')}
           </button>
           <button
             type="button"
@@ -302,22 +310,22 @@ export function InviteRegisterView({
                 : 'text-[#8B949E] hover:text-white'
             }`}
           >
-            Bestehendes Konto verknüpfen
+            {t('invite.modeExisting')}
           </button>
         </div>
 
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4"
+          className="space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6"
         >
           {modus === 'bestehend' ? (
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-xs font-semibold text-white">
                 <ShieldCheck className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-                Mit vorhandenem SidelineOS-Konto beitreten
+                {t('invite.existingTitle')}
               </div>
               <label className="block space-y-1 text-xs text-[#8B949E]">
-                <span>E-Mail oder Benutzername</span>
+                <span>{t('invite.existingIdentifier')}</span>
                 <input
                   type="text"
                   value={bestehendKennung}
@@ -326,7 +334,7 @@ export function InviteRegisterView({
                 />
               </label>
               <label className="block space-y-1 text-xs text-[#8B949E]">
-                <span>Passwort</span>
+                <span>{t('invite.password')}</span>
                 <input
                   type="password"
                   value={bestehendPasswort}
@@ -339,7 +347,7 @@ export function InviteRegisterView({
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Voller Name *</span>
+                  <span>{t('invite.fullName')}</span>
                   <input
                     type="text"
                     value={vollerName}
@@ -349,7 +357,7 @@ export function InviteRegisterView({
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Benutzername *</span>
+                  <span>{t('invite.username')}</span>
                   <input
                     type="text"
                     value={benutzername}
@@ -359,7 +367,7 @@ export function InviteRegisterView({
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>E-Mail-Adresse *</span>
+                  <span>{t('invite.email')}</span>
                   <input
                     type="email"
                     value={email}
@@ -369,7 +377,7 @@ export function InviteRegisterView({
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Telefon / Kontakt</span>
+                  <span>{t('invite.phone')}</span>
                   <input
                     type="tel"
                     value={telefon}
@@ -379,27 +387,27 @@ export function InviteRegisterView({
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Trikotnummer (#)</span>
+                  <span>{t('invite.jersey')}</span>
                   <input
                     type="text"
                     value={trikotNummer}
                     onChange={(e) => setTrikotNummer(e.target.value)}
-                    placeholder="z. B. 22"
+                    placeholder="22"
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Position(en)</span>
+                  <span>{t('invite.position')}</span>
                   <input
                     type="text"
                     value={position}
                     onChange={(e) => setPosition(e.target.value)}
-                    placeholder="z. B. RB / LB"
+                    placeholder="RB / LB"
                     className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Passwort (mind. 10 Zeichen) *</span>
+                  <span>{t('invite.passwordMin')}</span>
                   <input
                     type="password"
                     value={passwort}
@@ -408,7 +416,7 @@ export function InviteRegisterView({
                   />
                 </label>
                 <label className="space-y-1 text-xs text-[#8B949E]">
-                  <span>Passwort bestätigen *</span>
+                  <span>{t('invite.passwordConfirm')}</span>
                   <input
                     type="password"
                     value={passwortWiederholung}
@@ -421,7 +429,7 @@ export function InviteRegisterView({
               {team.customProfilFelder.length > 0 && (
                 <div className="space-y-3 border-t border-[#232933] pt-3">
                   <div className="text-xs font-medium text-[#E6EDF3]">
-                    Team-Zusatzfelder ({team.name})
+                    {t('invite.customFields', { team: team.name })}
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {team.customProfilFelder.map((feld) => (
@@ -438,7 +446,7 @@ export function InviteRegisterView({
                             }
                             className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                           >
-                            <option value="">Bitte wählen…</option>
+                            <option value="">{t('invite.pleaseSelect')}</option>
                             {(feld.optionen ?? []).map((opt) => (
                               <option key={opt} value={opt}>
                                 {opt}
@@ -464,7 +472,7 @@ export function InviteRegisterView({
           )}
 
           <div className="space-y-1.5 border-t border-[#232933] pt-3">
-            <div className="text-xs text-[#8B949E]">Units (Mehrfachwahl für Two-Way-Spieler)</div>
+            <div className="text-xs text-[#8B949E]">{t('invite.unitsLabel')}</div>
             <div className="flex flex-wrap gap-3">
               {ALLE_UNITS.map((u) => (
                 <label
@@ -477,7 +485,7 @@ export function InviteRegisterView({
                     onChange={() => toggleUnit(u)}
                     className="h-3.5 w-3.5 accent-[#F59E0B]"
                   />
-                  <span>{SPIELER_UNIT_LABELS[u]}</span>
+                  <span>{holeUnitLabel(u, locale)}</span>
                 </label>
               ))}
             </div>
@@ -499,10 +507,10 @@ export function InviteRegisterView({
           >
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
             {sendet
-              ? 'Wird gesendet…'
+              ? t('invite.submitting')
               : einladung.bestaetigungErforderlich
-                ? 'Registrieren & Freigabe anfragen'
-                : 'Registrieren & Team beitreten'}
+                ? t('invite.submitApproval')
+                : t('invite.submitDirect')}
           </button>
         </form>
       </div>

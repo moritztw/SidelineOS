@@ -25,6 +25,7 @@ import type {
 } from '../../shared/types.ts';
 import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
 import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
+import { useI18n } from '../i18n/I18nContext.tsx';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
 import type { ApiAktionErgebnis } from './UserSettingsPage.tsx';
@@ -103,6 +104,7 @@ export function TeamSettingsPage({
   onEinladungTesten,
   onZurueck,
 }: TeamSettingsPageProps) {
+  const { locale, t } = useI18n();
   const [teamName, setTeamName] = useState(team.name);
   const [aktiveSaison, setAktiveSaison] = useState(team.aktiveSaison);
   const [neueSaisonEingabe, setNeueSaisonEingabe] = useState('');
@@ -277,15 +279,15 @@ export function TeamSettingsPage({
   };
 
   const kategorien: SettingsKategorie[] = [
-    { id: 'team-profil', label: 'Team-Profil & Saisons', gruppe: 'Team-Verwaltung' },
-    { id: 'team-mitglieder', label: 'Mitglieder, Rollen & Units', gruppe: 'Team-Verwaltung' },
+    { id: 'team-profil', label: t('teamSettings.catProfile'), gruppe: t('teamSettings.group') },
+    { id: 'team-mitglieder', label: t('teamSettings.catMembers'), gruppe: t('teamSettings.group') },
     {
       id: 'team-einladungen',
-      label: 'Einladungen & Freigaben',
-      gruppe: 'Team-Verwaltung',
+      label: t('teamSettings.catInvitations'),
+      gruppe: t('teamSettings.group'),
       badge: offeneAnfragen.length,
     },
-    { id: 'team-profilfelder', label: 'Spieler-Custom-Felder', gruppe: 'Team-Verwaltung' },
+    { id: 'team-profilfelder', label: t('teamSettings.catCustomFields'), gruppe: t('teamSettings.group') },
   ];
 
   const pluginsMitTeamPanel = aktivePlugins.filter((p) => Boolean(p.settingsPanels?.team));
@@ -305,14 +307,15 @@ export function TeamSettingsPage({
     benutzer,
     aktiveTeamAnsicht: 'TEAM_ADMIN',
     s3Konfig,
+    locale,
   };
 
   return (
     <SettingsShell
-      titel={`Team-Einstellungen · ${team.name}`}
-      untertitel="Zentrale Team-Admin-Verwaltung für Saisons, Mitglieder, Multi-Units, Einladungen inkl. Freigabe-Warteliste, Spieler-Custom-Felder sowie Plugin-Konfigurationen."
+      titel={t('teamSettings.title', { team: team.name })}
+      untertitel={t('teamSettings.subtitle')}
       kategorien={kategorien}
-      zurueckLabel="Alle Einstellungen"
+      zurueckLabel={t('settingsShell.allSettings')}
       onZurueck={onZurueck}
     >
       {aktionFehler && (

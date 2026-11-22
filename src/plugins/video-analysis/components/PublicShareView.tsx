@@ -8,8 +8,9 @@ import {
   Lock,
   Play,
 } from 'lucide-react';
+import { holeAktuelleBrandKonfig, teileWortmarke } from '../../../sdk/plugin.ts';
 import { useVideoAnalysis } from '../VideoAnalysisContext.tsx';
-import { KATEGORIE_LABELS } from '../types.ts';
+import { createVideoTranslator, holeVideoKategorieLabel } from '../i18n.ts';
 import {
   exportiereBreakdownAlsCsv,
   filtereBundleFuerFreigabe,
@@ -20,11 +21,15 @@ import { THUMB_ENDZONE, THUMB_SIDELINE } from '../data/demoReels.ts';
 
 interface PublicShareViewProps {
   token: string;
+  locale?: string;
   onSchliessen: () => void;
 }
 
-export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
+export function PublicShareView({ token, locale, onSchliessen }: PublicShareViewProps) {
   const { reels, tagSchema } = useVideoAnalysis();
+  const t = createVideoTranslator(locale);
+  const brand = holeAktuelleBrandKonfig();
+  const { basis, akzent } = teileWortmarke(brand.produktName);
 
   let gefundenerTreffer: {
     reel: (typeof reels)[number];
@@ -52,9 +57,9 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             <AlertTriangle className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="font-mono text-xs text-[#FCA5A5]">HTTP 404 Not Found</div>
-          <h1 className="text-base font-semibold text-white">Share-Link nicht gefunden</h1>
+          <h1 className="text-base font-semibold text-white">{t('publicShare.notFoundTitle')}</h1>
           <p className="text-xs text-[#8B949E]">
-            Unter <code className="font-mono">/share/{token}</code> existiert keine Video-Freigabe.
+            {t('publicShare.notFoundBody', { path: `/share/${token}` })}
           </p>
           <button
             type="button"
@@ -62,7 +67,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zu SidelineOS
+            {t('publicShare.backToBrand', { brand: brand.produktName })}
           </button>
         </div>
       </div>
@@ -80,9 +85,9 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             <Clock className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="font-mono text-xs text-[#FCA5A5]">HTTP 410 Gone</div>
-          <h1 className="text-base font-semibold text-white">Download-Link abgelaufen</h1>
+          <h1 className="text-base font-semibold text-white">{t('publicShare.expiredTitle')}</h1>
           <p className="text-xs text-[#8B949E]">
-            Der Link „{link.bezeichnung}“ ist abgelaufen oder wurde widerrufen.
+            {t('publicShare.expiredBody', { name: link.bezeichnung })}
           </p>
           <button
             type="button"
@@ -90,7 +95,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zu SidelineOS
+            {t('publicShare.backToBrand', { brand: brand.produktName })}
           </button>
         </div>
       </div>
@@ -101,6 +106,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
   const freigegebeneSpalten = tagSchema.filter((f) => link.freigegebeneFelder.includes(f.key));
   const aktiverPlay = gefiltertesBundle.plays[aktiverPlayIndex] ?? gefiltertesBundle.plays[0];
   const vorschauBild = aktiverWinkel === 'ENDZONE' ? THUMB_ENDZONE : THUMB_SIDELINE;
+  const datumLocale = locale === 'en' ? 'en-US' : 'de-DE';
 
   const handleDownload = (format: 'json' | 'csv') => {
     const inhalt =
@@ -124,7 +130,8 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
         <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-6 py-3.5">
           <div className="flex items-center gap-3">
             <span className="font-display text-lg font-bold tracking-tight text-white">
-              Sideline<span className="text-[#F59E0B]">OS</span>
+              {basis}
+              {akzent && <span className="text-[#F59E0B]">{akzent}</span>}
               <span className="font-medium text-[#8B949E]">-Core</span>
             </span>
             <span className="text-[#36404F]">/</span>
@@ -138,7 +145,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
               className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
-              sideline.json laden
+              {t('publicShare.downloadJson')}
             </button>
             {freigegebeneSpalten.length > 0 && (
               <button
@@ -147,7 +154,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
                 className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#13171D] px-3 py-1.5 text-xs font-medium text-white hover:border-[#F59E0B]"
               >
                 <Download className="h-3.5 w-3.5 text-[#8B949E]" aria-hidden="true" />
-                Breakdown CSV
+                {t('publicShare.downloadCsv')}
               </button>
             )}
             <button
@@ -156,7 +163,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
               className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E] hover:text-white"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-              Zur App
+              {t('publicShare.toApp')}
             </button>
           </div>
         </div>
@@ -168,25 +175,30 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
           <div>
             <div className="flex items-center gap-2 text-xs text-[#8B949E]">
               <Film className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-              <span>Öffentliche Video-Freigabe (Read-Only)</span>
+              <span>{t('publicShare.readOnlyBadge')}</span>
               <span>·</span>
-              <span>{KATEGORIE_LABELS[reel.category]}</span>
+              <span>{holeVideoKategorieLabel(reel.category, locale)}</span>
             </div>
             <h1 className="mt-1 text-lg font-semibold text-white">{link.bezeichnung}</h1>
             <p className="text-xs text-[#8B949E]">
-              Tape: {reel.title} · {gefiltertesBundle.plays.length} Plays · Winkel:{' '}
-              {reel.angles.join(' + ')}
+              {t('publicShare.metaLine', {
+                title: reel.title,
+                plays: gefiltertesBundle.plays.length,
+                angles: reel.angles.join(' + '),
+              })}
             </p>
           </div>
 
           <div className="space-y-1 text-right text-xs">
             <div className="inline-flex items-center gap-1.5 font-mono text-[#4ADE80]">
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              Gültig bis {new Date(link.gueltigBis).toLocaleDateString('de-DE')}
+              {t('publicShare.validUntil', {
+                date: new Date(link.gueltigBis).toLocaleDateString(datumLocale),
+              })}
             </div>
             <div className="flex items-center justify-end gap-1 text-[11px] text-[#8B949E]">
               <Lock className="h-3 w-3" aria-hidden="true" />
-              Notizen &amp; Canvas-Zeichnungen bleiben privat
+              {t('publicShare.privateHint')}
             </div>
           </div>
         </section>
@@ -196,7 +208,10 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
           <div className="space-y-3 rounded-lg border border-[#232933] bg-[#13171D] p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="font-mono text-xs text-white">
-                Play #{aktiverPlay?.play_number ?? 1} · Winkel {aktiverWinkel}
+                {t('publicShare.playAngleTitle', {
+                  play: aktiverPlay?.play_number ?? 1,
+                  angle: aktiverWinkel,
+                })}
               </div>
               <div className="flex items-center gap-1">
                 {reel.angles.map((w) => (
@@ -219,13 +234,15 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
             <div className="relative aspect-video overflow-hidden rounded border border-[#232933] bg-[#0B0E11]">
               <img
                 src={vorschauBild}
-                alt={`Videovorschau Play ${aktiverPlay?.play_number ?? 1}`}
+                alt={t('publicShare.previewAlt', { play: aktiverPlay?.play_number ?? 1 })}
                 className="h-full w-full object-cover"
               />
               <div className="absolute inset-0 flex items-center justify-center bg-black/30">
                 <div className="inline-flex items-center gap-2 rounded-full border border-[#F59E0B]/60 bg-[#0B0E11]/90 px-4 py-2 text-xs font-medium text-white">
                   <Play className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-                  S3 Stream-Vorschau ({aktiverPlay?.sources[aktiverWinkel]?.file ?? 'Clip'})
+                  {t('publicShare.streamPreview', {
+                    file: aktiverPlay?.sources[aktiverWinkel]?.file ?? 'Clip',
+                  })}
                 </div>
               </div>
             </div>
@@ -233,7 +250,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
 
           <aside className="rounded-lg border border-[#232933] bg-[#13171D] p-4 space-y-2">
             <h2 className="text-xs font-semibold text-white">
-              Enthaltene Spielzüge ({gefiltertesBundle.plays.length})
+              {t('publicShare.playsIncluded', { count: gefiltertesBundle.plays.length })}
             </h2>
             <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
               {gefiltertesBundle.plays.map((play, idx) => {
@@ -253,7 +270,7 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
                     <span className="font-mono text-[11px]">
                       {play.sources[aktiverWinkel]
                         ? play.sources[aktiverWinkel]!.file
-                        : 'Winkel fehlt'}
+                        : t('publicShare.angleMissing')}
                     </span>
                   </button>
                 );
@@ -265,13 +282,12 @@ export function PublicShareView({ token, onSchliessen }: PublicShareViewProps) {
         {/* Ausschließlich freigegebene Tagging-Spalten */}
         <section className="rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-3">
           <h2 className="text-sm font-semibold text-white">
-            Freigegebene Tagging-Daten ({freigegebeneSpalten.length} Spalten)
+            {t('publicShare.sharedDataTitle', { count: freigegebeneSpalten.length })}
           </h2>
 
           {freigegebeneSpalten.length === 0 ? (
             <p className="rounded border border-[#232933] bg-[#0B0E11] px-4 py-5 text-center text-xs text-[#8B949E]">
-              Dieser Link gibt ausschließlich Videodateien frei – es sind keine Tagging-Spalten
-              enthalten.
+              {t('publicShare.noTagColumns')}
             </p>
           ) : (
             <div className="overflow-x-auto">

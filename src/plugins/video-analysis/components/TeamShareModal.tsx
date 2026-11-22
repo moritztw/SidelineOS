@@ -27,10 +27,12 @@ import {
   generiereShareLinkPfad,
   istShareLinkGueltig,
 } from '../services/bundleSchema.ts';
+import { createVideoTranslator } from '../i18n.ts';
 
 interface TeamShareModalProps {
   reel: VideoReel;
   tagSchema: TagFeldKonfig[];
+  locale?: string;
   onSchliessen: () => void;
   onTeamFreigabenAendern: (reelId: string, freigaben: TeamFreigabeEintrag[]) => void;
   onShareLinksAendern: (reelId: string, links: ShareDownloadLink[]) => void;
@@ -50,10 +52,10 @@ function berechneAblaufIso(preset: AblaufPreset, eigenesDatum: string): string {
   return new Date(jetzt.getTime() + stunden * 3600 * 1000).toISOString();
 }
 
-function formatiereAblaufDatum(iso: string): string {
+function formatiereAblaufDatum(iso: string, locale?: string): string {
   const datum = new Date(iso);
   if (Number.isNaN(datum.getTime())) return iso;
-  return datum.toLocaleString('de-DE', {
+  return datum.toLocaleString(locale === 'en' ? 'en-US' : 'de-DE', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -65,12 +67,15 @@ function formatiereAblaufDatum(iso: string): string {
 function TaggingFeldAuswahl({
   felder,
   ausgewaehlt,
+  locale,
   onAendern,
 }: {
   felder: TagFeldKonfig[];
   ausgewaehlt: BreakdownFeldKey[];
+  locale?: string;
   onAendern: (felder: BreakdownFeldKey[]) => void;
 }) {
+  const t = createVideoTranslator(locale);
   const alleKeys = felder.map((f) => f.key);
   const basisKeys = BASIS_TAGGING_FELDER.filter((k) => alleKeys.includes(k));
 
@@ -85,7 +90,7 @@ function TaggingFeldAuswahl({
     <div className="space-y-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-[#8B949E]">
-          Freigegebene Tagging-Spalten ({ausgewaehlt.length}/{felder.length})
+          {t('shareModal.selectedFields', { selected: ausgewaehlt.length, total: felder.length })}
         </span>
         <div className="flex items-center gap-1.5 text-[11px]">
           <button
@@ -93,21 +98,21 @@ function TaggingFeldAuswahl({
             onClick={() => onAendern([])}
             className="rounded border border-[#232933] px-2 py-0.5 text-[#8B949E] hover:border-[#36404F] hover:text-white"
           >
-            Nur Video
+            {t('shareModal.presetVideoOnly')}
           </button>
           <button
             type="button"
             onClick={() => onAendern([...basisKeys])}
             className="rounded border border-[#232933] px-2 py-0.5 text-[#8B949E] hover:border-[#36404F] hover:text-white"
           >
-            Basis
+            {t('shareModal.presetBasic')}
           </button>
           <button
             type="button"
             onClick={() => onAendern([...alleKeys])}
             className="rounded border border-[#232933] px-2 py-0.5 text-[#8B949E] hover:border-[#36404F] hover:text-white"
           >
-            Alle Spalten
+            {t('shareModal.presetAll')}
           </button>
         </div>
       </div>
@@ -139,11 +144,13 @@ function TaggingFeldAuswahl({
 export function TeamShareModal({
   reel,
   tagSchema,
+  locale,
   onSchliessen,
   onTeamFreigabenAendern,
   onShareLinksAendern,
   onShareVorschau,
 }: TeamShareModalProps) {
+  const t = createVideoTranslator(locale);
   const aktiveFelder = tagSchema.filter((f) => f.aktiv);
   const [aktiverTab, setAktiverTab] = useState<ShareTab>('teams');
   const [aufgeklapptesTeam, setAufgeklapptesTeam] = useState<string | null>(
@@ -260,7 +267,7 @@ export function TeamShareModal({
             <div className="flex items-center gap-2">
               <Share2 className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
               <h2 id="team-share-title" className="text-base font-semibold text-white">
-                Austausch &amp; Download-Links
+                {t('shareModal.title')}
               </h2>
             </div>
             <p className="mt-0.5 truncate text-xs text-[#8B949E]">{reel.title}</p>
@@ -268,7 +275,7 @@ export function TeamShareModal({
           <button
             type="button"
             onClick={onSchliessen}
-            aria-label="Dialog schließen"
+            aria-label={t('shareModal.closeAria')}
             className="rounded p-1 text-[#8B949E] transition-colors hover:bg-[#1E2530] hover:text-white"
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -287,7 +294,7 @@ export function TeamShareModal({
             }`}
           >
             <Users className="h-3.5 w-3.5" aria-hidden="true" />
-            Instanz-Teams &amp; Pools ({reel.teamFreigaben.length})
+            {t('shareModal.tabTeams', { count: reel.teamFreigaben.length })}
           </button>
           <button
             type="button"
@@ -299,16 +306,14 @@ export function TeamShareModal({
             }`}
           >
             <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Download-Links /share/ ({reel.shareLinks.length})
+            {t('shareModal.tabLinks', { count: reel.shareLinks.length })}
           </button>
         </div>
 
         {/* Scrollbarer Inhalt */}
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
           <p className="text-xs leading-relaxed text-[#8B949E]">
-            Wähle pro Team oder Download-Link exakt aus, ob nur das Videomaterial oder zusätzlich
-            einzelne Tagging-Spalten übergeben werden. Coach-Notizen und Canvas-Zeichnungen bleiben
-            stets privat.
+            {t('shareModal.hint')}
           </p>
 
           {aktiverTab === 'teams' ? (
@@ -349,8 +354,10 @@ export function TeamShareModal({
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-[11px] text-[#8B949E]">
                             {freigabe.freigegebeneFelder.length === 0
-                              ? 'Nur Video'
-                              : `${freigabe.freigegebeneFelder.length} Tag-Spalten`}
+                              ? t('shareModal.onlyVideo')
+                              : t('shareModal.tagColumnsCount', {
+                                  count: freigabe.freigegebeneFelder.length,
+                                })}
                           </span>
                           <button
                             type="button"
@@ -359,7 +366,7 @@ export function TeamShareModal({
                             }
                             className="rounded border border-[#232933] px-2 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
                           >
-                            {offen ? 'Schließen' : 'Tagging wählen'}
+                            {offen ? t('shareModal.closePanel') : t('shareModal.selectTagging')}
                           </button>
                         </div>
                       )}
@@ -370,6 +377,7 @@ export function TeamShareModal({
                         <TaggingFeldAuswahl
                           felder={aktiveFelder}
                           ausgewaehlt={freigabe.freigegebeneFelder}
+                          locale={locale}
                           onAendern={(felder) => aktualisiereTeamFelder(teamName, felder)}
                         />
                       </div>
@@ -383,34 +391,34 @@ export function TeamShareModal({
               {/* Neuen /share/ Download-Link anlegen */}
               <div className="space-y-4 rounded-md border border-[#232933] bg-[#0B0E11] p-4">
                 <div className="text-xs font-semibold text-white">
-                  Neuen /share/-Download-Link erstellen
+                  {t('shareModal.newLinkTitle')}
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs text-[#8B949E]">
-                    <span>Bezeichnung</span>
+                    <span>{t('shareModal.linkLabel')}</span>
                     <input
                       type="text"
                       value={linkName}
                       onChange={(e) => setLinkName(e.target.value)}
-                      placeholder="z. B. Scouting-Tausch Nord"
+                      placeholder={t('shareModal.linkPlaceholder')}
                       className="w-full rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
                     />
                   </label>
 
                   <label className="space-y-1 text-xs text-[#8B949E]">
-                    <span>Link-Ablauf</span>
+                    <span>{t('shareModal.expiryLabel')}</span>
                     <div className="flex gap-2">
                       <select
                         value={ablaufPreset}
                         onChange={(e) => setAblaufPreset(e.target.value as AblaufPreset)}
                         className="flex-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                       >
-                        <option value="24h">Nach 24 Stunden</option>
-                        <option value="7d">Nach 7 Tagen</option>
-                        <option value="14d">Nach 14 Tagen</option>
-                        <option value="30d">Nach 30 Tagen</option>
-                        <option value="custom">Datum wählen</option>
+                        <option value="24h">{t('shareModal.expiry24h')}</option>
+                        <option value="7d">{t('shareModal.expiry7d')}</option>
+                        <option value="14d">{t('shareModal.expiry14d')}</option>
+                        <option value="30d">{t('shareModal.expiry30d')}</option>
+                        <option value="custom">{t('shareModal.expiryCustom')}</option>
                       </select>
                       {ablaufPreset === 'custom' && (
                         <input
@@ -427,6 +435,7 @@ export function TeamShareModal({
                 <TaggingFeldAuswahl
                   felder={aktiveFelder}
                   ausgewaehlt={linkFelder}
+                  locale={locale}
                   onAendern={setLinkFelder}
                 />
 
@@ -437,7 +446,7 @@ export function TeamShareModal({
                     className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-1.5 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24]"
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                    Download-Link generieren
+                    {t('shareModal.createLink')}
                   </button>
                 </div>
               </div>
@@ -445,11 +454,11 @@ export function TeamShareModal({
               {/* Bestehende Links */}
               <div className="space-y-2">
                 <h3 className="text-xs font-medium text-[#8B949E]">
-                  Aktive &amp; erstellte Download-Links
+                  {t('shareModal.existingLinks')}
                 </h3>
                 {reel.shareLinks.length === 0 ? (
                   <p className="rounded border border-[#232933] bg-[#0B0E11] px-4 py-6 text-center text-xs text-[#8B949E]">
-                    Noch keine externen /share/-Download-Links für dieses Reel angelegt.
+                    {t('shareModal.noLinks')}
                   </p>
                 ) : (
                   <ul className="space-y-2.5">
@@ -469,7 +478,7 @@ export function TeamShareModal({
                                     gueltig ? 'text-[#4ADE80]' : 'text-[#FCA5A5]'
                                   }`}
                                 >
-                                  {gueltig ? 'Aktiv' : 'Abgelaufen'}
+                                  {gueltig ? t('shareModal.statusActive') : t('shareModal.statusExpired')}
                                 </span>
                               </div>
                               <div className="truncate font-mono text-xs text-[#F59E0B]">
@@ -479,13 +488,17 @@ export function TeamShareModal({
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[#8B949E]">
                                 <span className="inline-flex items-center gap-1 font-mono tabular-nums">
                                   <Clock className="h-3 w-3" aria-hidden="true" />
-                                  Gültig bis {formatiereAblaufDatum(link.gueltigBis)}
+                                  {t('shareModal.validUntil', {
+                                    date: formatiereAblaufDatum(link.gueltigBis, locale),
+                                  })}
                                 </span>
                                 <span aria-hidden="true">·</span>
                                 <span>
                                   {link.freigegebeneFelder.length === 0
-                                    ? 'Nur Video (keine Tags)'
-                                    : `Tags: ${link.freigegebeneFelder.join(', ')}`}
+                                    ? t('shareModal.noTagsInfo')
+                                    : t('shareModal.tagsList', {
+                                        tags: link.freigegebeneFelder.join(', '),
+                                      })}
                                 </span>
                               </div>
                             </div>
@@ -498,11 +511,11 @@ export function TeamShareModal({
                                     onSchliessen();
                                     onShareVorschau(link.token);
                                   }}
-                                  title="Öffentliche /share/-Ansicht testen"
+                                  title={t('shareModal.openShareTitle')}
                                   className="inline-flex items-center gap-1 rounded border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2.5 py-1 text-[11px] font-medium text-[#F59E0B] hover:bg-[#F59E0B]/20"
                                 >
                                   <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                                  Öffnen
+                                  {t('shareModal.openBtn')}
                                 </button>
                               )}
                               <button
@@ -511,7 +524,9 @@ export function TeamShareModal({
                                 className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
                               >
                                 <Copy className="h-3 w-3" aria-hidden="true" />
-                                {kopiertLinkId === link.id ? 'Kopiert' : 'Kopieren'}
+                                {kopiertLinkId === link.id
+                                  ? t('shareModal.copied')
+                                  : t('shareModal.copy')}
                               </button>
                               <button
                                 type="button"
@@ -522,7 +537,7 @@ export function TeamShareModal({
                                     'json'
                                   )
                                 }
-                                title="Gefiltertes JSON-Paket testen"
+                                title={t('shareModal.testJson')}
                                 className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-[11px] text-[#8B949E] hover:border-[#36404F] hover:text-white"
                               >
                                 <Download className="h-3 w-3" aria-hidden="true" />
@@ -538,7 +553,7 @@ export function TeamShareModal({
                                       'csv'
                                     )
                                   }
-                                  title="Gefiltertes CSV-Paket testen"
+                                  title={t('shareModal.testCsv')}
                                   className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-[11px] text-[#8B949E] hover:border-[#36404F] hover:text-white"
                                 >
                                   <Download className="h-3 w-3" aria-hidden="true" />
@@ -548,7 +563,7 @@ export function TeamShareModal({
                               <button
                                 type="button"
                                 onClick={() => handleLinkWiderrufen(link.id)}
-                                aria-label={`Link ${link.bezeichnung} widerrufen`}
+                                aria-label={t('shareModal.revokeAria', { name: link.bezeichnung })}
                                 className="rounded border border-[#DC2626]/30 bg-[#DC2626]/10 p-1 text-[#FCA5A5] hover:bg-[#DC2626]/20"
                               >
                                 <Trash2 className="h-3 w-3" aria-hidden="true" />
@@ -572,7 +587,7 @@ export function TeamShareModal({
             onClick={onSchliessen}
             className="rounded-md bg-[#F59E0B] px-4 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24]"
           >
-            Fertig
+            {t('shareModal.done')}
           </button>
         </div>
       </div>

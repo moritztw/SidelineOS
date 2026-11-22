@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { useI18n } from '../i18n/I18nContext.tsx';
 
 export interface SettingsKategorie {
   id: string;
@@ -31,6 +32,7 @@ export function SettingsShell({
   onZurueck,
   children,
 }: SettingsShellProps) {
+  const { t } = useI18n();
   const [aktiveId, setAktiveId] = useState<string>(kategorien[0]?.id ?? '');
 
   useEffect(() => {
@@ -90,7 +92,7 @@ export function SettingsShell({
                 className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#8B949E] transition-colors hover:text-[#F59E0B]"
               >
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-                {zurueckLabel ?? 'Alle Einstellungen'}
+                {zurueckLabel ?? t('settingsShell.allSettings')}
               </button>
             )}
             <h1 className="text-lg font-semibold text-white">{titel}</h1>
@@ -102,7 +104,7 @@ export function SettingsShell({
 
       {/* Mobile Kategorie-Schnellnavigation */}
       <nav
-        aria-label="Einstellungs-Kategorien"
+        aria-label={t('settingsShell.mobileNavAria')}
         className="flex items-center gap-2 overflow-x-auto pb-1 lg:hidden"
       >
         {kategorien.map((kat) => {
@@ -130,7 +132,7 @@ export function SettingsShell({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
         {/* Offenes, dauerhaft sichtbares sticky Seitenmenü */}
         <aside
-          aria-label="Kategorien-Navigation"
+          aria-label={t('settingsShell.sideNavAria')}
           className="hidden lg:sticky lg:top-20 lg:block rounded-lg border border-[#232933] bg-[#13171D] p-3"
         >
           <div className="space-y-4">

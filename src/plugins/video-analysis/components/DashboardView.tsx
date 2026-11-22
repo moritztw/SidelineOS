@@ -20,7 +20,11 @@ import type {
   TeamFreigabeEintrag,
   VideoReel,
 } from '../types.ts';
-import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../types.ts';
+import {
+  createVideoTranslator,
+  holeVideoFreigabeLabel,
+  holeVideoKategorieLabel,
+} from '../i18n.ts';
 import { istShareLinkGueltig, reelZuBundle } from '../services/bundleSchema.ts';
 import { TeamShareModal } from './TeamShareModal.tsx';
 import { UploadPanel } from './UploadPanel.tsx';
@@ -30,6 +34,7 @@ interface DashboardViewProps {
   gewaehlteSaison: string;
   teamAktiveSaison: string;
   teamRolle: TeamRolle;
+  locale?: string;
   tagSchema: TagFeldKonfig[];
   reels: VideoReel[];
   uploadHervorgehoben: boolean;
@@ -41,12 +46,12 @@ interface DashboardViewProps {
   onShareVorschau?: (token: string) => void;
 }
 
-const KATEGORIE_TABS: Array<{ id: 'ALL' | ReelKategorie; label: string }> = [
-  { id: 'ALL', label: 'Alle' },
-  { id: 'GAME', label: 'Spiel' },
-  { id: 'PRACTICE', label: 'Training' },
-  { id: 'SCOUTING', label: 'Scouting' },
-  { id: 'SELF_SCOUT', label: 'Self-Scout' },
+const KATEGORIE_IDS: Array<'ALL' | ReelKategorie> = [
+  'ALL',
+  'GAME',
+  'PRACTICE',
+  'SCOUTING',
+  'SELF_SCOUT',
 ];
 
 const FREIGABE_OPTIONEN: SpielerFreigabe[] = [
@@ -57,20 +62,33 @@ const FREIGABE_OPTIONEN: SpielerFreigabe[] = [
   'UNIT_SPECIAL_TEAMS',
 ];
 
-function formatiereDatum(isoDatum: string): string {
+function formatiereDatum(isoDatum: string, locale?: string): string {
   const teile = isoDatum.split('-');
   if (teile.length !== 3) return isoDatum;
+  if (locale === 'en') {
+    return isoDatum;
+  }
   return `${teile[2]}.${teile[1]}.${teile[0]}`;
 }
 
-function ReelThumbnail({ src, titel }: { src: string; titel: string }) {
+function ReelThumbnail({
+  src,
+  titel,
+  vorschauLabel,
+  altText,
+}: {
+  src: string;
+  titel: string;
+  vorschauLabel: string;
+  altText: string;
+}) {
   const [bildFehler, setBildFehler] = useState(false);
 
   if (bildFehler) {
     return (
       <div className="flex aspect-video w-36 shrink-0 flex-col items-center justify-center rounded border border-[#232933] bg-[#0B0E11] text-[#8B949E]">
         <Film className="h-5 w-5" aria-hidden="true" />
-        <span className="mt-1 text-[10px]">Vorschau</span>
+        <span className="mt-1 text-[10px]">{vorschauLabel}</span>
       </div>
     );
   }
@@ -79,7 +97,7 @@ function ReelThumbnail({ src, titel }: { src: string; titel: string }) {
     <div className="relative aspect-video w-36 shrink-0 overflow-hidden rounded border border-[#232933] bg-[#0B0E11]">
       <img
         src={src}
-        alt={`Vorschaubild für ${titel}`}
+        alt={altText || titel}
         referrerPolicy="no-referrer"
         onError={() => setBildFehler(true)}
         className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
@@ -93,6 +111,7 @@ export function DashboardView({
   gewaehlteSaison,
   teamAktiveSaison,
   teamRolle,
+  locale,
   tagSchema,
   reels,
   uploadHervorgehoben,
@@ -103,6 +122,7 @@ export function DashboardView({
   onReelOeffnen,
   onShareVorschau,
 }: DashboardViewProps) {
+  const t = createVideoTranslator(locale);
   const istCoach = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const istArchivSaison = gewaehlteSaison !== 'ALL' && gewaehlteSaison !== teamAktiveSaison;
   const [aktiveKategorie, setAktiveKategorie] = useState<'ALL' | ReelKategorie>('ALL');
@@ -144,23 +164,23 @@ export function DashboardView({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div
           role="tablist"
-          aria-label="Kategorien filtern"
+          aria-label={t('dashboard.filterAria')}
           className="flex items-center gap-1 rounded-md border border-[#232933] bg-[#13171D] p-1"
         >
-          {KATEGORIE_TABS.map((tab) => {
-            const aktiv = aktiveKategorie === tab.id;
+          {KATEGORIE_IDS.map((katId) => {
+            const aktiv = aktiveKategorie === katId;
             return (
               <button
-                key={tab.id}
+                key={katId}
                 role="tab"
                 type="button"
                 aria-selected={aktiv}
-                onClick={() => setAktiveKategorie(tab.id)}
+                onClick={() => setAktiveKategorie(katId)}
                 className={`rounded px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap ${
                   aktiv ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
                 }`}
               >
-                {tab.label}
+                {t(`category.${katId}`)}
               </button>
             );
           })}
@@ -175,8 +195,8 @@ export function DashboardView({
             type="search"
             value={suchbegriff}
             onChange={(e) => setSuchbegriff(e.target.value)}
-            placeholder="Spiel, Gegner oder Datum suchen..."
-            aria-label="Videobibliothek durchsuchen"
+            placeholder={t('dashboard.searchPlaceholder')}
+            aria-label={t('dashboard.searchAria')}
             className="w-full rounded-md border border-[#232933] bg-[#13171D] py-2 pl-8 pr-3 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
           />
         </div>
@@ -187,41 +207,34 @@ export function DashboardView({
           istCoach ? 'lg:grid-cols-[minmax(0,1fr)_340px]' : ''
         }`}
       >
-        <section aria-label="Videobibliothek" className="min-w-0 space-y-3">
+        <section aria-label={t('dashboard.libraryAria')} className="min-w-0 space-y-3">
           {istArchivSaison && (
             <div className="flex items-center justify-between rounded-md border border-[#F59E0B]/35 bg-[#F59E0B]/10 px-4 py-2.5 text-xs text-[#FDE68A]">
               <span>
-                Archiv-Saison <strong className="font-mono text-white">{gewaehlteSaison}</strong>:
-                Alle Tapes, Breakdowns und Zeichnungen dieser Spielzeit bleiben vollständig
-                abrufbar.
+                {t('dashboard.archiveNoticePrefix')}{' '}
+                <strong className="font-mono text-white">{gewaehlteSaison}</strong>
+                {t('dashboard.archiveNoticeSuffix')}
               </span>
               <span className="font-mono text-white tabular-nums">
-                {gefilterteReels.length} Tapes
+                {t('dashboard.tapesCount', { count: gefilterteReels.length })}
               </span>
             </div>
           )}
 
           {teamRolle === 'PLAYER' && (
             <div className="flex items-center justify-between rounded-md border border-[#232933] bg-[#13171D] px-4 py-2.5 text-xs text-[#8B949E]">
-              <span>
-                Spieler-Ansicht aktiv: Du siehst ausschließlich Reels, die vom Coaching Staff
-                freigegeben wurden.
-              </span>
+              <span>{t('dashboard.playerNotice')}</span>
               <span className="font-mono text-[#E6EDF3] tabular-nums">
-                {gefilterteReels.length} freigegeben
+                {t('dashboard.releasedCount', { count: gefilterteReels.length })}
               </span>
             </div>
           )}
 
           {gefilterteReels.length === 0 ? (
             <div className="rounded-lg border border-[#232933] bg-[#13171D] px-6 py-14 text-center">
-              <p className="text-sm font-medium text-[#E6EDF3]">
-                Keine Videos für diese Auswahl gefunden.
-              </p>
+              <p className="text-sm font-medium text-[#E6EDF3]">{t('dashboard.emptyTitle')}</p>
               <p className="mt-1 text-xs text-[#8B949E]">
-                {istCoach
-                  ? 'Lade rechts Einzelclips, ein Raw-Tape oder ein sideline-bundle.json hoch.'
-                  : 'Aktuell sind in dieser Kategorie keine Tapes für Spieler freigegeben.'}
+                {istCoach ? t('dashboard.emptyCoach') : t('dashboard.emptyPlayer')}
               </p>
             </div>
           ) : (
@@ -242,9 +255,14 @@ export function DashboardView({
                         type="button"
                         onClick={() => onReelOeffnen(reel)}
                         className="shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
-                        aria-label={`${reel.title} im Film Room öffnen`}
+                        aria-label={t('dashboard.openInFilmRoomAria', { title: reel.title })}
                       >
-                        <ReelThumbnail src={reel.thumbnailUrl} titel={reel.title} />
+                        <ReelThumbnail
+                          src={reel.thumbnailUrl}
+                          titel={reel.title}
+                          vorschauLabel={t('dashboard.preview')}
+                          altText={t('dashboard.previewAlt', { title: reel.title })}
+                        />
                       </button>
 
                       <div className="min-w-0 flex-1 space-y-1.5">
@@ -257,29 +275,29 @@ export function DashboardView({
                         </button>
 
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-[#8B949E]">
-                          <span>{KATEGORIE_LABELS[reel.category]}</span>
+                          <span>{holeVideoKategorieLabel(reel.category, locale)}</span>
                           <span aria-hidden="true">·</span>
                           <span className="font-mono tabular-nums">
-                            {formatiereDatum(reel.eventDate)}
+                            {formatiereDatum(reel.eventDate, locale)}
                           </span>
                           <span aria-hidden="true">·</span>
                           <span>{reel.angles.join(' + ')}</span>
                           <span aria-hidden="true">·</span>
                           <span>
                             {reel.sourceMode === 'TIME_SLICE'
-                              ? 'Einzeldatei (Time-Slice)'
-                              : 'Einzelclips'}
+                              ? t('dashboard.modeTimeSlice')
+                              : t('dashboard.modeClips')}
                           </span>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pt-0.5 text-xs">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-[#E6EDF3] tabular-nums">
-                              {reel.playCount} Plays
+                              {t('dashboard.playsCount', { count: reel.playCount })}
                             </span>
                             <div
                               className="h-1.5 w-24 overflow-hidden rounded-full bg-[#232933]"
-                              aria-label={`${prozent} Prozent getaggt`}
+                              aria-label={t('dashboard.taggedAria', { percent: prozent })}
                             >
                               <div
                                 className="h-full bg-[#F59E0B]"
@@ -287,18 +305,21 @@ export function DashboardView({
                               />
                             </div>
                             <span className="font-mono text-[#8B949E] tabular-nums">
-                              {prozent}% getaggt
+                              {t('dashboard.taggedPercent', { percent: prozent })}
                             </span>
                           </div>
 
                           {reel.teamFreigaben.length > 0 && (
                             <span className="text-[#8B949E]">
-                              Geteilt:{' '}
+                              {t('dashboard.sharedWith')}{' '}
                               {reel.teamFreigaben
-                                .map((t) =>
-                                  t.freigegebeneFelder.length > 0
-                                    ? `${t.teamName} (${t.freigegebeneFelder.length} Tags)`
-                                    : `${t.teamName} (Video)`
+                                .map((tEntry) =>
+                                  tEntry.freigegebeneFelder.length > 0
+                                    ? t('dashboard.sharedTagsCount', {
+                                        team: tEntry.teamName,
+                                        count: tEntry.freigegebeneFelder.length,
+                                      })
+                                    : t('dashboard.sharedVideoOnly', { team: tEntry.teamName })
                                 )
                                 .join(', ')}
                             </span>
@@ -313,7 +334,7 @@ export function DashboardView({
 
                           {reel.receivedFromTeam && (
                             <span className="text-[#8B949E]">
-                              Erhalten von: {reel.receivedFromTeam}
+                              {t('dashboard.receivedFrom', { team: reel.receivedFromTeam })}
                             </span>
                           )}
                         </div>
@@ -328,7 +349,9 @@ export function DashboardView({
                           ) : (
                             <Users className="h-3.5 w-3.5 text-[#4ADE80]" aria-hidden="true" />
                           )}
-                          <span className="sr-only">Spieler-Freigabe für {reel.title}</span>
+                          <span className="sr-only">
+                            {t('dashboard.visibilityAria', { title: reel.title })}
+                          </span>
                           <select
                             value={reel.visibility}
                             onChange={(e) =>
@@ -346,7 +369,9 @@ export function DashboardView({
                                 value={option}
                                 className="bg-[#13171D] text-[#E6EDF3]"
                               >
-                                Freigabe: {FREIGABE_LABELS[option]}
+                                {t('dashboard.visibilityOption', {
+                                  label: holeVideoFreigabeLabel(option, locale),
+                                })}
                               </option>
                             ))}
                           </select>
@@ -354,7 +379,9 @@ export function DashboardView({
                       ) : (
                         <span className="inline-flex items-center gap-1.5 text-xs text-[#86EFAC]">
                           <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-                          Freigegeben: {FREIGABE_LABELS[reel.visibility]}
+                          {t('dashboard.visibilityPlayerBadge', {
+                            label: holeVideoFreigabeLabel(reel.visibility, locale),
+                          })}
                         </span>
                       )}
 
@@ -364,16 +391,16 @@ export function DashboardView({
                             <button
                               type="button"
                               onClick={() => setTeilenReelId(reel.id)}
-                              title="Teams & /share/-Download-Links verwalten"
+                              title={t('dashboard.shareBtnTitle')}
                               className="inline-flex items-center gap-1 rounded-md border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs font-medium text-[#E6EDF3] transition-colors hover:border-[#36404F] hover:text-white whitespace-nowrap"
                             >
                               <Share2 className="h-3.5 w-3.5 text-[#8B949E]" aria-hidden="true" />
-                              Teilen
+                              {t('dashboard.shareBtn')}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleJsonExport(reel)}
-                              title="Als sideline-bundle.json exportieren"
+                              title={t('dashboard.jsonBtnTitle')}
                               className="inline-flex items-center gap-1 rounded-md border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs font-medium text-[#E6EDF3] transition-colors hover:border-[#36404F] hover:text-white whitespace-nowrap"
                             >
                               <Download
@@ -391,7 +418,7 @@ export function DashboardView({
                           className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:border-[#F59E0B] whitespace-nowrap"
                         >
                           <Play className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
-                          Öffnen
+                          {t('dashboard.openBtn')}
                         </button>
                       </div>
                     </div>
@@ -406,6 +433,7 @@ export function DashboardView({
           <UploadPanel
             teamId={teamId}
             saison={gewaehlteSaison === 'ALL' ? teamAktiveSaison : gewaehlteSaison}
+            locale={locale}
             hervorgehoben={uploadHervorgehoben}
             onNeuesReelHinzufuegen={onNeuesReel}
           />
@@ -415,6 +443,7 @@ export function DashboardView({
       {teilenReel && (
         <TeamShareModal
           reel={teilenReel}
+          locale={locale}
           tagSchema={tagSchema}
           onSchliessen={() => setTeilenReelId(null)}
           onTeamFreigabenAendern={onTeamFreigabenAendern}

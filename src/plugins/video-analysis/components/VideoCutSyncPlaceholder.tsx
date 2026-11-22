@@ -1,40 +1,34 @@
 import { ArrowLeft, Layers, ListFilter } from 'lucide-react';
 import type { VideoReel } from '../types.ts';
-import { FREIGABE_LABELS, KATEGORIE_LABELS } from '../types.ts';
+import {
+  createVideoTranslator,
+  holeVideoFreigabeLabel,
+  holeVideoKategorieLabel,
+} from '../i18n.ts';
 
 type PlatzhalterAnsicht = 'cut-sync' | 'playlists';
 
 interface VideoCutSyncPlaceholderProps {
   ansicht: PlatzhalterAnsicht;
+  locale?: string;
   ausgewaehltesReel: VideoReel | null;
   onZurueckZumDashboard: () => void;
 }
 
-const ANSICHT_META: Record<
-  PlatzhalterAnsicht,
-  { titel: string; paket: string; beschreibung: string }
-> = {
-  'cut-sync': {
-    titel: 'Cut & Multi-Angle Sync Editor',
-    paket: 'Paket 3',
-    beschreibung:
-      'Dual-Viewport für Einzelclip-Sync (inkl. optionalem Offset, Snap-Sync, Lücken & Fehl-Clip-Löschung) sowie Fast-Cut-Editor für Einzeldatei-Tapes (I / O Auto-Out / J-K-L).',
-  },
-  playlists: {
-    titel: 'Smart Playlists & Filter-Grid',
-    paket: 'Paket 3',
-    beschreibung:
-      'Dynamische Cutups über beliebige Breakdown-Spalten (z. B. alle 3rd Downs in der Redzone) sowie typsichere Suchanfragen.',
-  },
-};
-
 export function VideoCutSyncPlaceholder({
   ansicht,
+  locale,
   ausgewaehltesReel,
   onZurueckZumDashboard,
 }: VideoCutSyncPlaceholderProps) {
-  const meta = ANSICHT_META[ansicht];
-  const Icon = ansicht === 'cut-sync' ? Layers : ListFilter;
+  const t = createVideoTranslator(locale);
+  const istCutSync = ansicht === 'cut-sync';
+  const titel = istCutSync ? t('placeholder.cutSyncTitle') : t('placeholder.playlistsTitle');
+  const paket = istCutSync ? t('placeholder.cutSyncPkg') : t('placeholder.playlistsPkg');
+  const beschreibung = istCutSync
+    ? t('placeholder.cutSyncDesc')
+    : t('placeholder.playlistsDesc');
+  const Icon = istCutSync ? Layers : ListFilter;
 
   return (
     <div className="space-y-6">
@@ -45,7 +39,7 @@ export function VideoCutSyncPlaceholder({
           className="inline-flex items-center gap-2 text-sm text-[#8B949E] transition-colors hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Zurück zur Videobibliothek
+          {t('placeholder.backToLibrary')}
         </button>
       </div>
 
@@ -55,37 +49,45 @@ export function VideoCutSyncPlaceholder({
             <Icon className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="space-y-2">
-            <p className="font-mono text-xs text-[#F59E0B]">Geplant in {meta.paket}</p>
-            <h1 className="text-xl font-semibold text-white">{meta.titel}</h1>
-            <p className="max-w-2xl text-sm leading-relaxed text-[#8B949E]">{meta.beschreibung}</p>
+            <p className="font-mono text-xs text-[#F59E0B]">
+              {t('placeholder.plannedIn', { pkg: paket })}
+            </p>
+            <h1 className="text-xl font-semibold text-white">{titel}</h1>
+            <p className="max-w-2xl text-sm leading-relaxed text-[#8B949E]">{beschreibung}</p>
           </div>
         </div>
 
-        {ausgewaehltesReel && ansicht === 'cut-sync' && (
+        {ausgewaehltesReel && istCutSync && (
           <div className="mt-6 border-t border-[#232933] pt-6">
-            <h2 className="text-xs font-medium text-[#8B949E]">
-              Aktuell gewähltes Reel für diese Ansicht
-            </h2>
+            <h2 className="text-xs font-medium text-[#8B949E]">{t('placeholder.selectedReel')}</h2>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-4 rounded-md border border-[#232933] bg-[#0B0E11] p-4">
               <div>
                 <div className="text-sm font-semibold text-white">{ausgewaehltesReel.title}</div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#8B949E]">
-                  <span>{KATEGORIE_LABELS[ausgewaehltesReel.category]}</span>
+                  <span>{holeVideoKategorieLabel(ausgewaehltesReel.category, locale)}</span>
                   <span aria-hidden="true">·</span>
                   <span className="font-mono tabular-nums">{ausgewaehltesReel.eventDate}</span>
                   <span aria-hidden="true">·</span>
-                  <span className="font-mono tabular-nums">{ausgewaehltesReel.playCount} Plays</span>
+                  <span className="font-mono tabular-nums">
+                    {t('dashboard.playsCount', { count: ausgewaehltesReel.playCount })}
+                  </span>
                   <span aria-hidden="true">·</span>
-                  <span>Winkel: {ausgewaehltesReel.angles.join(' + ')}</span>
+                  <span>
+                    {t('placeholder.angles', { angles: ausgewaehltesReel.angles.join(' + ') })}
+                  </span>
                   <span aria-hidden="true">·</span>
-                  <span>Freigabe: {FREIGABE_LABELS[ausgewaehltesReel.visibility]}</span>
+                  <span>
+                    {t('placeholder.visibility', {
+                      visibility: holeVideoFreigabeLabel(ausgewaehltesReel.visibility, locale),
+                    })}
+                  </span>
                 </div>
               </div>
               <span className="font-mono text-xs text-[#8B949E]">
-                Modus:{' '}
+                {t('placeholder.modePrefix')}{' '}
                 {ausgewaehltesReel.sourceMode === 'TIME_SLICE'
-                  ? 'Einzeldatei (Time-Slice)'
-                  : 'Einzelclips'}
+                  ? t('dashboard.modeTimeSlice')
+                  : t('dashboard.modeClips')}
               </span>
             </div>
 
@@ -95,10 +97,10 @@ export function VideoCutSyncPlaceholder({
                   <thead>
                     <tr className="border-b border-[#232933] text-[#8B949E]">
                       <th className="py-2 font-medium">#</th>
-                      <th className="py-2 font-medium">Quellen (Winkel)</th>
-                      <th className="py-2 font-medium">Offset (Optional)</th>
-                      <th className="py-2 font-medium">ODK / Situation</th>
-                      <th className="py-2 font-medium">Play Type</th>
+                      <th className="py-2 font-medium">{t('placeholder.colSources')}</th>
+                      <th className="py-2 font-medium">{t('placeholder.colOffset')}</th>
+                      <th className="py-2 font-medium">{t('placeholder.colSituation')}</th>
+                      <th className="py-2 font-medium">{t('placeholder.colPlayType')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#232933]">
@@ -115,11 +117,13 @@ export function VideoCutSyncPlaceholder({
                           </td>
                           <td className="py-2.5 font-mono text-[#E6EDF3]">
                             {winkelEintraege
-                              .map(([w, q]) => (q ? `${w} (${q.file})` : `${w} (Fehlt)`))
+                              .map(([w, q]) =>
+                                q ? `${w} (${q.file})` : `${w} (${t('placeholder.missingAngle')})`
+                              )
                               .join(' · ')}
                           </td>
                           <td className="py-2.5 font-mono text-[#8B949E] tabular-nums">
-                            {offsets.length > 0 ? offsets.join(', ') : 'Kein Offset (Standard)'}
+                            {offsets.length > 0 ? offsets.join(', ') : t('placeholder.noOffset')}
                           </td>
                           <td className="py-2.5 font-mono text-[#E6EDF3] tabular-nums">
                             {play.breakdown?.odk ?? '–'} · {play.breakdown?.down ?? '–'} &amp;{' '}

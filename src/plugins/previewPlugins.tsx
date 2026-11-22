@@ -1,5 +1,32 @@
 import { ArrowLeft, BookOpen, ClipboardCheck, Puzzle } from 'lucide-react';
-import type { PluginManifest, SidelinePlugin } from '../sdk/plugin.ts';
+import {
+  createPluginTranslator,
+  type PluginManifest,
+  type SidelinePlugin,
+  type SprachWoerterbuecher,
+} from '../sdk/plugin.ts';
+import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
+
+const PREVIEW_WOERTERBUECHER: SprachWoerterbuecher = {
+  de: {
+    tabOverview: 'Modul-Übersicht',
+    toHome: 'Zur Startseite',
+    backHome: 'Zurück zur {brand}-Startseite',
+    badge: 'Externes {brand}-Plugin · v{version} · SDK {sdkVersion}',
+    repository: 'Repository',
+    dbPrefix: 'Isoliertes DB-Präfix',
+    permissions: 'Berechtigungen',
+  },
+  en: {
+    tabOverview: 'Module Overview',
+    toHome: 'Go to Home',
+    backHome: 'Back to {brand} home',
+    badge: 'External {brand} Plugin · v{version} · SDK {sdkVersion}',
+    repository: 'Repository',
+    dbPrefix: 'Isolated DB Prefix',
+    permissions: 'Permissions',
+  },
+};
 
 /**
  * Erstellt ein typsicheres Vorschau-Plugin aus einem deklarativen PluginManifest.
@@ -17,59 +44,74 @@ export function erstelleVorschauPluginAusManifest(manifest: PluginManifest): Sid
   return {
     manifest,
     defaultTab: 'uebersicht',
-    getTabs: () => [{ id: 'uebersicht', label: 'Modul-Übersicht' }],
-    PrimaerAktion: ({ ctx, className }) => (
-      <button type="button" onClick={ctx.onZurueckZurStartseite} className={className}>
-        Zur Startseite
-      </button>
-    ),
-    renderMainView: (ctx) => (
-      <div className="space-y-6">
-        <button
-          type="button"
-          onClick={ctx.onZurueckZurStartseite}
-          className="inline-flex items-center gap-2 text-sm text-[#8B949E] transition-colors hover:text-white"
-        >
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Zurück zur SidelineOS-Startseite
+    getTabs: ({ locale }) => {
+      const t = createPluginTranslator(PREVIEW_WOERTERBUECHER, locale);
+      return [{ id: 'uebersicht', label: t('tabOverview') }];
+    },
+    PrimaerAktion: ({ ctx, className }) => {
+      const t = createPluginTranslator(PREVIEW_WOERTERBUECHER, ctx.locale);
+      return (
+        <button type="button" onClick={ctx.onZurueckZurStartseite} className={className}>
+          {t('toHome')}
         </button>
+      );
+    },
+    renderMainView: (ctx) => {
+      const brand = holeAktuelleBrandKonfig();
+      const t = createPluginTranslator(PREVIEW_WOERTERBUECHER, ctx.locale);
 
-        <section className="rounded-lg border border-[#232933] bg-[#13171D] p-8 space-y-4">
-          <div className="flex items-start gap-4">
-            <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-3 text-[#F59E0B]">
-              <Icon className="h-5 w-5" aria-hidden="true" />
-            </div>
-            <div className="space-y-2">
-              <div className="font-mono text-xs text-[#F59E0B]">
-                Externes SidelineOS-Plugin · v{manifest.version} · SDK {manifest.sdkVersion}
-              </div>
-              <h1 className="text-xl font-semibold text-white">{manifest.name}</h1>
-              <p className="max-w-2xl text-sm leading-relaxed text-[#8B949E]">
-                {manifest.kurzbeschreibung}
-              </p>
-            </div>
-          </div>
+      return (
+        <div className="space-y-6">
+          <button
+            type="button"
+            onClick={ctx.onZurueckZurStartseite}
+            className="inline-flex items-center gap-2 text-sm text-[#8B949E] transition-colors hover:text-white"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            {t('backHome', { brand: brand.produktName })}
+          </button>
 
-          <div className="grid grid-cols-1 gap-3 border-t border-[#232933] pt-4 text-xs sm:grid-cols-3">
-            <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
-              <div className="text-[#8B949E]">Repository</div>
-              <div className="mt-1 truncate font-mono text-[#E6EDF3]">
-                {manifest.repositoryUrl}
+          <section className="space-y-4 rounded-lg border border-[#232933] bg-[#13171D] p-8">
+            <div className="flex items-start gap-4">
+              <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-3 text-[#F59E0B]">
+                <Icon className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div className="space-y-2">
+                <div className="font-mono text-xs text-[#F59E0B]">
+                  {t('badge', {
+                    brand: brand.produktName,
+                    version: manifest.version,
+                    sdkVersion: manifest.sdkVersion,
+                  })}
+                </div>
+                <h1 className="text-xl font-semibold text-white">{manifest.name}</h1>
+                <p className="max-w-2xl text-sm leading-relaxed text-[#8B949E]">
+                  {manifest.kurzbeschreibung}
+                </p>
               </div>
             </div>
-            <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
-              <div className="text-[#8B949E]">Isoliertes DB-Präfix</div>
-              <div className="mt-1 font-mono text-[#E6EDF3]">{manifest.dbPrefix}*</div>
-            </div>
-            <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
-              <div className="text-[#8B949E]">Berechtigungen</div>
-              <div className="mt-1 font-mono text-[#E6EDF3]">
-                {manifest.permissions.join(', ')}
+
+            <div className="grid grid-cols-1 gap-3 border-t border-[#232933] pt-4 text-xs sm:grid-cols-3">
+              <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
+                <div className="text-[#8B949E]">{t('repository')}</div>
+                <div className="mt-1 truncate font-mono text-[#E6EDF3]">
+                  {manifest.repositoryUrl}
+                </div>
+              </div>
+              <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
+                <div className="text-[#8B949E]">{t('dbPrefix')}</div>
+                <div className="mt-1 font-mono text-[#E6EDF3]">{manifest.dbPrefix}*</div>
+              </div>
+              <div className="rounded border border-[#232933] bg-[#0B0E11] p-3">
+                <div className="text-[#8B949E]">{t('permissions')}</div>
+                <div className="mt-1 font-mono text-[#E6EDF3]">
+                  {manifest.permissions.join(', ')}
+                </div>
               </div>
             </div>
-          </div>
-        </section>
-      </div>
-    ),
+          </section>
+        </div>
+      );
+    },
   };
 }

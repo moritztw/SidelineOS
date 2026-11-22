@@ -18,6 +18,7 @@ interface TelestrationCanvasProps {
     zeichnung: Omit<CanvasZeichnung, 'id' | 'angle' | 'timestamp_ms' | 'status'>
   ) => void;
   onZeichnungAktualisieren: (id: string, punkte: NormPunkt[]) => void;
+  textPlaceholder?: string;
 }
 
 const VB_BREITE = 1000;
@@ -56,6 +57,7 @@ export function TelestrationCanvas({
   onAuswaehlen,
   onZeichnungHinzufuegen,
   onZeichnungAktualisieren,
+  textPlaceholder = 'Text...',
 }: TelestrationCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [drag, setDrag] = useState<DragModus | null>(null);
@@ -483,7 +485,7 @@ export function TelestrationCanvas({
               if (e.key === 'Enter') handleTextBestaetigen();
               if (e.key === 'Escape') setTextPosition(null);
             }}
-            placeholder="Text-Marker..."
+            placeholder={textPlaceholder}
             className="w-40 bg-transparent px-1.5 py-0.5 text-xs text-white placeholder-[#6E7681] focus:outline-none"
           />
           <button

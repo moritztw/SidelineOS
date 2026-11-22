@@ -1,3 +1,5 @@
+import type { UnterstuetzteSprache } from './i18n.ts';
+
 export type TeamRolle = 'TEAM_ADMIN' | 'COACH' | 'PLAYER';
 
 export type SpielerUnit = 'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS';
@@ -52,6 +54,7 @@ export interface BenutzerKonto {
   position?: string;
   istSysadmin: boolean;
   erstelltAm: string;
+  preferredLocale?: UnterstuetzteSprache;
   customProfilWerte: Record<string, string>;
 }
 
@@ -122,11 +125,35 @@ export const TEAM_ROLLEN_LABELS: Record<TeamRolle, string> = {
   PLAYER: 'Spieler',
 };
 
+export const TEAM_ROLLEN_LABELS_I18N: Record<UnterstuetzteSprache, Record<TeamRolle, string>> = {
+  de: TEAM_ROLLEN_LABELS,
+  en: {
+    TEAM_ADMIN: 'Team Admin',
+    COACH: 'Coach',
+    PLAYER: 'Player',
+  },
+};
+
 export const SPIELER_UNIT_LABELS: Record<SpielerUnit, string> = {
   OFFENSE: 'Offense',
   DEFENSE: 'Defense',
   SPECIAL_TEAMS: 'Special Teams',
 };
+
+export const SPIELER_UNIT_LABELS_I18N: Record<UnterstuetzteSprache, Record<SpielerUnit, string>> = {
+  de: SPIELER_UNIT_LABELS,
+  en: SPIELER_UNIT_LABELS,
+};
+
+export function holeRollenLabel(rolle: TeamRolle, locale?: string): string {
+  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
+  return TEAM_ROLLEN_LABELS_I18N[code][rolle];
+}
+
+export function holeUnitLabel(unit: SpielerUnit, locale?: string): string {
+  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
+  return SPIELER_UNIT_LABELS_I18N[code][unit];
+}
 
 export const DEMO_PROFILE: BenutzerProfil[] = [
   {

@@ -7,6 +7,7 @@ import type {
 } from '../types.ts';
 import { exportiereBreakdownAlsCsv } from '../services/bundleSchema.ts';
 import { leseBreakdownWert } from '../services/taggingEngine.ts';
+import { createVideoTranslator } from '../i18n.ts';
 
 interface BreakdownGridProps {
   reelTitel: string;
@@ -14,6 +15,7 @@ interface BreakdownGridProps {
   aktiverPlayIndex: number;
   teamRolle: TeamRolle;
   tagSchema: TagFeldKonfig[];
+  locale?: string;
   onPlayWaehlen: (index: number) => void;
   onFeldAendern: (
     playNumber: number,
@@ -30,10 +32,12 @@ export function BreakdownGrid({
   aktiverPlayIndex,
   teamRolle,
   tagSchema,
+  locale,
   onPlayWaehlen,
   onFeldAendern,
   onDefinitionLernen,
 }: BreakdownGridProps) {
+  const t = createVideoTranslator(locale);
   const istBearbeitbar = teamRolle === 'COACH' || teamRolle === 'TEAM_ADMIN';
   const aktiveFelder = tagSchema.filter((f) => f.aktiv);
 
@@ -54,7 +58,7 @@ export function BreakdownGrid({
 
   return (
     <section
-      aria-label="Hudl-konforme Breakdown-Tabelle"
+      aria-label={t('grid.ariaLabel')}
       className="overflow-hidden rounded-lg border border-[#232933] bg-[#13171D]"
     >
       {/* Datalists für alle aktiven Wörterbuch-Felder */}
@@ -70,9 +74,9 @@ export function BreakdownGrid({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <h2 className="text-xs font-semibold text-white">Breakdown Data Grid</h2>
+          <h2 className="text-xs font-semibold text-white">{t('grid.title')}</h2>
           <span className="font-mono text-[11px] text-[#8B949E] tabular-nums">
-            {plays.length} Plays · {aktiveFelder.length} aktive Spalten · ↑/↓ Play · Leertaste Play/Pause · A Winkel
+            {t('grid.meta', { plays: plays.length, columns: aktiveFelder.length })}
           </span>
         </div>
 
@@ -82,13 +86,13 @@ export function BreakdownGrid({
           className="inline-flex items-center gap-1.5 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] font-medium text-[#E6EDF3] transition-colors hover:border-[#F59E0B] hover:text-white whitespace-nowrap"
         >
           <Download className="h-3 w-3 text-[#8B949E]" aria-hidden="true" />
-          Hudl CSV exportieren
+          {t('grid.exportCsv')}
         </button>
       </div>
 
       {plays.length === 0 ? (
         <div className="px-6 py-10 text-center text-xs text-[#8B949E]">
-          Dieses Reel enthält noch keine geschnittenen Plays.
+          {t('grid.empty')}
         </div>
       ) : (
         <div className="max-h-[320px] overflow-auto">
@@ -106,7 +110,7 @@ export function BreakdownGrid({
                     {feld.kurz}
                   </th>
                 ))}
-                <th className="px-3 py-2 text-right whitespace-nowrap">WINKEL</th>
+                <th className="px-3 py-2 text-right whitespace-nowrap">{t('grid.anglesCol')}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#232933]">

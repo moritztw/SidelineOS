@@ -38,6 +38,13 @@ const CORE_MIGRATIONS: Array<{ name: string; sql: string }> = [
       'utf8'
     ),
   },
+  {
+    name: '004_user_locale.sql',
+    sql: fs.readFileSync(
+      new URL('./db/migrations/004_user_locale.sql', import.meta.url),
+      'utf8'
+    ),
+  },
 ];
 
 async function fuehreCoreMigrationenAus(db: CoreDatabaseClient): Promise<void> {
@@ -100,6 +107,7 @@ export async function bootstrapCoreInstance(
         email: config.initialSysadmin.email,
         istSysadmin: true,
         erstelltAm: new Date().toISOString().slice(0, 10),
+        preferredLocale: config.defaultLocale,
         customProfilWerte: {},
       },
       hashPasswort(config.initialSysadmin.password)

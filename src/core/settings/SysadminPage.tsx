@@ -35,13 +35,14 @@ import type {
   TeamMitgliedschaft,
   TeamRolle,
 } from '../../shared/types.ts';
-import { TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
+import { holeRollenLabel } from '../../shared/types.ts';
 import {
-  PERMISSION_BESCHREIBUNGEN,
+  holePermissionBeschreibung,
   type PluginSettingsKontext,
   type PluginStoreEintrag,
   type SidelinePlugin,
 } from '../../sdk/plugin.ts';
+import { useI18n } from '../i18n/I18nContext.tsx';
 import { parseGitHubPluginQuelle } from '../pluginRegistry.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
@@ -168,6 +169,7 @@ export function SysadminPage({
   onSmtpTesten,
   onZurueck,
 }: SysadminPageProps) {
+  const { locale, brand, t } = useI18n();
   // Plugin Store & Installer-Modi
   const [installModus, setInstallModus] = useState<'release' | 'upload' | 'dev-git'>('release');
   const [githubUrl, setGithubUrl] = useState('');
@@ -456,15 +458,16 @@ export function SysadminPage({
           benutzer: benutzerListe[0],
           aktiveTeamAnsicht: null,
           s3Konfig,
+          locale,
         }
       : null;
 
   return (
     <SettingsShell
-      titel="Sysadmin · Instanz-Administration"
-      untertitel="SidelineOS verwaltet im Kern Auth, Mandanten, S3/SMTP und den Plugin Store. Alle Fachmodule laufen isoliert als installierbare GitHub-Plugins."
+      titel={t('sysadmin.title')}
+      untertitel={t('sysadmin.subtitle')}
       kategorien={kategorien}
-      zurueckLabel="Alle Einstellungen"
+      zurueckLabel={t('settingsShell.allSettings')}
       onZurueck={onZurueck}
       kopfAktion={
         <div className="flex flex-wrap items-center gap-2">
@@ -474,13 +477,18 @@ export function SysadminPage({
               className="inline-flex items-center gap-1.5 rounded border border-[#F59E0B]/50 bg-[#F59E0B]/10 px-3 py-1.5 text-xs font-medium text-[#FBBF24] hover:bg-[#F59E0B]/20"
             >
               <ArrowUpCircle className="h-3.5 w-3.5" aria-hidden="true" />
-              {verfuegbareUpdatesAnzahl}{' '}
-              {verfuegbareUpdatesAnzahl === 1 ? 'Update verfügbar' : 'Updates verfügbar'}
+              {verfuegbareUpdatesAnzahl === 1
+                ? t('sysadmin.updateAvailableBadgeSingular', {
+                    count: verfuegbareUpdatesAnzahl,
+                  })
+                : t('sysadmin.updateAvailableBadgePlural', {
+                    count: verfuegbareUpdatesAnzahl,
+                  })}
             </a>
           )}
           <div className="inline-flex items-center gap-1.5 rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E]">
             <ShieldAlert className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-            Kein Team-Inhaltszugriff
+            {t('sysadmin.noContentAccess')}
           </div>
         </div>
       }
@@ -494,8 +502,11 @@ export function SysadminPage({
             <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-[#F59E0B]" aria-hidden="true" />
             <div>
               <div className="font-semibold text-white">
-                SidelineOS-Core Update verfügbar: v{updateStatus.coreUpdate.verfuegbar} (aktuell v
-                {updateStatus.coreUpdate.aktuell})
+                {t('sysadmin.coreUpdateTitle', {
+                  coreName: brand.coreName,
+                  available: updateStatus.coreUpdate.verfuegbar ?? '',
+                  current: updateStatus.coreUpdate.aktuell,
+                })}
               </div>
               {updateStatus.coreUpdate.hinweis && (
                 <p className="mt-0.5 text-[11px] text-[#FDE68A]/90">
@@ -511,7 +522,7 @@ export function SysadminPage({
               rel="noreferrer"
               className="inline-flex items-center gap-1 rounded border border-[#F59E0B]/50 bg-[#0B0E11] px-2.5 py-1 text-[11px] font-medium text-[#F59E0B] hover:bg-[#13171D]"
             >
-              Release auf GitHub öffnen
+              {t('sysadmin.openGithubRelease')}
               <ExternalLink className="h-3 w-3" aria-hidden="true" />
             </a>
           )}
@@ -671,7 +682,7 @@ export function SysadminPage({
                     {manifest.s3Prefix && <div>S3: teams/&#123;id&#125;/{manifest.s3Prefix}</div>}
                     <div
                       title={manifest.permissions
-                        .map((p) => `${p}: ${PERMISSION_BESCHREIBUNGEN[p]}`)
+                        .map((p) => `${p}: ${holePermissionBeschreibung(p, locale)}`)
                         .join('\n')}
                     >
                       Rechte: {manifest.permissions.join(', ')}
@@ -1137,8 +1148,8 @@ export function SysadminPage({
                 const userTeams = mitgliedschaften
                   .filter((m) => m.userUuid === user.uuid)
                   .map((m) => {
-                    const t = teams.find((team) => team.id === m.teamId);
-                    return `${t?.kurzname ?? m.teamId}: ${TEAM_ROLLEN_LABELS[m.rolle]}`;
+                    const teamObj = teams.find((team) => team.id === m.teamId);
+                    return `${teamObj?.kurzname ?? m.teamId}: ${holeRollenLabel(m.rolle, locale)}`;
                   });
 
                 return (
@@ -1623,15 +1634,9 @@ export function SysadminPage({
       >
         <div className="flex items-center gap-2">
           <Terminal className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-          <h2 className="text-sm font-semibold text-white">
-            Deployment-unabhängige Ersteinrichtung (.env)
-          </h2>
+          <h2 className="text-sm font-semibold text-white">{t('sysadmin.bootstrapTitle')}</h2>
         </div>
-        <p className="text-xs leading-relaxed text-[#8B949E]">
-          SidelineOS verzichtet bewusst auf einen unsicheren Erststart-Wizard im Browser. Der
-          erste Sysadmin, Datenbank, S3, SMTP und die installierten Plugins werden einheitlich über
-          Umgebungsvariablen (Docker Compose, Kubernetes, Proxmox LXC oder Systemd) gesetzt.
-        </p>
+        <p className="text-xs leading-relaxed text-[#8B949E]">{t('sysadmin.bootstrapBody')}</p>
         <pre className="overflow-x-auto rounded-md border border-[#232933] bg-[#0B0E11] p-3 font-mono text-[11px] leading-relaxed text-[#E6EDF3]">
 {`INITIAL_SYSADMIN_EMAIL="admin@verein.example"
 INITIAL_SYSADMIN_USERNAME="sysadmin"

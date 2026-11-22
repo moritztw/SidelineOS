@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
 import { pruefeEinladungsToken } from '../../core/authService.ts';
+import { istUnterstuetzteSprache, normalisiereSprache } from '../../shared/i18n.ts';
 import type { BenutzerKonto, TeamMitgliedschaft } from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
@@ -151,6 +152,17 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
             )
           : aktuell.customProfilWerte;
 
+      let naechsteSprache = aktuell.preferredLocale ?? config.defaultLocale;
+      if (body.preferredLocale !== undefined) {
+        if (!istUnterstuetzteSprache(body.preferredLocale)) {
+          res.status(400).json({
+            fehler: 'Nicht unterstützte Sprache. Erlaubt sind "de" und "en".',
+          });
+          return;
+        }
+        naechsteSprache = body.preferredLocale;
+      }
+
       const aktualisiert = await repo.aktualisiereBenutzer({
         ...aktuell,
         benutzername: neuerUsername,
@@ -160,6 +172,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
         trikotNummer:
           typeof body.trikotNummer === 'string' ? body.trikotNummer.trim() : aktuell.trikotNummer,
         position: typeof body.position === 'string' ? body.position.trim() : aktuell.position,
+        preferredLocale: naechsteSprache,
         customProfilWerte,
       });
 
@@ -283,6 +296,8 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
               )
             : {};
 
+        const gewaehlteSprache = normalisiereSprache(body.preferredLocale, config.defaultLocale);
+
         konto = await repo.erstelleBenutzer(
           {
             uuid: `usr-${crypto.randomUUID()}`,
@@ -295,6 +310,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
             position: typeof body.position === 'string' ? body.position.trim() : undefined,
             istSysadmin: false,
             erstelltAm: new Date().toISOString().slice(0, 10),
+            preferredLocale: gewaehlteSprache,
             customProfilWerte,
           },
           hashPasswort(passwort)

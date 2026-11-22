@@ -63,7 +63,10 @@ import type {
   TeamMitgliedschaft,
   TeamRolle,
 } from './shared/types.ts';
-import { DEMO_PROFILE, TEAM_ROLLEN_LABELS } from './shared/types.ts';
+import type { UnterstuetzteSprache } from './shared/i18n.ts';
+import { normalisiereSprache } from './shared/i18n.ts';
+import { DEMO_PROFILE, holeRollenLabel } from './shared/types.ts';
+import { I18nProvider, useI18n } from './core/i18n/I18nContext.tsx';
 
 const DEMO_KENNUNG_ZU_PROFIL: Record<string, string> = {
   'profil-teamadmin-sysadmin': 'm.brenner',
@@ -121,6 +124,7 @@ function SidelineCoreShell({
   onGlobalModulToggle,
   onGlobalModuleSynchronisieren,
 }: SidelineShellProps) {
+  const { locale, setLocale, setBrandName, t } = useI18n();
   const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
     parseAppRouteAusPfad(typeof window !== 'undefined' ? window.location.pathname : '/')
   );
@@ -190,7 +194,12 @@ function SidelineCoreShell({
       setBenutzerListe(ov.users);
       setMitgliedschaften(ov.memberships);
       setInstalledPluginsMeta(ov.plugins);
-      if (ov.capabilities) setSysCapabilities(ov.capabilities);
+      if (ov.capabilities) {
+        setSysCapabilities(ov.capabilities);
+        if (ov.capabilities.brandName) {
+          setBrandName(ov.capabilities.brandName);
+        }
+      }
       if (ov.s3Config) setS3Konfig(ov.s3Config);
       if (ov.smtpConfig) setSmtpKonfig(ov.smtpConfig);
       if (ov.cleanupStats) setCleanupStats(ov.cleanupStats);
@@ -213,6 +222,9 @@ function SidelineCoreShell({
   const uebernehmeSitzung = useCallback(
     async (sitzung: AuthSessionResponse) => {
       setAktuellerBenutzer(sitzung.user);
+      if (sitzung.user.preferredLocale) {
+        setLocale(normalisiereSprache(sitzung.user.preferredLocale, 'de'));
+      }
       setTeams(sitzung.teams);
       setMitgliedschaften(sitzung.memberships);
 
@@ -235,7 +247,7 @@ function SidelineCoreShell({
         setBenutzerListe([sitzung.user]);
       }
     },
-    [ladeSysadminUebersicht]
+    [ladeSysadminUebersicht, setLocale]
   );
 
   // Initialer Session-Check beim App-Start
@@ -404,6 +416,9 @@ function SidelineCoreShell({
 
   const handleInviteBeigetreten = async (ergebnis: InviteAcceptResponse) => {
     setAktuellerBenutzer(ergebnis.user);
+    if (ergebnis.user.preferredLocale) {
+      setLocale(normalisiereSprache(ergebnis.user.preferredLocale, 'de'));
+    }
     setTeams([ergebnis.team]);
     setAktivesTeamId(ergebnis.team.id);
     setGewaehlteSaison(ergebnis.team.aktiveSaison);
@@ -457,16 +472,36 @@ function SidelineCoreShell({
   const handleZugangSpeichern = async (daten: {
     benutzername: string;
     email: string;
+    preferredLocale?: UnterstuetzteSprache;
     altesPasswort?: string;
     neuesPasswort?: string;
   }): Promise<ApiAktionErgebnis> => {
     try {
       const res = await coreApi.aktualisiereEigenesProfil(daten);
       setAktuellerBenutzer(res.user);
+      if (res.user.preferredLocale) {
+        setLocale(res.user.preferredLocale);
+      }
       setBenutzerListe((alt) => alt.map((b) => (b.uuid === res.user.uuid ? res.user : b)));
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Zugangsdaten konnten nicht aktualisiert werden.');
+    }
+  };
+
+  const handleSpracheSpeichern = async (
+    sprache: UnterstuetzteSprache
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereEigenesProfil({ preferredLocale: sprache });
+      setAktuellerBenutzer(res.user);
+      if (res.user.preferredLocale) {
+        setLocale(res.user.preferredLocale);
+      }
+      setBenutzerListe((alt) => alt.map((b) => (b.uuid === res.user.uuid ? res.user : b)));
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Spracheinstellung konnte nicht gespeichert werden.');
     }
   };
 
@@ -512,7 +547,7 @@ function SidelineCoreShell({
       return;
     }
     if (aktivesPlugin && bereich === 'modul') {
-      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: zielRolle });
+      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: zielRolle, locale });
       if (!erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
         setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab);
       }
@@ -971,24 +1006,22 @@ function SidelineCoreShell({
     if (sharePlugin?.renderPublicShareView) {
       return sharePlugin.renderPublicShareView({
         token: routeModus.token,
+        locale,
         onSchliessen: () => navigiereZuRoute({ art: 'app' }),
       });
     }
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
-        <div className="w-full max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 space-y-4 text-center">
-          <h1 className="text-base font-semibold text-white">Kein Video-Plugin aktiv</h1>
-          <p className="text-xs text-[#8B949E]">
-            Für öffentliche <code className="font-mono">/share/</code>-Links muss ein
-            unterstützendes Plugin im Core installiert sein.
-          </p>
+        <div className="w-full max-w-md space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
+          <h1 className="text-base font-semibold text-white">{t('app.noVideoPluginTitle')}</h1>
+          <p className="text-xs text-[#8B949E]">{t('app.noVideoPluginBody')}</p>
           <button
             type="button"
             onClick={() => navigiereZuRoute({ art: 'app' })}
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            Zurück zu SidelineOS
+            {t('app.backToBrand')}
           </button>
         </div>
       </div>
@@ -1008,7 +1041,7 @@ function SidelineCoreShell({
   if (sessionWirdGeprueft) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
-        SidelineOS Sitzung wird geprüft…
+        {t('app.checkingSession')}
       </div>
     );
   }
@@ -1031,6 +1064,7 @@ function SidelineCoreShell({
           aktiveTeamAnsicht,
           gewaehlteSaison: aktiveSaisonAuswahl,
           benutzer: aktuellerBenutzer,
+          locale,
           aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab,
           onTabWechseln: setAktiverPluginTab,
           onTeamSettingsOeffnen: () => {
@@ -1044,7 +1078,7 @@ function SidelineCoreShell({
 
   const pluginTabs =
     pluginLaufzeitKontext && aktivesPlugin
-      ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht })
+      ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht, locale })
       : [];
 
   const aktuellesDemoProfil = DEMO_PROFILE.find((p) => p.userUuid === konto.userUuid);
@@ -1071,12 +1105,12 @@ function SidelineCoreShell({
           <div className="flex flex-wrap items-center gap-3">
             {aktiveTeamAnsicht === null || bereich === 'sysadmin' || !aktivesTeam ? (
               <span className="text-xs font-medium text-[#8B949E]">
-                Instanz-Verwaltung · Sysadmin-Bereich (getrennt von Team-Daten)
+                {t('app.context.sysadminScope')}
               </span>
             ) : (
               <>
                 <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                  <span>Team</span>
+                  <span>{t('app.context.team')}</span>
                   <select
                     value={aktivesTeam.id}
                     onChange={(e) => handleTeamWechseln(e.target.value)}
@@ -1091,20 +1125,23 @@ function SidelineCoreShell({
                 </label>
 
                 <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                  <span>Saison</span>
+                  <span>{t('app.context.season')}</span>
                   <select
-                    aria-label="Saison auswählen"
+                    aria-label={t('app.context.seasonSelectAria')}
                     value={aktiveSaisonAuswahl}
                     onChange={(e) => setGewaehlteSaison(e.target.value)}
                     className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 font-mono text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
                   >
                     {aktivesTeam.saisons.map((s) => (
                       <option key={s} value={s} className="bg-[#13171D]">
-                        {s} {s === aktivesTeam.aktiveSaison ? '(Aktuell)' : '(Archiv)'}
+                        {s}{' '}
+                        {s === aktivesTeam.aktiveSaison
+                          ? t('app.context.seasonCurrent')
+                          : t('app.context.seasonArchive')}
                       </option>
                     ))}
                     <option value="ALL" className="bg-[#13171D]">
-                      Alle Saisons
+                      {t('app.context.allSeasons')}
                     </option>
                   </select>
                 </label>
@@ -1117,11 +1154,11 @@ function SidelineCoreShell({
               <div className="flex items-center gap-2">
                 <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
                   <Eye className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
-                  Ansicht
+                  {t('app.context.view')}
                 </span>
                 <div
                   role="group"
-                  aria-label="Rollen-Ansicht umschalten"
+                  aria-label={t('app.context.roleSwitchAria')}
                   className="flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
                 >
                   {waehlbareAnsichten.map((rolle) => {
@@ -1137,7 +1174,7 @@ function SidelineCoreShell({
                             : 'text-[#8B949E] hover:text-[#E6EDF3]'
                         }`}
                       >
-                        {TEAM_ROLLEN_LABELS[rolle]}
+                        {holeRollenLabel(rolle, locale)}
                       </button>
                     );
                   })}
@@ -1147,9 +1184,9 @@ function SidelineCoreShell({
 
             {import.meta.env.DEV && (
               <label className="flex items-center gap-2 border-l border-[#232933] pl-3 text-xs text-[#6E7681]">
-                <span>Demo-Konto</span>
+                <span>{t('app.context.demoAccount')}</span>
                 <select
-                  aria-label="Angemeldetes Demo-Konto wechseln"
+                  aria-label={t('app.context.demoAccountAria')}
                   value={aktuellesDemoProfil?.id ?? '__custom__'}
                   onChange={(e) => {
                     if (e.target.value !== '__custom__') {
@@ -1175,11 +1212,11 @@ function SidelineCoreShell({
             <button
               type="button"
               onClick={() => void handleAbmelden()}
-              title="Abmelden"
+              title={t('app.context.logout')}
               className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs text-[#8B949E] transition-colors hover:border-[#F59E0B] hover:text-white"
             >
               <LogOut className="h-3 w-3" aria-hidden="true" />
-              Abmelden
+              {t('app.context.logout')}
             </button>
           </div>
         </div>
@@ -1190,11 +1227,11 @@ function SidelineCoreShell({
         <div className="border-b border-[#F59E0B]/30 bg-[#F59E0B]/10">
           <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-[#FDE68A]">
             <span>
-              Ansichts-Vorschau aktiv: Du siehst die Oberfläche als{' '}
+              {t('app.previewBanner.prefix')}{' '}
               <strong className="font-semibold text-white">
-                {TEAM_ROLLEN_LABELS[aktiveTeamAnsicht]}
+                {holeRollenLabel(aktiveTeamAnsicht, locale)}
               </strong>{' '}
-              (deine eigentliche Rolle: {TEAM_ROLLEN_LABELS[konto.teamRolle]}).
+              ({t('app.previewBanner.actualRole')}: {holeRollenLabel(konto.teamRolle, locale)}).
             </span>
             <button
               type="button"
@@ -1202,7 +1239,7 @@ function SidelineCoreShell({
               className="inline-flex items-center gap-1.5 rounded border border-[#F59E0B]/50 bg-[#0B0E11] px-2.5 py-1 text-xs font-medium text-[#F59E0B] hover:bg-[#13171D]"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
-              Zurück zu {TEAM_ROLLEN_LABELS[konto.teamRolle]}
+              {t('app.previewBanner.backTo')} {holeRollenLabel(konto.teamRolle, locale)}
             </button>
           </div>
         </div>
@@ -1291,12 +1328,9 @@ function SidelineCoreShell({
               onSmtpTesten={handleSmtpTesten}
             />
           ) : (
-            <div className="mx-auto max-w-md rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center space-y-3">
-              <h1 className="text-base font-semibold text-white">Noch keinem Team zugewiesen</h1>
-              <p className="text-xs text-[#8B949E]">
-                Dein Konto ist angemeldet, besitzt jedoch aktuell keine aktive Team-Mitgliedschaft.
-                Bitte wende dich an deinen Team Admin oder öffne einen Einladungslink.
-              </p>
+            <div className="mx-auto max-w-md space-y-3 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
+              <h1 className="text-base font-semibold text-white">{t('app.noTeamTitle')}</h1>
+              <p className="text-xs text-[#8B949E]">{t('app.noTeamBody')}</p>
             </div>
           )
         ) : bereich === 'hub' ? (
@@ -1327,6 +1361,7 @@ function SidelineCoreShell({
             aktivePlugins={aktiveTeamPlugins}
             onProfilSpeichern={handleProfilSpeichern}
             onZugangSpeichern={handleZugangSpeichern}
+            onSpracheSpeichern={handleSpracheSpeichern}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
@@ -1437,19 +1472,21 @@ export default function App() {
   };
 
   return (
-    <PluginProviderStack plugins={installiertePlugins}>
-      <SidelineCoreShell
-        storeKatalog={storeKatalog}
-        installiertePlugins={installiertePlugins}
-        installiertePluginIds={installiertePluginIds}
-        globalAktivierteModule={globalAktivierteModule}
-        onPluginInstallieren={handlePluginInstallieren}
-        onPluginDeinstallieren={handlePluginDeinstallieren}
-        onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
-        onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
-        onGlobalModulToggle={handleGlobalModulToggle}
-        onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
-      />
-    </PluginProviderStack>
+    <I18nProvider>
+      <PluginProviderStack plugins={installiertePlugins}>
+        <SidelineCoreShell
+          storeKatalog={storeKatalog}
+          installiertePlugins={installiertePlugins}
+          installiertePluginIds={installiertePluginIds}
+          globalAktivierteModule={globalAktivierteModule}
+          onPluginInstallieren={handlePluginInstallieren}
+          onPluginDeinstallieren={handlePluginDeinstallieren}
+          onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
+          onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
+          onGlobalModulToggle={handleGlobalModulToggle}
+          onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
+        />
+      </PluginProviderStack>
+    </I18nProvider>
   );
 }

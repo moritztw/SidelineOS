@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Lock, Save, User } from 'lucide-react';
+import {
+  UNTERSTUETZTE_SPRACHEN,
+  type UnterstuetzteSprache,
+} from '../../shared/i18n.ts';
 import type {
   BenutzerKonto,
   S3Konfiguration,
@@ -7,8 +11,9 @@ import type {
   TeamMitgliedschaft,
   TeamRolle,
 } from '../../shared/types.ts';
-import { SPIELER_UNIT_LABELS, TEAM_ROLLEN_LABELS } from '../../shared/types.ts';
+import { holeRollenLabel, holeUnitLabel } from '../../shared/types.ts';
 import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
+import { useI18n } from '../i18n/I18nContext.tsx';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
 export interface ApiAktionErgebnis {
@@ -33,9 +38,11 @@ interface UserSettingsPageProps {
   onZugangSpeichern: (daten: {
     benutzername: string;
     email: string;
+    preferredLocale?: UnterstuetzteSprache;
     altesPasswort?: string;
     neuesPasswort?: string;
   }) => Promise<ApiAktionErgebnis>;
+  onSpracheSpeichern: (sprache: UnterstuetzteSprache) => Promise<ApiAktionErgebnis>;
   onZurueck?: () => void;
 }
 
@@ -48,8 +55,10 @@ export function UserSettingsPage({
   aktivePlugins,
   onProfilSpeichern,
   onZugangSpeichern,
+  onSpracheSpeichern,
   onZurueck,
 }: UserSettingsPageProps) {
+  const { locale, setLocale, t } = useI18n();
   const [vollerName, setVollerName] = useState(benutzer.vollerName);
   const [trikotNummer, setTrikotNummer] = useState(benutzer.trikotNummer ?? '');
   const [position, setPosition] = useState(benutzer.position ?? '');
@@ -63,6 +72,9 @@ export function UserSettingsPage({
 
   const [benutzername, setBenutzername] = useState(benutzer.benutzername);
   const [email, setEmail] = useState(benutzer.email);
+  const [gewaehlteSprache, setGewaehlteSprache] = useState<UnterstuetzteSprache>(
+    benutzer.preferredLocale ?? locale
+  );
   const [passwortAktuell, setPasswortAktuell] = useState('');
   const [passwortNeu, setPasswortNeu] = useState('');
   const [passwortWiederholung, setPasswortWiederholung] = useState('');
@@ -78,18 +90,19 @@ export function UserSettingsPage({
     setCustomWerte(benutzer.customProfilWerte);
     setBenutzername(benutzer.benutzername);
     setEmail(benutzer.email);
+    setGewaehlteSprache(benutzer.preferredLocale ?? locale);
     setProfilHinweis(null);
     setProfilFehler(null);
     setKontoHinweis(null);
     setKontoFehler(null);
-  }, [benutzer]);
+  }, [benutzer, locale]);
 
   const handleProfilSpeichern = async () => {
     setProfilFehler(null);
     setProfilHinweis(null);
     const nameBereinigt = vollerName.trim();
     if (!nameBereinigt) {
-      setProfilFehler('Bitte einen vollständigen Namen angeben.');
+      setProfilFehler(t('userSettings.errNameRequired'));
       return;
     }
 
@@ -103,13 +116,23 @@ export function UserSettingsPage({
         customProfilWerte: { ...customWerte },
       });
       if (!res.ok) {
-        setProfilFehler(res.fehler ?? 'Profil konnte nicht gespeichert werden.');
+        setProfilFehler(res.fehler ?? t('userSettings.profileSaveError'));
         return;
       }
-      setProfilHinweis('Profil- und Spielerdaten gespeichert.');
+      setProfilHinweis(t('userSettings.profileSaved'));
       setTimeout(() => setProfilHinweis(null), 2400);
     } finally {
       setSpeichertProfil(false);
+    }
+  };
+
+  const handleSpracheSofortWechseln = async (zielSprache: UnterstuetzteSprache) => {
+    setGewaehlteSprache(zielSprache);
+    setLocale(zielSprache);
+    setKontoFehler(null);
+    const res = await onSpracheSpeichern(zielSprache);
+    if (!res.ok) {
+      setKontoFehler(res.fehler ?? t('userSettings.accountSaveError'));
     }
   };
 
@@ -120,21 +143,21 @@ export function UserSettingsPage({
     const userBereinigt = benutzername.trim();
     const mailBereinigt = email.trim();
     if (!userBereinigt || !mailBereinigt.includes('@')) {
-      setKontoFehler('Bitte einen gültigen Nutzernamen und eine gültige E-Mail-Adresse angeben.');
+      setKontoFehler(t('userSettings.errCredentials'));
       return;
     }
 
     if (passwortNeu || passwortWiederholung) {
       if (!passwortAktuell) {
-        setKontoFehler('Bitte das aktuelle Passwort zur Bestätigung eingeben.');
+        setKontoFehler(t('userSettings.errCurrentPassword'));
         return;
       }
       if (passwortNeu.length < 10) {
-        setKontoFehler('Das neue Passwort muss mindestens 10 Zeichen lang sein.');
+        setKontoFehler(t('userSettings.errPasswordMin'));
         return;
       }
       if (passwortNeu !== passwortWiederholung) {
-        setKontoFehler('Die neuen Passwörter stimmen nicht überein.');
+        setKontoFehler(t('userSettings.errPasswordMatch'));
         return;
       }
     }
@@ -144,21 +167,23 @@ export function UserSettingsPage({
       const res = await onZugangSpeichern({
         benutzername: userBereinigt,
         email: mailBereinigt,
+        preferredLocale: gewaehlteSprache,
         ...(passwortNeu
           ? { altesPasswort: passwortAktuell, neuesPasswort: passwortNeu }
           : {}),
       });
       if (!res.ok) {
-        setKontoFehler(res.fehler ?? 'Kontodaten konnten nicht aktualisiert werden.');
+        setKontoFehler(res.fehler ?? t('userSettings.accountSaveError'));
         return;
       }
+      setLocale(gewaehlteSprache);
       setPasswortAktuell('');
       setPasswortNeu('');
       setPasswortWiederholung('');
       setKontoHinweis(
         passwortNeu
-          ? 'Kontodaten und Passwort erfolgreich aktualisiert.'
-          : 'Nutzername und E-Mail-Adresse gespeichert.'
+          ? t('userSettings.accountPasswordSaved')
+          : t('userSettings.accountSaved')
       );
       setTimeout(() => setKontoHinweis(null), 2600);
     } finally {
@@ -167,8 +192,16 @@ export function UserSettingsPage({
   };
 
   const kategorien: SettingsKategorie[] = [
-    { id: 'profil', label: 'Spieler- & Nutzerprofil', gruppe: 'SidelineOS-Konto' },
-    { id: 'konto', label: 'Zugang, E-Mail & Passwort', gruppe: 'SidelineOS-Konto' },
+    {
+      id: 'profil',
+      label: t('userSettings.catProfile'),
+      gruppe: t('userSettings.groupAccount'),
+    },
+    {
+      id: 'konto',
+      label: t('userSettings.catAccount'),
+      gruppe: t('userSettings.groupAccount'),
+    },
   ];
 
   const pluginsMitPanel = aktivePlugins.filter((p) => Boolean(p.settingsPanels?.user));
@@ -188,33 +221,37 @@ export function UserSettingsPage({
     benutzer,
     aktiveTeamAnsicht,
     s3Konfig,
+    locale,
   };
 
   return (
     <SettingsShell
-      titel="Persönliche Einstellungen"
-      untertitel={`Einstellungen für dein Benutzerkonto (${TEAM_ROLLEN_LABELS[aktiveTeamAnsicht]} · ${team.name}). Aktive Plugins blenden ihre persönlichen Optionen automatisch unten mit ein.`}
+      titel={t('userSettings.title')}
+      untertitel={t('userSettings.subtitle', {
+        role: holeRollenLabel(aktiveTeamAnsicht, locale),
+        team: team.name,
+      })}
       kategorien={kategorien}
-      zurueckLabel="Alle Einstellungen"
+      zurueckLabel={t('settingsShell.allSettings')}
       onZurueck={onZurueck}
     >
       {/* Sektion 1: Spieler- & Nutzerprofil */}
       <section
         id="profil"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
+        className="scroll-mt-20 space-y-4 rounded-lg border border-[#232933] bg-[#13171D] p-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
           <div className="flex items-center gap-2">
             <User className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-white">Spieler- &amp; Nutzerprofil</h2>
+            <h2 className="text-sm font-semibold text-white">{t('userSettings.profileHeading')}</h2>
           </div>
           {mitgliedschaft && (
             <span className="font-mono text-[11px] text-[#8B949E]">
-              Units:{' '}
+              {t('userSettings.unitsPrefix')}{' '}
               <span className="text-[#E6EDF3]">
                 {mitgliedschaft.units.length > 0
-                  ? mitgliedschaft.units.map((u) => SPIELER_UNIT_LABELS[u]).join(' · ')
-                  : 'Keine Unit zugewiesen'}
+                  ? mitgliedschaft.units.map((u) => holeUnitLabel(u, locale)).join(' · ')
+                  : t('userSettings.noUnit')}
               </span>
             </span>
           )}
@@ -222,7 +259,7 @@ export function UserSettingsPage({
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Voller Name</span>
+            <span>{t('userSettings.fullName')}</span>
             <input
               type="text"
               value={vollerName}
@@ -232,7 +269,7 @@ export function UserSettingsPage({
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Telefon / Kontaktdaten</span>
+            <span>{t('userSettings.phone')}</span>
             <input
               type="tel"
               value={telefon}
@@ -243,23 +280,23 @@ export function UserSettingsPage({
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Trikotnummer (#)</span>
+            <span>{t('userSettings.jersey')}</span>
             <input
               type="text"
               value={trikotNummer}
               onChange={(e) => setTrikotNummer(e.target.value)}
-              placeholder="z. B. 14"
+              placeholder="14"
               className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 font-mono text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
             />
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Position(en)</span>
+            <span>{t('userSettings.position')}</span>
             <input
               type="text"
               value={position}
               onChange={(e) => setPosition(e.target.value)}
-              placeholder="z. B. WR / CB oder LB"
+              placeholder="WR / CB / LB"
               className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
             />
           </label>
@@ -268,7 +305,7 @@ export function UserSettingsPage({
         {team.customProfilFelder.length > 0 && (
           <div className="space-y-3 border-t border-[#232933] pt-4">
             <div className="text-xs font-medium text-[#E6EDF3]">
-              Zusatzfelder von {team.name} (durch Team Admin definiert)
+              {t('userSettings.customFieldsTitle', { team: team.name })}
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {team.customProfilFelder.map((feld) => (
@@ -285,7 +322,7 @@ export function UserSettingsPage({
                       }
                       className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
                     >
-                      <option value="">Bitte wählen…</option>
+                      <option value="">{t('userSettings.pleaseSelect')}</option>
                       {(feld.optionen ?? []).map((opt) => (
                         <option key={opt} value={opt}>
                           {opt}
@@ -319,27 +356,27 @@ export function UserSettingsPage({
             className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:opacity-60"
           >
             <Save className="h-3.5 w-3.5" aria-hidden="true" />
-            {speichertProfil ? 'Speichert…' : 'Profil speichern'}
+            {speichertProfil ? t('userSettings.saving') : t('userSettings.saveProfile')}
           </button>
         </div>
       </section>
 
-      {/* Sektion 2: Zugang, E-Mail & Passwort */}
+      {/* Sektion 2: Zugang, Sprache, E-Mail & Passwort */}
       <section
         id="konto"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
+        className="scroll-mt-20 space-y-4 rounded-lg border border-[#232933] bg-[#13171D] p-5"
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
           <div className="flex items-center gap-2">
             <Lock className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-white">Zugang, E-Mail &amp; Passwort</h2>
+            <h2 className="text-sm font-semibold text-white">{t('userSettings.accountHeading')}</h2>
           </div>
           <span className="font-mono text-[11px] text-[#6E7681]">ID: {benutzer.uuid}</span>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Benutzername</span>
+            <span>{t('userSettings.username')}</span>
             <input
               type="text"
               value={benutzername}
@@ -349,7 +386,7 @@ export function UserSettingsPage({
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>E-Mail-Adresse</span>
+            <span>{t('userSettings.email')}</span>
             <input
               type="email"
               value={email}
@@ -357,22 +394,40 @@ export function UserSettingsPage({
               className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
             />
           </label>
+
+          <label className="space-y-1 text-xs text-[#8B949E]">
+            <span>{t('userSettings.languageLabel')}</span>
+            <select
+              aria-label={t('nav.languageAria')}
+              value={gewaehlteSprache}
+              onChange={(e) =>
+                void handleSpracheSofortWechseln(e.target.value as UnterstuetzteSprache)
+              }
+              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+            >
+              {UNTERSTUETZTE_SPRACHEN.map((lang) => (
+                <option key={lang.code} value={lang.code} className="bg-[#13171D]">
+                  {lang.eigenname} ({lang.code.toUpperCase()})
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="grid grid-cols-1 gap-4 border-t border-[#232933] pt-4 sm:grid-cols-3">
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Aktuelles Passwort</span>
+            <span>{t('userSettings.currentPassword')}</span>
             <input
               type="password"
               value={passwortAktuell}
               onChange={(e) => setPasswortAktuell(e.target.value)}
-              placeholder="Nur bei Passwortwechsel"
+              placeholder={t('userSettings.currentPasswordPlaceholder')}
               className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
             />
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Neues Passwort (mind. 10 Zeichen)</span>
+            <span>{t('userSettings.newPassword')}</span>
             <input
               type="password"
               value={passwortNeu}
@@ -382,7 +437,7 @@ export function UserSettingsPage({
           </label>
 
           <label className="space-y-1 text-xs text-[#8B949E]">
-            <span>Neues Passwort bestätigen</span>
+            <span>{t('userSettings.confirmPassword')}</span>
             <input
               type="password"
               value={passwortWiederholung}
@@ -402,15 +457,15 @@ export function UserSettingsPage({
             onClick={() => void handleKontoSpeichern()}
             className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:border-[#F59E0B] disabled:opacity-60"
           >
-            {speichertKonto ? 'Speichert…' : 'Zugangsdaten aktualisieren'}
+            {speichertKonto ? t('userSettings.saving') : t('userSettings.updateAccount')}
           </button>
         </div>
 
         <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-3 text-xs text-[#8B949E]">
-          <strong className="font-medium text-[#E6EDF3]">Konto-Portabilität (Roadmap):</strong>{' '}
-          Dein Konto bleibt bei einem Team-Austritt erhalten. In einer späteren Version kannst du
-          dein Profil inkl. eigener Notizen per Export-Token auf einen anderen SidelineOS-Server
-          umziehen.
+          <strong className="font-medium text-[#E6EDF3]">
+            {t('userSettings.portabilityTitle')}
+          </strong>{' '}
+          {t('userSettings.portabilityBody')}
         </div>
       </section>
 

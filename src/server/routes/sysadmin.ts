@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { Router } from 'express';
+import { normalisiereSprache } from '../../shared/i18n.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth, requireSysadmin } from '../middleware/auth.ts';
@@ -49,6 +50,8 @@ export function erstelleSysadminRouter(
           disableUpdateCheck: config.disableUpdateCheck,
           coreVersion: config.coreVersion,
           supportedSdkVersion: config.supportedSdkVersion,
+          brandName: config.brandName,
+          defaultLocale: config.defaultLocale,
         },
         ...(s3Config ? { s3Config } : {}),
         ...(smtpConfig ? { smtpConfig } : {}),
@@ -181,6 +184,7 @@ export function erstelleSysadminRouter(
           position: typeof body.position === 'string' ? body.position.trim() : undefined,
           istSysadmin: Boolean(body.istSysadmin),
           erstelltAm: new Date().toISOString().slice(0, 10),
+          preferredLocale: normalisiereSprache(body.preferredLocale, config.defaultLocale),
           customProfilWerte: {},
         },
         hashPasswort(passwort)
