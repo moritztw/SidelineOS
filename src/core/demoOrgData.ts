@@ -15,7 +15,7 @@ export const INITIALE_TEAMS: TeamKontext[] = [
     aktiveSaison: '2026',
     saisons: ['2026', '2025', '2024'],
     primaerFarbe: '#F59E0B',
-    aktivierteModule: ['video-analysis', 'playbook'],
+    aktivierteModule: [],
     customProfilFelder: [
       { key: 'passnummer', label: 'Spielerpass-Nr.', typ: 'text', pflicht: false },
       { key: 'notfallkontakt', label: 'Notfallkontakt (Name & Tel.)', typ: 'text', pflicht: true },
@@ -34,7 +34,7 @@ export const INITIALE_TEAMS: TeamKontext[] = [
     aktiveSaison: '2026',
     saisons: ['2026', '2025'],
     primaerFarbe: '#3B82F6',
-    aktivierteModule: ['video-analysis'],
+    aktivierteModule: [],
     customProfilFelder: [
       {
         key: 'notfallkontakt',

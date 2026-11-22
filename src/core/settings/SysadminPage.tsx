@@ -14,7 +14,6 @@ import {
   RotateCcw,
   ShieldAlert,
   Store,
-  Terminal,
   Trash2,
   Upload,
   UserPlus,
@@ -257,7 +256,6 @@ export function SysadminPage({
     { id: 'sys-benutzer', label: 'Globale Benutzer & Rollen', gruppe: 'Instanz-Verwaltung' },
     { id: 'sys-storage', label: 'S3 Object Storage', gruppe: 'Infrastruktur' },
     { id: 'sys-smtp', label: 'E-Mail / SMTP', gruppe: 'Infrastruktur' },
-    { id: 'sys-bootstrap', label: 'ENV-Ersteinrichtung', gruppe: 'Infrastruktur' },
   ];
 
   for (const plugin of pluginsMitSysadminPanel) {
@@ -767,8 +765,30 @@ export function SysadminPage({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onPluginInstallieren(manifest.id)}
-                      className="inline-flex items-center gap-1 rounded bg-[#F59E0B] px-2.5 py-1 text-[11px] font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+                      disabled={storeBeschaeftigt}
+                      onClick={() => {
+                        if (onPluginReleaseInstallieren && manifest.repositoryUrl) {
+                          void (async () => {
+                            setStoreBeschaeftigt(true);
+                            setStoreFehler(null);
+                            setStoreHinweis(null);
+                            const res = await onPluginReleaseInstallieren(manifest.repositoryUrl);
+                            setStoreBeschaeftigt(false);
+                            if (!res.ok) {
+                              setStoreFehler(
+                                res.fehler ?? `Installation von "${manifest.name}" fehlgeschlagen.`
+                              );
+                            } else {
+                              zeigeStoreHinweis(
+                                `Plugin "${manifest.name}" aus ${manifest.repositoryUrl} installiert.`
+                              );
+                            }
+                          })();
+                        } else {
+                          onPluginInstallieren(manifest.id);
+                        }
+                      }}
+                      className="inline-flex items-center gap-1 rounded bg-[#F59E0B] px-2.5 py-1 text-[11px] font-semibold text-[#0B0E11] hover:bg-[#FBBF24] disabled:opacity-50"
                     >
                       <Download className="h-3 w-3" aria-hidden="true" />
                       Installieren
@@ -1627,25 +1647,7 @@ export function SysadminPage({
         )}
       </section>
 
-      {/* 7. ENV-Ersteinrichtung */}
-      <section
-        id="sys-bootstrap"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-3"
-      >
-        <div className="flex items-center gap-2">
-          <Terminal className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-          <h2 className="text-sm font-semibold text-white">{t('sysadmin.bootstrapTitle')}</h2>
-        </div>
-        <p className="text-xs leading-relaxed text-[#8B949E]">{t('sysadmin.bootstrapBody')}</p>
-        <pre className="overflow-x-auto rounded-md border border-[#232933] bg-[#0B0E11] p-3 font-mono text-[11px] leading-relaxed text-[#E6EDF3]">
-{`INITIAL_SYSADMIN_EMAIL="admin@verein.example"
-INITIAL_SYSADMIN_USERNAME="sysadmin"
-INITIAL_SYSADMIN_PASSWORD="<starkes-passwort>"
-ENABLED_MODULES="${globalAktivierteModule.join(',')}"`}
-        </pre>
-      </section>
-
-      {/* 8. Dynamische Sysadmin-Panels aller aktivierten Plugins */}
+      {/* 7. Dynamische Sysadmin-Panels aller aktivierten Plugins */}
       {settingsKontext &&
         pluginsMitSysadminPanel.map((plugin) => {
           const SysadminPanel = plugin.settingsPanels!.sysadmin!;

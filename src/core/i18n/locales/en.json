@@ -15,8 +15,6 @@
   "app.context.allSeasons": "All Seasons",
   "app.context.view": "View",
   "app.context.roleSwitchAria": "Switch role view",
-  "app.context.demoAccount": "Demo Account",
-  "app.context.demoAccountAria": "Switch active demo account",
   "app.context.logout": "Sign out",
   "app.previewBanner.prefix": "Role preview active: You are viewing the UI as",
   "app.previewBanner.actualRole": "your actual role",
@@ -39,16 +37,11 @@
   "login.tagline": "Self-hosted multi-tenant platform for teams & coaches",
   "login.title": "Sign in",
   "login.identifierLabel": "Email address or username",
-  "login.identifierPlaceholder": "coach@club.org or m.brenner",
+  "login.identifierPlaceholder": "name@club.org or username",
   "login.passwordLabel": "Password",
   "login.submit": "Sign in",
   "login.submitting": "Signing in…",
   "login.failed": "Sign in failed.",
-  "login.demoPassword": "Demo password (Dev/Preview):",
-  "login.demoQuickTitle": "Demo quick sign-in (Backend session)",
-  "login.demoQuickAria": "Demo quick sign-in",
-  "login.publicRoutesTitle": "Open public routes directly",
-  "login.publicRoutesAria": "Test public routes",
 
   "invite.checking": "Checking invitation link…",
   "invite.invalidTitle": "Invitation unavailable",
@@ -158,15 +151,5 @@
   "sysadmin.updateAvailableBadgeSingular": "{count} update available",
   "sysadmin.updateAvailableBadgePlural": "{count} updates available",
   "sysadmin.coreUpdateTitle": "{coreName} update available: v{available} (current v{current})",
-  "sysadmin.openGithubRelease": "Open release on GitHub",
-  "sysadmin.bootstrapTitle": "Deployment-agnostic initial setup (.env)",
-  "sysadmin.bootstrapBody": "{brand} intentionally avoids an insecure browser setup wizard. The initial Sysadmin, database, S3, SMTP, and installed plugins are configured uniformly via environment variables (Docker Compose, Kubernetes, Proxmox LXC, or Systemd).",
-
-  "previewPlugin.tabOverview": "Module Overview",
-  "previewPlugin.toHome": "Go to Home",
-  "previewPlugin.backHome": "Back to {brand} home",
-  "previewPlugin.badge": "External {brand} Plugin · v{version} · SDK {sdkVersion}",
-  "previewPlugin.repository": "Repository",
-  "previewPlugin.dbPrefix": "Isolated DB Prefix",
-  "previewPlugin.permissions": "Permissions"
+  "sysadmin.openGithubRelease": "Open release on GitHub"
 }

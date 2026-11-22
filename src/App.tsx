@@ -22,7 +22,6 @@ import {
   type UpdatePruefErgebnisDTO,
 } from './core/apiClient.ts';
 import {
-  DEMO_STANDARD_PASSWORT,
   ermittleProfilAusKonto,
   parseAppRouteAusPfad,
 } from './core/authService.ts';
@@ -65,15 +64,8 @@ import type {
 } from './shared/types.ts';
 import type { UnterstuetzteSprache } from './shared/i18n.ts';
 import { normalisiereSprache } from './shared/i18n.ts';
-import { DEMO_PROFILE, holeRollenLabel } from './shared/types.ts';
+import { holeRollenLabel } from './shared/types.ts';
 import { I18nProvider, useI18n } from './core/i18n/I18nContext.tsx';
-
-const DEMO_KENNUNG_ZU_PROFIL: Record<string, string> = {
-  'profil-teamadmin-sysadmin': 'm.brenner',
-  'profil-coach': 't.richter',
-  'profil-player': 'l.weber',
-  'profil-only-sysadmin': 'sysadmin',
-};
 
 function fehlerAusUnbekannt(err: unknown, fallback: string): ApiAktionErgebnis {
   if (err instanceof CoreApiError) {
@@ -110,6 +102,7 @@ interface SidelineShellProps {
   onBackendPluginRegistrieren: (manifest: PluginManifest, releaseTag?: string) => void;
   onGlobalModulToggle: (modulId: PluginId) => void;
   onGlobalModuleSynchronisieren: (ids: PluginId[]) => void;
+  onInstalledPluginsSynchronisieren: (ids: PluginId[]) => void;
 }
 
 function SidelineCoreShell({
@@ -123,6 +116,7 @@ function SidelineCoreShell({
   onBackendPluginRegistrieren,
   onGlobalModulToggle,
   onGlobalModuleSynchronisieren,
+  onInstalledPluginsSynchronisieren,
 }: SidelineShellProps) {
   const { locale, setLocale, setBrandName, t } = useI18n();
   const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
@@ -203,6 +197,7 @@ function SidelineCoreShell({
       if (ov.s3Config) setS3Konfig(ov.s3Config);
       if (ov.smtpConfig) setSmtpKonfig(ov.smtpConfig);
       if (ov.cleanupStats) setCleanupStats(ov.cleanupStats);
+      onInstalledPluginsSynchronisieren(ov.plugins.map((p) => p.manifest.id));
       onGlobalModuleSynchronisieren(
         ov.plugins.filter((p) => p.enabledGlobally).map((p) => p.manifest.id)
       );
@@ -217,7 +212,7 @@ function SidelineCoreShell({
     } catch {
       // Ignorieren falls kein Sysadmin
     }
-  }, [onGlobalModuleSynchronisieren]);
+  }, [onGlobalModuleSynchronisieren, onInstalledPluginsSynchronisieren, setBrandName]);
 
   const uebernehmeSitzung = useCallback(
     async (sitzung: AuthSessionResponse) => {
@@ -524,12 +519,6 @@ function SidelineCoreShell({
     setAktivesPluginId(pluginId);
     setAktiverPluginTab(ziel.defaultTab);
     setBereich('modul');
-  };
-
-  const handleDemoKontoWechseln = async (profilId: string) => {
-    const kennung = DEMO_KENNUNG_ZU_PROFIL[profilId];
-    if (!kennung) return;
-    await handleAnmelden(kennung, DEMO_STANDARD_PASSWORT);
   };
 
   const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
@@ -1047,14 +1036,7 @@ function SidelineCoreShell({
   }
 
   if (routeModus.art === 'login' || !konto || !aktuellerBenutzer) {
-    return (
-      <LoginView
-        onAnmelden={handleAnmelden}
-        onInviteOeffnen={(token) => navigiereZuRoute({ art: 'invite', token })}
-        onShareOeffnen={(token) => navigiereZuRoute({ art: 'share', token })}
-        demoSchnellzugangErlaubt={import.meta.env.DEV}
-      />
-    );
+    return <LoginView onAnmelden={handleAnmelden} />;
   }
 
   const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
@@ -1080,8 +1062,6 @@ function SidelineCoreShell({
     pluginLaufzeitKontext && aktivesPlugin
       ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht, locale })
       : [];
-
-  const aktuellesDemoProfil = DEMO_PROFILE.find((p) => p.userUuid === konto.userUuid);
 
   return (
     <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
@@ -1180,33 +1160,6 @@ function SidelineCoreShell({
                   })}
                 </div>
               </div>
-            )}
-
-            {import.meta.env.DEV && (
-              <label className="flex items-center gap-2 border-l border-[#232933] pl-3 text-xs text-[#6E7681]">
-                <span>{t('app.context.demoAccount')}</span>
-                <select
-                  aria-label={t('app.context.demoAccountAria')}
-                  value={aktuellesDemoProfil?.id ?? '__custom__'}
-                  onChange={(e) => {
-                    if (e.target.value !== '__custom__') {
-                      void handleDemoKontoWechseln(e.target.value);
-                    }
-                  }}
-                  className="rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-xs text-[#E6EDF3] focus:border-[#F59E0B] focus:outline-none"
-                >
-                  {!aktuellesDemoProfil && (
-                    <option value="__custom__" className="bg-[#13171D]">
-                      {konto.label}
-                    </option>
-                  )}
-                  {DEMO_PROFILE.map((p) => (
-                    <option key={p.id} value={p.id} className="bg-[#13171D]">
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
             )}
 
             <button
@@ -1485,6 +1438,7 @@ export default function App() {
           onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
           onGlobalModulToggle={handleGlobalModulToggle}
           onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
+          onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
         />
       </PluginProviderStack>
     </I18nProvider>

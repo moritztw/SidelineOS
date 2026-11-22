@@ -1,6 +1,5 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import {
   erstelleCustomPluginManifest,
   istPluginFuerTeamAktiv,
@@ -15,19 +14,17 @@ import {
 } from '../../src/core/pluginStoreCatalog.ts';
 import { fuegeNeueSaisonHinzu } from '../../src/core/seasonUtils.ts';
 import { ermittleEintragSaison, filtereNachSaison } from '../../src/sdk/plugin.ts';
-import { VIDEO_PLUGIN_MANIFEST } from '../../src/plugins/video-analysis/manifest.ts';
-import type { VideoReel } from '../../src/plugins/video-analysis/types.ts';
 import type { TeamKontext } from '../../src/shared/types.ts';
 
 describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
   it('parst ENABLED_MODULES aus ENV kommagetrennt und ignoriert unbekannte IDs', () => {
     assert.deepEqual(
       parseAktivierteModuleAusEnv(
-        'video-analysis, roster-attendance, unbekannt',
-        STANDARD_INSTALLIERTE_PLUGIN_IDS,
+        'video-analysis, unbekannt',
+        ['video-analysis', 'scouting'],
         STANDARD_AKTIVIERTE_PLUGIN_IDS
       ),
-      ['video-analysis', 'roster-attendance']
+      ['video-analysis']
     );
   });
 
@@ -35,7 +32,7 @@ describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
     assert.deepEqual(
       parseAktivierteModuleAusEnv(
         '',
-        STANDARD_INSTALLIERTE_PLUGIN_IDS,
+        ['video-analysis'],
         STANDARD_AKTIVIERTE_PLUGIN_IDS
       ),
       STANDARD_AKTIVIERTE_PLUGIN_IDS
@@ -43,7 +40,7 @@ describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
     assert.deepEqual(
       parseAktivierteModuleAusEnv(
         undefined,
-        STANDARD_INSTALLIERTE_PLUGIN_IDS,
+        ['video-analysis'],
         STANDARD_AKTIVIERTE_PLUGIN_IDS
       ),
       STANDARD_AKTIVIERTE_PLUGIN_IDS
@@ -54,8 +51,8 @@ describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
     assert.equal(
       istPluginFuerTeamAktiv(
         'video-analysis',
-        ['video-analysis', 'playbook'],
-        ['video-analysis', 'playbook'],
+        ['video-analysis', 'scouting'],
+        ['video-analysis', 'scouting'],
         ['video-analysis']
       ),
       true
@@ -63,17 +60,17 @@ describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
     assert.equal(
       istPluginFuerTeamAktiv(
         'video-analysis',
-        ['playbook'],
-        ['video-analysis', 'playbook'],
+        ['scouting'],
+        ['video-analysis', 'scouting'],
         ['video-analysis']
       ),
       false
     );
     assert.equal(
       istPluginFuerTeamAktiv(
-        'playbook',
-        ['video-analysis', 'playbook'],
-        ['video-analysis', 'playbook'],
+        'scouting',
+        ['video-analysis', 'scouting'],
+        ['video-analysis', 'scouting'],
         ['video-analysis']
       ),
       false
@@ -100,15 +97,16 @@ describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
     assert.equal(manifest.s3Prefix, 'plugins/scouting/');
   });
 
-  it('hält plugin.manifest.json, TypeScript-Manifest und Store-Katalog exakt synchron', () => {
-    const jsonRoh = readFileSync(
-      new URL('../../src/plugins/video-analysis/plugin.manifest.json', import.meta.url),
-      'utf8'
+  it('listet ausschließlich SidelineOS-video als offizielles externes Store-Plugin ohne Vorinstallation', () => {
+    assert.deepEqual(STANDARD_INSTALLIERTE_PLUGIN_IDS, []);
+    assert.deepEqual(STANDARD_AKTIVIERTE_PLUGIN_IDS, []);
+    assert.equal(OFFIZIELLER_PLUGIN_KATALOG.length, 1);
+    assert.equal(VIDEO_STORE_MANIFEST.id, 'video-analysis');
+    assert.equal(
+      VIDEO_STORE_MANIFEST.repositoryUrl,
+      'https://github.com/moritztw/SidelineOS-video'
     );
-    const jsonManifest = JSON.parse(jsonRoh);
-    assert.deepEqual(VIDEO_PLUGIN_MANIFEST, jsonManifest);
-    assert.deepEqual(VIDEO_STORE_MANIFEST, VIDEO_PLUGIN_MANIFEST);
-    assert.ok(OFFIZIELLER_PLUGIN_KATALOG.some((e) => e.manifest.id === 'video-analysis'));
+    assert.equal(OFFIZIELLER_PLUGIN_KATALOG[0].manifest.id, 'video-analysis');
   });
 });
 
@@ -123,42 +121,9 @@ describe('Dauerhafte Multi-Saison-Teams & generische SDK-Saison-Filterung', () =
     customProfilFelder: [],
   };
 
-  const demoReels: VideoReel[] = [
-    {
-      id: 'r1',
-      teamId: 'team-test',
-      title: 'Spiel 2026',
-      category: 'GAME',
-      eventDate: '2026-08-10',
-      thumbnailUrl: '',
-      angles: ['SIDELINE'],
-      sourceMode: 'CLIP_FILE',
-      playCount: 1,
-      taggedCount: 0,
-      visibility: 'COACHES_ONLY',
-      teamFreigaben: [],
-      shareLinks: [],
-      draftNoteCount: 0,
-      plays: [],
-    },
-    {
-      id: 'r2',
-      teamId: 'team-test',
-      saison: '2025',
-      title: 'Halbfinale 2025',
-      category: 'GAME',
-      eventDate: '2025-09-20',
-      thumbnailUrl: '',
-      angles: ['SIDELINE'],
-      sourceMode: 'CLIP_FILE',
-      playCount: 1,
-      taggedCount: 1,
-      visibility: 'ALL_PLAYERS',
-      teamFreigaben: [],
-      shareLinks: [],
-      draftNoteCount: 0,
-      plays: [],
-    },
+  const eintraege = [
+    { id: 'r1', eventDate: '2026-08-10' },
+    { id: 'r2', saison: '2025', eventDate: '2025-09-20' },
   ];
 
   it('startet eine neue Saison ohne Team-Neuanlage und erhält alle Altsaisons', () => {
@@ -174,16 +139,16 @@ describe('Dauerhafte Multi-Saison-Teams & generische SDK-Saison-Filterung', () =
   });
 
   it('filtert Einträge sauber nach Saison inkl. Fallback auf eventDate und ALL-Ansicht', () => {
-    assert.equal(ermittleEintragSaison(demoReels[0]), '2026');
-    assert.equal(ermittleEintragSaison(demoReels[1]), '2025');
+    assert.equal(ermittleEintragSaison(eintraege[0]), '2026');
+    assert.equal(ermittleEintragSaison(eintraege[1]), '2025');
     assert.deepEqual(
-      filtereNachSaison(demoReels, '2026').map((r) => r.id),
+      filtereNachSaison(eintraege, '2026').map((r) => r.id),
       ['r1']
     );
     assert.deepEqual(
-      filtereNachSaison(demoReels, '2025').map((r) => r.id),
+      filtereNachSaison(eintraege, '2025').map((r) => r.id),
       ['r2']
     );
-    assert.equal(filtereNachSaison(demoReels, 'ALL').length, 2);
+    assert.equal(filtereNachSaison(eintraege, 'ALL').length, 2);
   });
 });

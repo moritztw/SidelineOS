@@ -7,6 +7,7 @@ import { erstelleCoreApp } from '../../src/server/app.ts';
 import { bootstrapCoreInstance } from '../../src/server/bootstrap.ts';
 import { loadCoreConfig } from '../../src/server/config.ts';
 import { erstelleDatenbankClient, type CoreDatabaseClient } from '../../src/server/db/client.ts';
+import { CoreRepository } from '../../src/server/db/coreRepository.ts';
 import { PluginBackendHost } from '../../src/server/plugins/backendHost.ts';
 
 function extrahiereCookieHeader(setCookie: string | null): string {
@@ -50,6 +51,29 @@ describe('SidelineOS-Core API & Plugin-Gateway (Teilpaket 1B)', () => {
     });
     db = await erstelleDatenbankClient(config);
     await bootstrapCoreInstance(db, config, { seedDemoWennLeer: true });
+    const repo = new CoreRepository(db);
+    await repo.registrierePlugin(
+      {
+        manifest: VIDEO_TEST_MANIFEST,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v1.0.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
+    await repo.registrierePlugin(
+      {
+        manifest: PLAYBOOK_TEST_MANIFEST,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v1.0.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
+    await repo.setzeTeamModulAktiv('team-stallions-seniors', 'video-analysis', true);
+    await repo.setzeTeamModulAktiv('team-stallions-u19', 'video-analysis', true);
 
     const pluginHost = new PluginBackendHost(db);
 
