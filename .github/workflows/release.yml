@@ -1,0 +1,51 @@
+name: SidelineOS-Core Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Node.js 22 einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Abhängigkeiten sauber installieren
+        run: npm ci
+
+      - name: TypeScript prüfen
+        run: npm run lint
+
+      - name: Unit- & Integrations-Tests ausführen
+        run: npm test
+
+      - name: Frontend- & SDK-Build erzeugen
+        run: |
+          npm run build
+          npm run build:sdk
+
+      - name: Plugin-SDK-Paket & SHA-256-Prüfsumme erzeugen
+        run: |
+          mkdir -p release-assets
+          npm pack ./packages/plugin-sdk --pack-destination release-assets
+          (cd release-assets && sha256sum *.tgz > SHA256SUMS.txt)
+
+      - name: GitHub Release veröffentlichen
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            release-assets/*.tgz
+            release-assets/SHA256SUMS.txt
