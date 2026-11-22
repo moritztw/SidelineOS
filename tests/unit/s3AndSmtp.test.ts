@@ -11,6 +11,7 @@ import { CoreRepository } from '../../src/server/db/coreRepository.ts';
 import { PluginBackendHost } from '../../src/server/plugins/backendHost.ts';
 import { entschluesseleGeheimnis, verschluesseleGeheimnis } from '../../src/server/security.ts';
 import {
+  baueS3ClientKonfig,
   normalisiereUndPruefeS3Key,
   S3BrokerService,
   validiereS3EndpointUrl,
@@ -181,7 +182,22 @@ describe('Core-Phase 2: S3-Broker & SMTP-Service', () => {
     );
 
     assert.equal(validiereS3EndpointUrl('http://localhost:9000').ok, true);
+    assert.equal(validiereS3EndpointUrl('https://demoaccount.r2.cloudflarestorage.com').ok, true);
     assert.equal(validiereS3EndpointUrl('javascript:alert(1)').ok, false);
+
+    const r2ClientKonfig = baueS3ClientKonfig({
+      endpoint: 'https://demoaccount.r2.cloudflarestorage.com',
+      region: 'auto',
+      bucket: 'sidelineos-alpha',
+      accessKey: 'r2-access',
+      secretKey: 'r2-secret',
+      forcePathStyle: true,
+      cleanupRetentionDays: 14,
+    });
+    assert.equal(r2ClientKonfig.region, 'auto');
+    assert.equal(r2ClientKonfig.requestChecksumCalculation, 'WHEN_REQUIRED');
+    assert.equal(r2ClientKonfig.responseChecksumValidation, 'WHEN_REQUIRED');
+    assert.equal(r2ClientKonfig.forcePathStyle, true);
   });
 
   it('persistiert S3-Settings verschlüsselt, maskiert Secrets und liefert Presigned URLs nur innerhalb des Team-/Plugin-Scopes', async () => {

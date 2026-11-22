@@ -6,7 +6,7 @@
 
 **SidelineOS-Core** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Der schlanke **SidelineOS-Core** übernimmt Benutzerkonten, Teams/Saisons, Auth/Einladungen, S3-Infrastruktur und einen **Plugin Store**, über den eigenständige GitHub-Module (wie die Videoanalyse) unabhängig entwickelt und installiert werden.
 
-> **Projektstatus:** **SidelineOS-Core** verfügt über ein produktionsnahes Backend-Fundament (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), einen **S3-Broker** (Presigned-URLs, Präfix-Isolation, AES-256-GCM-verschlüsselte Konfiguration, anonymisierte **S3-Cleanup-Queue** mit Schonfrist), einen **SMTP-Service** (`nodemailer` mit Offline-Link-Fallback), das eigenständige `@sidelineos/plugin-sdk`-Paket samt Dual-Mode Plugin-Installer (GitHub-Releases + SHA-256, Offline-`.tar.gz`, Dev-Git-Clone & Update-/Rollback-Center) sowie die **Rebranding-Vorbereitung** (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) und das **i18n-Fundament (DE/EN)** inkl. automatischer Sprachweitergabe an Plugins. Als nächstes folgt **R2 (Basis-Deployment)** für das erste **Alpha-Release (`v0.1.0-alpha.1`)**.
+> **Projektstatus:** **SidelineOS-Core** ist bereit für den **Alpha-Selbsttest (`v0.1.0-alpha.1`)**: Produktionsnahes Backend (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), **S3-Broker** inkl. Cloudflare-R2-Support (Presigned-URLs, Präfix-Isolation, AES-256-GCM, anonymisierte **S3-Cleanup-Queue**), **SMTP-Service**, `@sidelineos/plugin-sdk` samt Plugin-Installer, **Rebranding-Vorbereitung** & **i18n (DE/EN)** sowie **Proxmox-LXC-Deployment** (`systemd` + Cloudflare R2 + Multi-Arch-`Dockerfile`). Als nächstes folgt der Post-Alpha-Ausbau (**Upload & File-Handling**, **Benachrichtigungen**) für die **Closed Beta**.
 
 ---
 
@@ -61,8 +61,12 @@ sidelineos/
 ├── .env.example                       # ENV-Bootstrap (Sysadmin, Brand, Sprache, DB, S3, SMTP)
 ├── LICENSE                            # GNU AGPLv3
 ├── README.md                          # Projektübersicht & Quickstart
+├── deploy/
+│   ├── lxc/                           # Proxmox-LXC & Raspberry-Pi Installer, Updater & systemd-Unit
+│   └── docker/                        # Optionales Multi-Arch-Dockerfile (amd64 & arm64)
 ├── docs/                              # Ausführliche Projektdokumentation
 │   ├── architecture.md                # System-, Core/Plugin- & Storage-Architektur
+│   ├── deployment-proxmox-lxc.md      # Deployment-Leitfaden (Proxmox LXC, Cloudflare R2, Backup)
 │   ├── plugin-sdk.md                  # Strukturelle Voraussetzungen & SDK für externe Plugins
 │   └── json-bundle-format.md          # Spezifikation sideline-bundle.json (v1.0)
 ├── src/
@@ -90,6 +94,7 @@ sidelineos/
 
 ## Dokumentation
 
+* [Proxmox-LXC & Cloudflare-R2 Deployment-Leitfaden](docs/deployment-proxmox-lxc.md)
 * [Architektur- & Storage-Konzept](docs/architecture.md)
 * [Plugin SDK & Voraussetzungen für eigene GitHub-Module](docs/plugin-sdk.md)
 * [JSON-Bundle-Format (`sideline-bundle.json` v1.0)](docs/json-bundle-format.md)
@@ -100,17 +105,18 @@ sidelineos/
 
 > **Hinweis zur Modultrennung:** In diesem Repository wird **ausschließlich der Core** (Auth, Mandanten, Infrastruktur, `@sidelineos/plugin-sdk`, Plugin Store) weiterentwickelt. Fachliche Modul-Features (z. B. Cut & Multi-Angle Sync oder Smart Playlists in der Videoanalyse) liegen in der Roadmap der jeweiligen Plugin-Repositories (siehe [`src/plugins/video-analysis/AI_HANDOFF.md`](src/plugins/video-analysis/AI_HANDOFF.md)).
 
-### Abgeschlossen (Core-Phasen 1–3 & R1)
+### Abgeschlossen (Core-Phasen 1–3, R1 & R2 → Alpha bereit)
 - [x] **Core-Grundstruktur & Entkopplung:** SidelineOS-Hub, Einstellungs-Hub mit offenem Seitenmenü, dauerhafte Multi-Saison-Teams, Multi-Unit-Kader, Einladungsmanagement & `@sidelineos/plugin-sdk` (`v1.0`) inkl. GitHub Plugin Store
 - [x] **Core-Auth & Öffentliche Routen:** Login-Maske (`/login`), Einladungs-Registrierung (`/invite/<token>` inkl. Bestätigungs-Warteliste) sowie SDK-Delegation für öffentliche Plugin-Routen (`/share/<token>`)
 - [x] **Plugin-Migration vorbereitet:** Bisheriger Videoanalyse-Prototyp vollständig in `src/plugins/video-analysis/` gekapselt und für die Auslagerung nach `sidelineos-plugin-video` dokumentiert
 - [x] **Core-Phase 1 – Backend-Fundament & `.env`-Bootstrap:** Stateless Node.js/Express-API (`/api/v1/*`), PostgreSQL-Schema (+ `PGlite`-Dev-Fallback) für Core-Tabellen & isolierte `plugin_<slug>`-Schemas, `scrypt`-Passwort-Hashing & Session-Auth, deployment-unabhängiges `.env`-Bootstrap (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`)
-- [x] **Core-Phase 2 – S3-Broker & SMTP-Service:** Serverseitig signierte Presigned-URLs auf Team-/Plugin-Präfixe (`teams/{teamId}/plugins/{slug}/`, kompatibel mit MinIO & Garage-S3), AES-256-GCM-verschlüsselte Infrastruktur-Einstellungen (`core.system_settings`), S3-/SMTP-Verbindungstests im Sysadmin-UI sowie E-Mail-Einladungsversand via `nodemailer` inkl. Offline-Link-Fallback
+- [x] **Core-Phase 2 – S3-Broker & SMTP-Service:** Serverseitig signierte Presigned-URLs auf Team-/Plugin-Präfixe (`teams/{teamId}/plugins/{slug}/`, kompatibel mit Cloudflare R2, MinIO & Garage-S3), AES-256-GCM-verschlüsselte Infrastruktur-Einstellungen (`core.system_settings`), S3-/SMTP-Verbindungstests im Sysadmin-UI sowie E-Mail-Einladungsversand via `nodemailer` inkl. Offline-Link-Fallback
 - [x] **Core-Phase 3 – Eigenständiges SDK & GitHub Plugin-Installer:** Auskopplung von `@sidelineos/plugin-sdk` (`packages/plugin-sdk/` inkl. `ExchangeTarget` & Scope-Export/Import-Vertrag), Dual-Mode Plugin-Installer (verifizierte GitHub-Releases + SHA-256, Offline-`.tar.gz`-Upload, Dev-Git-Clone mit `403`-Production-Sperre, `previous_version`-Rollback), Core-/Plugin-Update-Checker mit Sysadmin-Badge & Banner sowie `core.schema_migrations` + anonymisierte `core.s3_cleanup_queue` mit Schonfrist
 - [x] **R1 – Rebranding-Vorbereitung & i18n-Fundament (DE/EN + Plugin-Sprachpakete):** Zentrale Brand-Konfiguration (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) für UI, E-Mails und Header ohne Umbau technischer IDs; typsicheres Core-i18n (`de` Standard, `en` erweiterbar), persistente Benutzer-Sprache (`preferred_locale`) sowie Weiterleitung über `@sidelineos/plugin-sdk` (`locale` + `createPluginTranslator`) inkl. vollständig lokalisierter Videoanalyse
+- [x] **R2 – Basis-Deployment (Proxmox LXC, Cloudflare R2 & Multi-Arch):** Idempotenter Debian-/systemd-Installer (`deploy/lxc/install-core.sh`, `update-core.sh` für `amd64` & `arm64`), Cloudflare-R2-Presigned-Fix (`WHEN_REQUIRED`), optionales Multi-Arch-`Dockerfile` sowie Betriebsanleitung & Alpha-Checkliste (`docs/deployment-proxmox-lxc.md`)
 
-### Kurzfristig: Alpha-Release (`v0.1.0-alpha.1` – Einzelnutzer-Selbsttest)
-- [ ] **R2 – Basis-Deployment (Docker, Docker Compose, Postgres & MinIO):** Produktionsreifes Container-Image + `docker-compose.yml` (Core, PostgreSQL, MinIO, S3-/Healthcheck-Bootstrap & Dokumentation) für den Einzelnutzer-Selbsttest
+### Aktuell: Alpha-Release (`v0.1.0-alpha.1` – Einzelnutzer-Selbsttest)
+- [ ] **Einzelnutzer-Selbsttest im Proxmox-LXC** gemäß [Alpha-Checkliste](docs/deployment-proxmox-lxc.md#7-alpha-selbsttest-checkliste-v010-alpha1) durchführen
 
 ### Post-Alpha: Core-Ausbau vor Testnutzern → Closed Beta (`v0.1.0-beta.1`)
 - [ ] **Zentrales Upload- & File-Handling:** Einheitlicher S3-Upload-Proxy / Presigned-Multipart-Service, Quotas/Limits, Upload-Fortschritt sowie sichere Datei-Validierung für alle Plugins

@@ -121,11 +121,14 @@ export function normalisiereUndPruefeS3Key(params: {
   return { prefix, key };
 }
 
-function defaultClientFactory(konfig: VollS3Konfiguration): S3ClientAdapter {
-  return new S3Client({
+export function baueS3ClientKonfig(konfig: VollS3Konfiguration) {
+  return {
     region: konfig.region || 'eu-central-1',
     ...(konfig.endpoint ? { endpoint: konfig.endpoint } : {}),
     forcePathStyle: konfig.forcePathStyle,
+    // Verhindert automatische CRC32-Header in Presigned PUT-URLs (z. B. bei Cloudflare R2 Browser-Uploads)
+    requestChecksumCalculation: 'WHEN_REQUIRED' as const,
+    responseChecksumValidation: 'WHEN_REQUIRED' as const,
     credentials: {
       accessKeyId: konfig.accessKey,
       secretAccessKey: konfig.secretKey,
@@ -133,7 +136,11 @@ function defaultClientFactory(konfig: VollS3Konfiguration): S3ClientAdapter {
     requestHandler: {
       requestTimeout: 5000,
     },
-  }) as unknown as S3ClientAdapter;
+  };
+}
+
+function defaultClientFactory(konfig: VollS3Konfiguration): S3ClientAdapter {
+  return new S3Client(baueS3ClientKonfig(konfig)) as unknown as S3ClientAdapter;
 }
 
 async function defaultPresigner(

@@ -1,0 +1,32 @@
+[Unit]
+Description=SidelineOS-Core Platform
+Documentation=https://github.com/sidelineos/sidelineos-core
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=sidelineos
+Group=sidelineos
+WorkingDirectory=/opt/sidelineos-core
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/opt/sidelineos-core/.env
+ExecStart=/opt/sidelineos-core/node_modules/.bin/tsx server.ts
+Restart=always
+RestartSec=5
+TimeoutStopSec=15
+
+# Härtung (setzt in unprivilegierten Proxmox-LXCs Features -> nesting=1 voraus)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/sidelineos-core/.sidelineos-data
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sidelineos-core
+
+[Install]
+WantedBy=multi-user.target

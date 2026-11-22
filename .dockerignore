@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+node_modules
+dist
+packages/plugin-sdk/dist
+.sidelineos-data
+.aistudio
+*.log
