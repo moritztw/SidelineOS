@@ -1,6 +1,18 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
 import { normalisiereSprache, type UnterstuetzteSprache } from '../shared/i18n.ts';
+
+const PACKAGE_CORE_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
+    ) as { version?: string };
+    return pkg.version?.trim() || '0.1.0';
+  } catch {
+    return '0.1.0';
+  }
+})();
 
 export interface CoreServerConfig {
   nodeEnv: string;
@@ -134,7 +146,7 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
       absender: env.SMTP_FROM?.trim() || `${brandKonfig.produktName} <noreply@sidelineos.local>`,
       tlsAktiv: parseBool(env.SMTP_TLS, true),
     },
-    coreVersion: env.CORE_VERSION?.trim() || '0.1.0',
+    coreVersion: env.CORE_VERSION?.trim() || PACKAGE_CORE_VERSION,
     supportedSdkVersion: '1.0',
     pluginDataDir: env.PLUGIN_DATA_DIR?.trim() || '.sidelineos-data/plugins',
     devAllowGitInstall,

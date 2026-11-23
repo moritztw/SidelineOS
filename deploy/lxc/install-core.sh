@@ -90,6 +90,28 @@ SQL
   fi
   sed -i -E 's|^DEV_ALLOW_GIT_INSTALL=.*|DEV_ALLOW_GIT_INSTALL="false"|' "${APP_DIR}/.env"
 
+  INIT_CORE_VERSION=""
+  if [[ -d "${APP_DIR}/.git" ]]; then
+    INIT_TAG="$(git -C "${APP_DIR}" describe --tags --exact-match HEAD 2>/dev/null || true)"
+    if [[ -n "${INIT_TAG}" ]]; then
+      INIT_CORE_VERSION="${INIT_TAG#v}"
+    else
+      INIT_BRANCH="$(git -C "${APP_DIR}" symbolic-ref --short HEAD 2>/dev/null || git -C "${APP_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+      INIT_SHA="$(git -C "${APP_DIR}" rev-parse --short HEAD 2>/dev/null || true)"
+      if [[ -n "${INIT_BRANCH}" && "${INIT_BRANCH}" != "HEAD" && -n "${INIT_SHA}" ]]; then
+        CLEAN_BRANCH="$(printf '%s' "${INIT_BRANCH}" | sed -E 's|[^a-zA-Z0-9._-]+|-|g; s|^-+||; s|-+$||')"
+        INIT_CORE_VERSION="${CLEAN_BRANCH}-${INIT_SHA}"
+      fi
+    fi
+  fi
+  if [[ -n "${INIT_CORE_VERSION}" ]]; then
+    if grep -q '^CORE_VERSION=' "${APP_DIR}/.env"; then
+      sed -i -E "s|^CORE_VERSION=.*|CORE_VERSION=\"${INIT_CORE_VERSION}\"|" "${APP_DIR}/.env"
+    else
+      printf '\nCORE_VERSION="%s"\n' "${INIT_CORE_VERSION}" >> "${APP_DIR}/.env"
+    fi
+  fi
+
   chmod 600 "${APP_DIR}/.env"
   echo "    Neue .env erzeugt (Zufalls-DB-Passwort & SESSION_SECRET gesetzt)."
 else

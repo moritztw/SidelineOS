@@ -557,7 +557,12 @@ export function SysadminPage({
 
           <div className="flex flex-wrap items-center gap-3">
             <span className="font-mono text-[11px] text-[#8B949E]">
-              {installiertePlugins.length} installiert · Core v{capabilities?.coreVersion ?? '0.1.0'}{' '}
+              {installiertePlugins.length} installiert · Core{' '}
+              {capabilities?.coreVersion
+                ? /^\d/.test(capabilities.coreVersion)
+                  ? `v${capabilities.coreVersion}`
+                  : capabilities.coreVersion
+                : 'v0.1.0'}{' '}
               · SDK v{capabilities?.supportedSdkVersion ?? '1.0'}
             </span>
             {onUpdatesPruefen && (
@@ -582,6 +587,12 @@ export function SysadminPage({
           </div>
         </div>
 
+        {vollstaendigerKatalog.length === 0 ? (
+          <div className="rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-5 text-center text-xs text-[#6E7681]">
+            Noch keine Plugins installiert. Installiere externe Module unten per GitHub-Release,
+            Offline-Paket (`.tar.gz`) oder Git-Branch.
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           {vollstaendigerKatalog.map((eintrag) => {
             const { manifest } = eintrag;
@@ -799,6 +810,7 @@ export function SysadminPage({
             );
           })}
         </div>
+        )}
 
         {/* Dual-Mode Plugin-Installer: Release-Bundle / Offline .tar.gz / Dev-Git */}
         <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">

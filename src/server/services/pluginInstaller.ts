@@ -765,7 +765,10 @@ export class PluginInstallerService {
     try {
       const coreRelease = await this.holeGitHubRelease(this.config.coreGithubRepo);
       const neusteCore = coreRelease.tag_name.replace(/^v/i, '');
-      const istNeuer = vergleicheSemVer(this.config.coreVersion, neusteCore) < 0;
+      const istSemVerCore = /^\d+\.\d+\.\d+/.test(
+        this.config.coreVersion.trim().replace(/^v/i, '')
+      );
+      const istNeuer = istSemVerCore && vergleicheSemVer(this.config.coreVersion, neusteCore) < 0;
       coreUpdate = {
         aktuell: this.config.coreVersion,
         verfuegbar: neusteCore,
