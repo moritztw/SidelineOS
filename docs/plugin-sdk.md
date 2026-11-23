@@ -125,8 +125,17 @@ Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. I
 
 1. **Keine unkontrollierte Code-Ausführung im Server-Prozess:** Backend-Routen eines Plugins dürfen niemals über unsichere `eval()`/`Function()`-Konstrukte oder rohes SQL ohne Parameterbindung laufen. Externe Plugins werden im Produktionsbetrieb als signiertes Release-Artefakt (`sideline-plugin-v1.tar.gz` + SHA256-Prüfsumme + `plugin.manifest.json`) über GitHub Releases oder per Offline-`.tar.gz`-Upload installiert. Nur im expliziten Dev-Modus (`NODE_ENV !== 'production'` + `DEV_ALLOW_GIT_INSTALL=true`) steht zusätzlich `git clone --depth 1` + lokaler Build bereit.
 2. **Kein Cross-Site-Scripting (XSS):** UI-Komponenten verwenden ausschließlich sicheres React-Binding (`{wert}` statt `dangerouslySetInnerHTML`) und validieren JSON/CSV-Imports strikt vor der Übernahme.
-3. **Sichtbarkeit & Ausblendung:** Ist ein Plugin instanzweit (`ENABLED_MODULES`) oder für das gewählte Team deaktiviert, darf kein UI-Eintrag (weder Startseite noch Einstellungen) sichtbar sein und jeder API-/Routen-Zugriff liefert `403 Forbidden`.
+3. **Sichtbarkeit & Ausblendung:** Ist ein Plugin instanzweit (im Sysadmin Plugin Store) oder für das gewählte Team deaktiviert, darf kein UI-Eintrag (weder Startseite noch Einstellungen) sichtbar sein und jeder API-/Routen-Zugriff liefert `403 Forbidden`.
 4. **Cross-Platform-Fähigkeit:** Services müssen frei von Browser-DOM-APIs bleiben (`window`, `document`), damit Capacitor (Android/iOS) und Tauri (Linux/Windows/macOS) dieselbe Domänenlogik nutzen können.
+
+### Verbindliche Bundle-Dateien für dynamisches Laden (`dist/`)
+
+Damit SidelineOS-Core ein Plugin ohne Core-Rebuild zur Laufzeit laden kann, stellt `npm run build` im Plugin-Repo folgende Dateien in `dist/` bereit:
+
+* **`dist/client.js`** *(Pflicht für UI-Plugins, ESM)*: `export default` eines gültigen `SidelinePlugin`-Objekts (`manifest`, `getTabs`, `renderMainView`, optional `Provider`, `PrimaerAktion`, `renderPublicShareView`, `settingsPanels`).
+  * Im Frontend-Build (z. B. Vite Library Mode) werden `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client`, `lucide-react` und `@sidelineos/plugin-sdk` als `external` markiert – der Browser löst sie über die Core-ImportMap automatisch gegen die laufende Core-Instanz auf.
+* **`dist/client.css`** *(optional)*: Zusätzliches Plugin-CSS; wird vom Core beim Laden automatisch eingebunden und beim Deinstallieren entfernt.
+* **`dist/server.js`** *(optional, ESM)*: `export default` (oder `export const backendPlugin`) eines `SidelineBackendPlugin`-Objekts; wird beim Core-Start sowie live nach Installation/Rollback über `PluginBackendHost` geladen *(Fallback auf `dist/index.js` für Legacy-/Test-Bundles)*.
 
 ### GitHub Actions Release-Vorlage (`.github/workflows/release.yml` für Plugin-Repos)
 

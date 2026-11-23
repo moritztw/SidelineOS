@@ -62,7 +62,6 @@ describe('Core-Phase 2: S3-Broker & SMTP-Service', () => {
       NODE_ENV: 'test',
       APP_URL: 'https://sideline.example.org',
       SESSION_SECRET: 'phase2-test-session-secret-mindestens-32-chars',
-      ENABLED_MODULES: 'video-analysis,playbook',
     });
 
     db = await erstelleDatenbankClient(config);

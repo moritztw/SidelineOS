@@ -16,7 +16,7 @@
 * **Aufgeräumte Startseite & Einstellungs-Hub:** Die Startseite zeigt ausschließlich Kacheln für die installierten und fürs Team freigeschalteten Plugins sowie eine Kachel `Einstellungen`. Aktive Plugins klinken eigene Einstellungs-Kategorien dynamisch in die drei zentralen Einstellungsbereiche (`Persönliche Einstellungen`, `Team-Einstellungen`, `Sysadmin`) ein.
 * **Zentrale Spracheinstellung (DE / EN):** Benutzer wählen ihre UI-Sprache einmalig in den persönlichen Einstellungen (`preferred_locale`). Core und alle installierten Plugins erhalten die gewählte Sprache einheitlich über den SDK-Kontext (`locale`).
 * **Dauerhafte Multi-Saison-Teams:** Teams bleiben saisonübergreifend bestehen (`2026`, `2025`, `2024`, …). Alte Spielzeiten bleiben abrufbar, ohne Kader oder Einstellungen neu anzulegen.
-* **Deployment-unabhängige Ersteinrichtung per `.env`:** Kein unsicherer UI-Installations-Wizard – Initial-Sysadmin, `APP_BRAND_NAME`, `DEFAULT_LOCALE`, `ENABLED_MODULES`, Datenbank, S3 und SMTP werden einheitlich über Umgebungsvariablen konfiguriert.
+* **Deployment-unabhängige Ersteinrichtung per `.env`:** Kein unsicherer UI-Installations-Wizard – Initial-Sysadmin, `APP_BRAND_NAME`, `DEFAULT_LOCALE`, Datenbank, S3 und SMTP werden einheitlich über Umgebungsvariablen konfiguriert; Plugins werden nach dem Setup bequem im Sysadmin-Plugin-Store per GUI installiert.
 * **Spielerprofile, Multi-Units & Einladungen:** Spieler pflegen vollen Namen, Trikotnummer, Position, Kontakte und vom Team Admin definierte Custom-Felder. Two-Way-Spieler tragen mehrere Units (`Offense`, `Defense`, `Special Teams`). Team Admins laden per E-Mail (via SMTP oder Offline-Link-Fallback) oder teilbarem Team-Link inkl. Freigabe-Warteliste ein.
 
 ---
@@ -35,7 +35,7 @@
 # 1. Abhängigkeiten installieren
 npm install
 
-# 2. Umgebungsvariablen anlegen (inkl. Initial-Sysadmin & ENABLED_MODULES)
+# 2. Umgebungsvariablen anlegen (inkl. Initial-Sysadmin)
 cp .env.example .env
 
 # 3. Entwicklungsserver starten (Port 3000)
@@ -104,7 +104,7 @@ sidelineos/
 - [x] **Core-Grundstruktur & Entkopplung:** SidelineOS-Hub, Einstellungs-Hub mit offenem Seitenmenü, dauerhafte Multi-Saison-Teams, Multi-Unit-Kader, Einladungsmanagement & `@sidelineos/plugin-sdk` (`v1.0`) inkl. GitHub Plugin Store
 - [x] **Core-Auth & Öffentliche Routen:** Login-Maske (`/login`), Einladungs-Registrierung (`/invite/<token>` inkl. Bestätigungs-Warteliste) sowie SDK-Delegation für öffentliche Plugin-Routen (`/share/<token>`)
 - [x] **Plugin-Auslagerung abgeschlossen:** Videoanalyse vollständig in [`moritztw/SidelineOS-video`](https://github.com/moritztw/SidelineOS-video) ausgelagert und Fake-Preview-Module aus dem Core entfernt
-- [x] **Core-Phase 1 – Backend-Fundament & `.env`-Bootstrap:** Stateless Node.js/Express-API (`/api/v1/*`), PostgreSQL-Schema (+ `PGlite`-Dev-Fallback) für Core-Tabellen & isolierte `plugin_<slug>`-Schemas, `scrypt`-Passwort-Hashing & Session-Auth, deployment-unabhängiges `.env`-Bootstrap (`INITIAL_SYSADMIN_*`, `ENABLED_MODULES`)
+- [x] **Core-Phase 1 – Backend-Fundament & `.env`-Bootstrap:** Stateless Node.js/Express-API (`/api/v1/*`), PostgreSQL-Schema (+ `PGlite`-Dev-Fallback) für Core-Tabellen & isolierte `plugin_<slug>`-Schemas, `scrypt`-Passwort-Hashing & Session-Auth, deployment-unabhängiges `.env`-Bootstrap (`INITIAL_SYSADMIN_*`)
 - [x] **Core-Phase 2 – S3-Broker & SMTP-Service:** Serverseitig signierte Presigned-URLs auf Team-/Plugin-Präfixe (`teams/{teamId}/plugins/{slug}/`, kompatibel mit Cloudflare R2, MinIO & Garage-S3), AES-256-GCM-verschlüsselte Infrastruktur-Einstellungen (`core.system_settings`), S3-/SMTP-Verbindungstests im Sysadmin-UI sowie E-Mail-Einladungsversand via `nodemailer` inkl. Offline-Link-Fallback
 - [x] **Core-Phase 3 – Eigenständiges SDK & GitHub Plugin-Installer:** Auskopplung von `@sidelineos/plugin-sdk` (`packages/plugin-sdk/` inkl. `ExchangeTarget` & Scope-Export/Import-Vertrag), Dual-Mode Plugin-Installer (verifizierte GitHub-Releases + SHA-256, Offline-`.tar.gz`-Upload, Dev-Git-Clone mit `403`-Production-Sperre, `previous_version`-Rollback), Core-/Plugin-Update-Checker mit Sysadmin-Badge & Banner sowie `core.schema_migrations` + anonymisierte `core.s3_cleanup_queue` mit Schonfrist
 - [x] **R1 – Rebranding-Vorbereitung & i18n-Fundament (DE/EN + Plugin-Sprachpakete):** Zentrale Brand-Konfiguration (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) für UI, E-Mails und Header ohne Umbau technischer IDs; typsicheres Core-i18n (`de` Standard, `en` erweiterbar), persistente Benutzer-Sprache (`preferred_locale`) sowie Weiterleitung über `@sidelineos/plugin-sdk` (`locale` + `createPluginTranslator`) inkl. vollständig lokalisierter Videoanalyse

@@ -149,6 +149,20 @@ export interface MailVersandStatus {
   hinweis: string;
 }
 
+export interface RuntimePluginClientDTO {
+  pluginId: PluginId;
+  version: string;
+  manifest: PluginManifest;
+  clientUrl: string;
+  cssUrl?: string;
+}
+
+export interface RuntimeManifestResponse {
+  installedPluginIds: PluginId[];
+  enabledPluginIds: PluginId[];
+  bundles: RuntimePluginClientDTO[];
+}
+
 /**
  * Hält optionales Bearer-Fallback-Token ausschließlich im RAM (niemals localStorage/sessionStorage),
  * während Browser standardmäßig über das HttpOnly-Cookie authentifiziert werden.
@@ -551,5 +565,15 @@ export const coreApi = {
       method: 'POST',
       body: JSON.stringify({ auchVorfristig }),
     });
+  },
+
+  holeRuntimePlugins(): Promise<RuntimeManifestResponse> {
+    return apiRequest<RuntimeManifestResponse>('/api/v1/plugins/runtime/manifest');
+  },
+
+  holePublicRuntimePlugins(): Promise<{ bundles: RuntimePluginClientDTO[] }> {
+    return apiRequest<{ bundles: RuntimePluginClientDTO[] }>(
+      '/api/v1/plugins/runtime/public-manifest'
+    );
   },
 };

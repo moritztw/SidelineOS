@@ -15,7 +15,11 @@ async function startServer() {
   const db = await erstelleDatenbankClient(config);
   const bootstrap = await bootstrapCoreInstance(db, config);
 
-  const { app } = erstelleCoreApp({ db, config });
+  const { app, runtimeLoader } = erstelleCoreApp({ db, config });
+  const runtimeStart = await runtimeLoader.ladeAlleInstalliertenBackendPlugins();
+  if (runtimeStart.geladen.length > 0) {
+    console.log(`[SidelineOS-Core] Dynamische Plugins geladen: ${runtimeStart.geladen.join(', ')}`);
+  }
 
   if (config.nodeEnv !== 'production') {
     const { createServer: createViteServer } = await import('vite');

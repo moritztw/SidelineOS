@@ -2,27 +2,6 @@ import type { PluginId } from '../shared/types.ts';
 import type { PluginManifest, SidelinePlugin } from '../sdk/plugin.ts';
 
 /**
- * Parst ENABLED_MODULES aus der Umgebungskonfiguration (kommagetrennt).
- * Unbekannte IDs werden ignoriert; bei leerer/fehlender Variable greifen die Standard-IDs.
- */
-export function parseAktivierteModuleAusEnv(
-  envWert: string | undefined,
-  verfuegbareIds: readonly PluginId[],
-  fallbackIds: readonly PluginId[]
-): PluginId[] {
-  if (!envWert || !envWert.trim()) {
-    return [...fallbackIds];
-  }
-  const gueltig = new Set<string>(verfuegbareIds);
-  const geparst = envWert
-    .split(',')
-    .map((eintrag) => eintrag.trim())
-    .filter((eintrag) => gueltig.has(eintrag));
-
-  return geparst.length > 0 ? Array.from(new Set(geparst)) : [...fallbackIds];
-}
-
-/**
  * Ein Plugin ist für ein Team nur verfügbar, wenn es sowohl instanzweit (installiert & aktiv)
  * als auch für das jeweilige Team freigeschaltet wurde.
  */

@@ -3,8 +3,10 @@ import type { CoreServerConfig } from './config.ts';
 import type { CoreDatabaseClient } from './db/client.ts';
 import { CoreRepository } from './db/coreRepository.ts';
 import { PluginBackendHost } from './plugins/backendHost.ts';
+import { PluginRuntimeLoader } from './plugins/runtimeLoader.ts';
 import { erstelleAuthRouter } from './routes/auth.ts';
 import { erstellePluginGatewayRouter } from './routes/pluginGateway.ts';
+import { erstellePluginRuntimeRouter } from './routes/pluginRuntime.ts';
 import { erstelleSysadminRouter } from './routes/sysadmin.ts';
 import { erstelleTeamRouter } from './routes/teams.ts';
 import { PluginInstallerService } from './services/pluginInstaller.ts';
@@ -20,6 +22,7 @@ export interface CreateCoreAppOptionen {
   s3Cleanup?: S3CleanupService;
   smtpService?: SmtpService;
   pluginInstaller?: PluginInstallerService;
+  runtimeLoader?: PluginRuntimeLoader;
 }
 
 /**
@@ -30,6 +33,7 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
   app: Express;
   repo: CoreRepository;
   pluginHost: PluginBackendHost;
+  runtimeLoader: PluginRuntimeLoader;
   s3Broker: S3BrokerService;
   s3Cleanup: S3CleanupService;
   smtpService: SmtpService;
@@ -43,6 +47,8 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
   const pluginInstaller =
     optionen.pluginInstaller ?? new PluginInstallerService(db, repo, config);
   const pluginHost = optionen.pluginHost ?? new PluginBackendHost(db, s3Broker, s3Cleanup);
+  const runtimeLoader =
+    optionen.runtimeLoader ?? new PluginRuntimeLoader(repo, config, pluginHost);
 
   const app = express();
   app.set('trust proxy', 1);
@@ -77,8 +83,11 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
       s3Cleanup,
       smtpService,
       pluginInstaller,
+      runtimeLoader,
     })
   );
+
+  app.use('/api/v1/plugins/runtime', erstellePluginRuntimeRouter(repo, config, runtimeLoader));
 
   const { protectedRouter, publicRouter } = erstellePluginGatewayRouter(
     repo,
@@ -105,5 +114,14 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
     res.status(500).json({ fehler: 'Interner Serverfehler.' });
   });
 
-  return { app, repo, pluginHost, s3Broker, s3Cleanup, smtpService, pluginInstaller };
+  return {
+    app,
+    repo,
+    pluginHost,
+    runtimeLoader,
+    s3Broker,
+    s3Cleanup,
+    smtpService,
+    pluginInstaller,
+  };
 }

@@ -1,12 +1,6 @@
 import crypto from 'node:crypto';
-import { parseAktivierteModuleAusEnv } from '../core/pluginRegistry.ts';
-import {
-  OFFIZIELLER_PLUGIN_KATALOG,
-  STANDARD_AKTIVIERTE_PLUGIN_IDS,
-} from '../core/pluginStoreCatalog.ts';
 import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
 import { normalisiereSprache, type UnterstuetzteSprache } from '../shared/i18n.ts';
-import type { PluginId } from '../shared/types.ts';
 
 export interface CoreServerConfig {
   nodeEnv: string;
@@ -24,7 +18,6 @@ export interface CoreServerConfig {
     username: string;
     password: string;
   };
-  enabledModules: PluginId[];
   s3: {
     endpoint: string;
     region: string;
@@ -91,13 +84,6 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
         }
       : undefined;
 
-  const verfuegbareIds = OFFIZIELLER_PLUGIN_KATALOG.map((e) => e.manifest.id);
-  const enabledModules = parseAktivierteModuleAusEnv(
-    env.ENABLED_MODULES,
-    verfuegbareIds,
-    STANDARD_AKTIVIERTE_PLUGIN_IDS
-  );
-
   const rawS3Access = env.S3_ACCESS_KEY?.trim() || '';
   const rawS3Secret = env.S3_SECRET_KEY?.trim() || '';
   const s3AccessKey = rawS3Access === 'YOUR_S3_ACCESS_KEY' ? '' : rawS3Access;
@@ -125,7 +111,6 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     sessionSecret,
     sessionTtlStunden,
     initialSysadmin,
-    enabledModules,
     s3: {
       endpoint: env.S3_ENDPOINT?.trim() || '',
       region: env.S3_REGION?.trim() || 'eu-central-1',
