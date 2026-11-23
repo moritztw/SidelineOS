@@ -48,7 +48,7 @@ export function erstelleSysadminRouter(
         memberships,
         plugins,
         capabilities: {
-          devGitInstallErlaubt: config.devAllowGitInstall && config.nodeEnv !== 'production',
+          devGitInstallErlaubt: config.devAllowGitInstall,
           disableUpdateCheck: config.disableUpdateCheck,
           coreVersion: config.coreVersion,
           supportedSdkVersion: config.supportedSdkVersion,

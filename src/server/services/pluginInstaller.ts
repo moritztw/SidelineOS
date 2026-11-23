@@ -95,16 +95,17 @@ export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 export type CommandRunner = (
   cmd: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number }
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ) => Promise<{ stdout: string; stderr: string }>;
 
 function defaultCommandRunner(
   cmd: string,
   args: string[],
-  options: { cwd?: string; timeoutMs?: number }
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(cmd, args, {
     cwd: options.cwd,
+    env: options.env ?? process.env,
     timeout: options.timeoutMs ?? 120_000,
     maxBuffer: 10 * 1024 * 1024,
   });
@@ -559,10 +560,10 @@ export class PluginInstallerService {
     branch: string;
     migrationenAusgefuehrt: number;
   }> {
-    if (this.config.nodeEnv === 'production' || !this.config.devAllowGitInstall) {
+    if (!this.config.devAllowGitInstall) {
       throw new PluginInstallerFehler(
         403,
-        'Dev-Git-Installation ist nur im Entwicklungsmodus mit DEV_ALLOW_GIT_INSTALL=true erlaubt.'
+        'Git-Branch-Installation ist deaktiviert (DEV_ALLOW_GIT_INSTALL=true in .env erforderlich).'
       );
     }
 
@@ -577,7 +578,19 @@ export class PluginInstallerService {
       '_staging',
       `${quelle.slug}-${Date.now()}`
     );
+    const buildHome = path.resolve(this.config.pluginDataDir, '_build-home');
+    const npmCache = path.resolve(this.config.pluginDataDir, '_npm-cache');
     await fs.mkdir(path.dirname(stagingDir), { recursive: true });
+    await fs.mkdir(buildHome, { recursive: true });
+    await fs.mkdir(npmCache, { recursive: true });
+
+    const buildEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: buildHome,
+      npm_config_cache: npmCache,
+      // Auch wenn der Core unter NODE_ENV=production läuft, braucht der Plugin-Build devDependencies (vite/tsc)
+      NODE_ENV: 'development',
+    };
 
     try {
       const cloneArgs = ['clone', '--depth', '1'];
@@ -585,7 +598,7 @@ export class PluginInstallerService {
         cloneArgs.push('--branch', branch);
       }
       cloneArgs.push(`${quelle.repoUrl}.git`, stagingDir);
-      await this.commandRunner('git', cloneArgs, {});
+      await this.commandRunner('git', cloneArgs, { env: buildEnv });
 
       const manifestRawStr = await fs.readFile(
         path.join(stagingDir, 'plugin.manifest.json'),
@@ -610,10 +623,12 @@ export class PluginInstallerService {
 
       await this.commandRunner(
         'npm',
-        hatLockfile ? ['ci', '--no-audit', '--no-fund'] : ['install', '--no-audit', '--no-fund'],
-        { cwd: stagingDir }
+        hatLockfile
+          ? ['ci', '--include=dev', '--no-audit', '--no-fund']
+          : ['install', '--include=dev', '--no-audit', '--no-fund'],
+        { cwd: stagingDir, env: buildEnv }
       );
-      await this.commandRunner('npm', ['run', 'build'], { cwd: stagingDir });
+      await this.commandRunner('npm', ['run', 'build'], { cwd: stagingDir, env: buildEnv });
 
       // Gebautes dist/ + Manifest + optionale Migrationen einsammeln
       const gesammelteDateien = new Map<string, Buffer>();
