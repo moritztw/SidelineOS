@@ -148,7 +148,7 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     pluginDataDir: env.PLUGIN_DATA_DIR?.trim() || '.sidelineos-data/plugins',
     devAllowGitInstall,
     disableUpdateCheck: parseBool(env.DISABLE_UPDATE_CHECK, false),
-    coreGithubRepo: env.CORE_GITHUB_REPO?.trim() || 'sidelineos/sidelineos-core',
+    coreGithubRepo: env.CORE_GITHUB_REPO?.trim() || 'moritztw/SidelineOS-core',
     githubApiBaseUrl: (env.GITHUB_API_BASE_URL?.trim() || 'https://api.github.com').replace(
       /\/+$/,
       ''

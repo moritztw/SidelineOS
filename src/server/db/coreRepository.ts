@@ -315,7 +315,9 @@ export class CoreRepository {
       for (const pluginId of team.aktivierteModule) {
         await tx.query(
           `INSERT INTO core.team_modules (team_id, plugin_id, enabled)
-           VALUES ($1, $2, TRUE)
+           SELECT $1, plugin_id, TRUE
+           FROM core.installed_plugins
+           WHERE plugin_id = $2
            ON CONFLICT (team_id, plugin_id) DO UPDATE SET enabled = TRUE`,
           [team.id, pluginId]
         );

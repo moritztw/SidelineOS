@@ -26,7 +26,7 @@ Im frisch gestarteten Debian-LXC als `root`:
 
 ```bash
 apt-get update && apt-get install -y curl git ca-certificates
-git clone https://github.com/sidelineos/sidelineos-core.git /opt/sidelineos-core
+git clone https://github.com/moritztw/SidelineOS-core.git /opt/sidelineos-core
 cd /opt/sidelineos-core
 bash deploy/lxc/install-core.sh
 ```

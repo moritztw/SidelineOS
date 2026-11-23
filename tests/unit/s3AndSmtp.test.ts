@@ -68,6 +68,26 @@ describe('Core-Phase 2: S3-Broker & SMTP-Service', () => {
     db = await erstelleDatenbankClient(config);
     await bootstrapCoreInstance(db, config, { seedDemoWennLeer: true });
     const repo = new CoreRepository(db);
+    await repo.registrierePlugin(
+      {
+        manifest: VIDEO_S3_MANIFEST,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v1.0.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
+    await repo.registrierePlugin(
+      {
+        manifest: PLAYBOOK_OHNE_S3_MANIFEST,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v1.0.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
 
     const s3Broker = new S3BrokerService(repo, config, {
       clientFactory: () => ({
@@ -124,7 +144,8 @@ describe('Core-Phase 2: S3-Broker & SMTP-Service', () => {
     await pluginHost.registriereBackendPlugin(videoPlugin);
     await pluginHost.registriereBackendPlugin(playbookPlugin);
 
-    // Playbook zusätzlich für Seniors aktivieren
+    // Videoanalyse und Playbook für Seniors aktivieren
+    await repo.setzeTeamModulAktiv('team-stallions-seniors', 'video-analysis', true);
     await repo.setzeTeamModulAktiv('team-stallions-seniors', 'playbook', true);
 
     const { app } = erstelleCoreApp({ db, config, pluginHost, s3Broker, smtpService });

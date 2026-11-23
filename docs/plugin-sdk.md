@@ -45,7 +45,7 @@ Der SidelineOS Plugin Store liest **ausschließlich** `plugin.manifest.json`, be
   "version": "0.2.0",
   "sdkVersion": "1.0",
   "autor": "SidelineOS Core Team",
-  "repositoryUrl": "https://github.com/sidelineos/sidelineos-plugin-video",
+  "repositoryUrl": "https://github.com/moritztw/SidelineOS-video",
   "icon": "film",
   "status": "AKTIV",
   "standardAktiviert": true,
@@ -172,12 +172,8 @@ jobs:
 
 ---
 
-## 6. Schritt-für-Schritt: Videoanalyse-Ordner in ein eigenes GitHub-Repo auslagern
+## 6. Offizielles Referenz-Plugin: `SidelineOS-video`
 
-Der Ordner `src/plugins/video-analysis/` ist bereits vollständig nach diesen Regeln vorbereitet:
-
-1. Neues GitHub-Repository `sidelineos-plugin-video` mit GNU `AGPLv3` (`LICENSE`) anlegen.
-2. Gesamten Inhalt von `src/plugins/video-analysis/` inkl. `plugin.manifest.json`, `AI_HANDOFF.md` und zugehöriger Tests aus `tests/unit/` übernehmen.
-3. Importpfade auf das gebaute SDK-Paket `@sidelineos/plugin-sdk` (`npm run build:sdk` in `SidelineOS-Core`) umstellen.
-4. Oben gezeigte `.github/workflows/release.yml` hinterlegen und per `git tag v0.2.0 && git push --tags` ein Release erstellen.
-5. `AI_HANDOFF.md` mit in das neue Repo legen – damit verfügt jede weiterarbeitende KI sofort über alle Design-Entscheidungen, Frame-Math-Details und offenen Paket-3/4-Aufgaben.
+Das offizielle Videoanalyse-Plugin wurde vollständig aus dem Core ausgelagert und wird als eigenständiges Repository gepflegt:
+* Repository: **`https://github.com/moritztw/SidelineOS-video`**
+* Das Plugin nutzt `@sidelineos/plugin-sdk`, liefert das Bundle-Format `sideline-plugin-v1` (`.github/workflows/release.yml` wie oben) und wird über den Core Plugin Store installiert.

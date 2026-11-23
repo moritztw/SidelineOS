@@ -13,7 +13,7 @@ fi
 
 APP_DIR="${APP_DIR:-/opt/sidelineos-core}"
 APP_USER="${APP_USER:-sidelineos}"
-REPO_URL="${REPO_URL:-https://github.com/sidelineos/sidelineos-core.git}"
+REPO_URL="${REPO_URL:-https://github.com/moritztw/SidelineOS-core.git}"
 BRANCH="${BRANCH:-main}"
 DB_NAME="${DB_NAME:-sidelineos}"
 DB_USER="${DB_USER:-sidelineos}"

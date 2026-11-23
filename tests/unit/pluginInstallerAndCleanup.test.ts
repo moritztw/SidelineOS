@@ -109,7 +109,8 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
   };
 
   before(async () => {
-    tmpDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidelineos-p3-'));
+    try {
+      tmpDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sidelineos-p3-'));
 
     // 1. Lokaler Mock-GitHub-API + Asset-Server (100% offline)
     mockGitHubServer = http.createServer((req, res) => {
@@ -310,8 +311,29 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         return { status: 200, body: { ok: true } };
       },
     });
+    await repo.registrierePlugin(
+      {
+        manifest: videoManifest,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v0.1.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
+    await repo.registrierePlugin(
+      {
+        manifest: playbookManifest,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v0.1.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
     await pluginHost.registriereBackendPlugin(dummyPlugin(videoManifest));
     await pluginHost.registriereBackendPlugin(dummyPlugin(playbookManifest));
+    await repo.setzeTeamModulAktiv('team-stallions-seniors', 'video-analysis', true);
     await repo.setzeTeamModulAktiv('team-stallions-seniors', 'playbook', true);
 
     const { app } = erstelleCoreApp({
@@ -344,13 +366,20 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
       body: JSON.stringify({ kennung: 't.richter', passwort: DEMO_STANDARD_PASSWORT }),
     });
     coachCookie = extrahiereCookieHeader(loginCoach.headers.get('set-cookie'));
+    } catch (err) {
+      if (coreServer) await new Promise<void>((resolve) => coreServer.close(() => resolve()));
+      if (mockGitHubServer) await new Promise<void>((resolve) => mockGitHubServer.close(() => resolve()));
+      if (db) await db.close();
+      if (tmpDataDir) await fs.rm(tmpDataDir, { recursive: true, force: true }).catch(() => undefined);
+      throw err;
+    }
   });
 
   after(async () => {
-    await new Promise<void>((resolve) => coreServer.close(() => resolve()));
-    await new Promise<void>((resolve) => mockGitHubServer.close(() => resolve()));
-    await db.close();
-    await fs.rm(tmpDataDir, { recursive: true, force: true }).catch(() => undefined);
+    if (coreServer) await new Promise<void>((resolve) => coreServer.close(() => resolve()));
+    if (mockGitHubServer) await new Promise<void>((resolve) => mockGitHubServer.close(() => resolve()));
+    if (db) await db.close();
+    if (tmpDataDir) await fs.rm(tmpDataDir, { recursive: true, force: true }).catch(() => undefined);
   });
 
   it('vergleicht SemVer-Versionen inklusive Prerelease und v-Präfix korrekt', () => {

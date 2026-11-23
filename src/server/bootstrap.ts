@@ -7,7 +7,6 @@ import {
   INITIALE_TEAMS,
 } from '../core/demoOrgData.ts';
 import { DEMO_STANDARD_PASSWORT } from '../core/authService.ts';
-import { OFFIZIELLER_PLUGIN_KATALOG } from '../core/pluginStoreCatalog.ts';
 import type { CoreServerConfig } from './config.ts';
 import type { CoreDatabaseClient } from './db/client.ts';
 import { CoreRepository } from './db/coreRepository.ts';
@@ -82,11 +81,8 @@ export async function bootstrapCoreInstance(
 
   const repo = new CoreRepository(db);
 
-  // Store-Basisplugins idempotent registrieren
-  for (const eintrag of OFFIZIELLER_PLUGIN_KATALOG) {
-    const globalAn = config.enabledModules.includes(eintrag.manifest.id);
-    await repo.registrierePlugin(eintrag, globalAn);
-  }
+  // Veraltete Katalog-Platzhalter aus früheren Alpha-Ständen bereinigen (echte Bundles bleiben unberührt)
+  await db.query(`DELETE FROM core.installed_plugins WHERE install_mode = 'CATALOG'`);
 
   const vorhandeneBenutzer = await repo.zaehleBenutzer();
   if (vorhandeneBenutzer > 0) {

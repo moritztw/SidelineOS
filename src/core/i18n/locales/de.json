@@ -15,8 +15,6 @@
   "app.context.allSeasons": "Alle Saisons",
   "app.context.view": "Ansicht",
   "app.context.roleSwitchAria": "Rollen-Ansicht umschalten",
-  "app.context.demoAccount": "Demo-Konto",
-  "app.context.demoAccountAria": "Angemeldetes Demo-Konto wechseln",
   "app.context.logout": "Abmelden",
   "app.previewBanner.prefix": "Ansichts-Vorschau aktiv: Du siehst die Oberfläche als",
   "app.previewBanner.actualRole": "deine eigentliche Rolle",
@@ -39,16 +37,11 @@
   "login.tagline": "Selbstgehostete Multi-Tenant-Plattform für Teams & Coaches",
   "login.title": "Anmelden",
   "login.identifierLabel": "E-Mail-Adresse oder Benutzername",
-  "login.identifierPlaceholder": "coach@verein.de oder m.brenner",
+  "login.identifierPlaceholder": "name@verein.de oder benutzername",
   "login.passwordLabel": "Passwort",
   "login.submit": "Anmelden",
   "login.submitting": "Wird angemeldet…",
   "login.failed": "Anmeldung fehlgeschlagen.",
-  "login.demoPassword": "Demo-Passwort (Dev/Preview):",
-  "login.demoQuickTitle": "Demo-Schnellzugang (Backend-Session)",
-  "login.demoQuickAria": "Demo-Schnellzugang",
-  "login.publicRoutesTitle": "Öffentliche Routen direkt aufrufen",
-  "login.publicRoutesAria": "Öffentliche Routen testen",
 
   "invite.checking": "Einladungslink wird geprüft…",
   "invite.invalidTitle": "Einladung nicht nutzbar",
@@ -158,15 +151,5 @@
   "sysadmin.updateAvailableBadgeSingular": "{count} Update verfügbar",
   "sysadmin.updateAvailableBadgePlural": "{count} Updates verfügbar",
   "sysadmin.coreUpdateTitle": "{coreName} Update verfügbar: v{available} (aktuell v{current})",
-  "sysadmin.openGithubRelease": "Release auf GitHub öffnen",
-  "sysadmin.bootstrapTitle": "Deployment-unabhängige Ersteinrichtung (.env)",
-  "sysadmin.bootstrapBody": "{brand} verzichtet bewusst auf einen unsicheren Erststart-Wizard im Browser. Der erste Sysadmin, Datenbank, S3, SMTP und die installierten Plugins werden einheitlich über Umgebungsvariablen (Docker Compose, Kubernetes, Proxmox LXC oder Systemd) gesetzt.",
-
-  "previewPlugin.tabOverview": "Modul-Übersicht",
-  "previewPlugin.toHome": "Zur Startseite",
-  "previewPlugin.backHome": "Zurück zur {brand}-Startseite",
-  "previewPlugin.badge": "Externes {brand}-Plugin · v{version} · SDK {sdkVersion}",
-  "previewPlugin.repository": "Repository",
-  "previewPlugin.dbPrefix": "Isoliertes DB-Präfix",
-  "previewPlugin.permissions": "Berechtigungen"
+  "sysadmin.openGithubRelease": "Release auf GitHub öffnen"
 }

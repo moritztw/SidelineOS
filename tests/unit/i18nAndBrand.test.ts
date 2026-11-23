@@ -2,10 +2,6 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import { DEMO_STANDARD_PASSWORT } from '../../src/core/authService.ts';
-import {
-  createVideoTranslator,
-  VIDEO_WOERTERBUECHER,
-} from '../../src/plugins/video-analysis/i18n.ts';
 import type { PluginManifest, SidelineBackendPlugin } from '../../src/sdk/plugin.ts';
 import {
   DEFAULT_BRAND,
@@ -23,6 +19,7 @@ import { erstelleCoreApp } from '../../src/server/app.ts';
 import { bootstrapCoreInstance } from '../../src/server/bootstrap.ts';
 import { loadCoreConfig } from '../../src/server/config.ts';
 import { erstelleDatenbankClient, type CoreDatabaseClient } from '../../src/server/db/client.ts';
+import { CoreRepository } from '../../src/server/db/coreRepository.ts';
 import { PluginBackendHost } from '../../src/server/plugins/backendHost.ts';
 
 const TEST_PLUGIN_MANIFEST: PluginManifest = {
@@ -67,10 +64,11 @@ describe('R1: Rebranding-Vorbereitung & i18n-Fundament', () => {
     assert.equal(uebersetzeSchluessel(woerterbuecher, 'en', 'nurDe'), 'Nur Deutsch');
     assert.equal(uebersetzeSchluessel(woerterbuecher, 'en', 'unbekannt.key'), 'unbekannt.key');
 
-    const tDe = createPluginTranslator(VIDEO_WOERTERBUECHER, 'de');
-    const tEn = createVideoTranslator('en');
-    assert.equal(tDe('tab.dashboard'), 'Bibliothek');
-    assert.equal(tEn('tab.dashboard'), 'Library');
+    const tDe = createPluginTranslator(woerterbuecher, 'de');
+    const tEn = createPluginTranslator(woerterbuecher, 'en');
+    assert.equal(tDe('gruss', { name: 'Coach' }), 'Hallo Coach');
+    assert.equal(tEn('gruss', { name: 'Coach' }), 'Hello Coach');
+    assert.equal(tEn('nurDe'), 'Nur Deutsch');
   });
 
   it('trennt UI-Markennamen sauber von unveränderlichen SDK- & Paket-Kennungen', () => {
@@ -107,6 +105,18 @@ describe('R1 API: Benutzer-Sprache, Capabilities & Plugin-Backend-Locale', () =>
     });
     db = await erstelleDatenbankClient(config);
     await bootstrapCoreInstance(db, config, { seedDemoWennLeer: true });
+    const repo = new CoreRepository(db);
+    await repo.registrierePlugin(
+      {
+        manifest: TEST_PLUGIN_MANIFEST,
+        quelle: 'OFFICIAL_GITHUB',
+        verifiziert: true,
+        releaseTag: 'v1.0.0',
+        paketFormat: 'sideline-plugin-v1',
+      },
+      true
+    );
+    await repo.setzeTeamModulAktiv('team-stallions-seniors', 'video-analysis', true);
 
     const pluginHost = new PluginBackendHost(db);
     const backendPlugin: SidelineBackendPlugin = {
