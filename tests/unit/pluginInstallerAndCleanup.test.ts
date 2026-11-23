@@ -568,7 +568,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(delRes.status, 200);
   });
 
-  it('erlaubt Dev-Git-Clone nur im Dev-Modus, validiert Branch-Namen und blockiert ihn in Production mit 403', async () => {
+  it('steuert Git-Clone explizit über DEV_ALLOW_GIT_INSTALL (Default false), validiert Branch-Namen und erlaubt explizites Opt-in auch bei NODE_ENV=production', async () => {
     // 1. Flag-Injection im Branch blockieren
     const badBranch = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
       method: 'POST',
@@ -606,23 +606,34 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(status?.installMode, 'DEV_GIT');
     assert.equal(status?.releaseTag, 'dev:feature/metrics');
 
-    // 3. In Production strikt 403 erzwingen
-    const prodConfig = loadCoreConfig({
+    // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)
+    const defaultProdConfig = loadCoreConfig({
       NODE_ENV: 'production',
       APP_URL: 'https://prod.example.org',
       SESSION_SECRET: 'prod-secret-mindestens-32-zeichen-lang-xyz',
       DATABASE_URL: 'postgresql://unused',
       PLUGIN_DATA_DIR: tmpDataDir,
-      DEV_ALLOW_GIT_INSTALL: 'true', // muss in production trotzdem false bleiben
     });
-    const prodInstaller = new PluginInstallerService(db, repo, prodConfig);
+    assert.equal(defaultProdConfig.devAllowGitInstall, false);
+    const defaultProdInstaller = new PluginInstallerService(db, repo, defaultProdConfig);
     await assert.rejects(
       () =>
-        prodInstaller.installiereDevAusGit({
+        defaultProdInstaller.installiereDevAusGit({
           repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
         }),
       (err: unknown) => err instanceof PluginInstallerFehler && err.status === 403
     );
+
+    // 4. Explizites DEV_ALLOW_GIT_INSTALL=true wirkt auch bei NODE_ENV=production
+    const optInProdConfig = loadCoreConfig({
+      NODE_ENV: 'production',
+      APP_URL: 'https://staging.example.org',
+      SESSION_SECRET: 'prod-secret-mindestens-32-zeichen-lang-xyz',
+      DATABASE_URL: 'postgresql://unused',
+      PLUGIN_DATA_DIR: tmpDataDir,
+      DEV_ALLOW_GIT_INSTALL: 'true',
+    });
+    assert.equal(optInProdConfig.devAllowGitInstall, true);
   });
 
   it('verwaltet S3-Cleanup-Queue mit Permission-Prüfung, anonymisierter Sysadmin-Statistik und Schonfrist-Löschung', async () => {

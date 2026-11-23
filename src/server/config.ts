@@ -99,8 +99,7 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
   const smtpPass = rawSmtpPass === 'YOUR_SMTP_PASSWORD' ? '' : rawSmtpPass;
   const smtpPort = Number(env.SMTP_PORT);
 
-  const devAllowGitInstall =
-    nodeEnv !== 'production' && parseBool(env.DEV_ALLOW_GIT_INSTALL, nodeEnv === 'development');
+  const devAllowGitInstall = parseBool(env.DEV_ALLOW_GIT_INSTALL, false);
 
   return {
     nodeEnv,

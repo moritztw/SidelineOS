@@ -845,8 +845,8 @@ export function SysadminPage({
                 onClick={() => setInstallModus('dev-git')}
                 title={
                   capabilities?.devGitInstallErlaubt
-                    ? 'Nur im Dev-Modus: Repo klonen & lokal bauen'
-                    : 'Im Produktionsmodus gesperrt (DEV_ALLOW_GIT_INSTALL=false)'
+                    ? 'Git-Repo klonen & lokal bauen (DEV_ALLOW_GIT_INSTALL=true)'
+                    : 'Deaktiviert (DEV_ALLOW_GIT_INSTALL=false)'
                 }
                 className={`inline-flex items-center gap-1 rounded px-2.5 py-1 font-medium transition-colors disabled:opacity-40 ${
                   installModus === 'dev-git'
