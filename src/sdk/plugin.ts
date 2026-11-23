@@ -36,7 +36,9 @@ export type PluginPermission =
   | 's3:team-rw'
   | 's3:cleanup-queue'
   | 'db:plugin-tables'
-  | 'share:public-links';
+  | 'share:public-links'
+  | 'notifications:send'
+  | 'notifications:channel';
 
 export type PluginIconName = 'film' | 'book-open' | 'clipboard-check' | 'layers' | 'puzzle';
 
@@ -122,17 +124,40 @@ export interface PluginDbScope {
  * Isolierter S3-Zugriff für ein externes Plugin innerhalb seines Team-Präfixes
  * (`teams/<teamId>/<s3Prefix>`). Der Core prüft Rechte und signiert Presigned URLs.
  */
+export interface S3MultipartPartRef {
+  partNumber: number;
+  etag: string;
+}
+
 export interface PluginS3Scope {
   readonly prefix: string;
   getSignedUploadUrl(params: {
     objectPath: string;
     contentType?: string;
+    fileSizeBytes?: number;
     expiresInSeconds?: number;
   }): Promise<{ url: string; key: string; expiresIn: number }>;
   getSignedDownloadUrl(params: {
     objectPath: string;
     expiresInSeconds?: number;
   }): Promise<{ url: string; key: string; expiresIn: number }>;
+  initiateMultipartUpload(params: {
+    objectPath: string;
+    contentType?: string;
+    fileSizeBytes?: number;
+  }): Promise<{ uploadId: string; key: string; maxFileSizeBytes: number }>;
+  getSignedMultipartPartUrl(params: {
+    objectPath: string;
+    uploadId: string;
+    partNumber: number;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; partNumber: number; expiresIn: number }>;
+  completeMultipartUpload(params: {
+    objectPath: string;
+    uploadId: string;
+    parts: S3MultipartPartRef[];
+  }): Promise<{ key: string; etag?: string; location?: string }>;
+  abortMultipartUpload(params: { objectPath: string; uploadId: string }): Promise<void>;
   deleteObject(objectPath: string): Promise<void>;
 }
 
@@ -167,6 +192,78 @@ export interface PluginExportScopeResult {
   assetKeys: string[];
 }
 
+export type NotificationPrioritaet = 'info' | 'warning' | 'urgent';
+
+export interface PluginNotificationChannel {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+export interface PluginNotificationChannelInfo extends PluginNotificationChannel {
+  providerPluginId: string;
+  aktiv: boolean;
+}
+
+export interface NotificationPayload {
+  eventType: string;
+  title: string;
+  message: string;
+  linkPath?: string;
+  priority?: NotificationPrioritaet;
+  recipientUserUuids?: string[];
+  channels?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface NotificationEmpfaengerInfo {
+  uuid: string;
+  vollerName: string;
+  benutzername: string;
+  preferredLocale: string;
+}
+
+export interface NotificationDispatchEvent {
+  eventType: string;
+  title: string;
+  message: string;
+  linkPath?: string;
+  priority: NotificationPrioritaet;
+  sourcePluginId: string;
+  teamId?: string;
+  teamName?: string;
+  recipients: NotificationEmpfaengerInfo[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface PluginNotificationChannelKontext {
+  readonly pluginId: PluginId;
+  readonly manifest: PluginManifest;
+  readonly channelId: string;
+  readonly db: PluginDbScope;
+  readonly team?: TeamKontext;
+}
+
+export interface NotificationChannelErgebnis {
+  channelId: string;
+  providerPluginId: string;
+  status: 'sent' | 'skipped' | 'failed';
+  delivered: number;
+  error?: string;
+}
+
+export interface NotificationDispatchErgebnis {
+  notificationIds: string[];
+  recipientCount: number;
+  channelResults: NotificationChannelErgebnis[];
+}
+
+export interface PluginNotificationScope {
+  send(payload: NotificationPayload): Promise<NotificationDispatchErgebnis>;
+  listChannels(): Promise<PluginNotificationChannelInfo[]>;
+}
+
 /**
  * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
  */
@@ -176,6 +273,7 @@ export interface PluginBackendKontext {
   readonly db: PluginDbScope;
   readonly s3?: PluginS3Scope;
   readonly cleanupQueue?: PluginCleanupQueueScope;
+  readonly notifications?: PluginNotificationScope;
   readonly user: BenutzerKonto;
   readonly locale: string;
   readonly team: TeamKontext;
@@ -189,6 +287,11 @@ export interface PluginBackendKontext {
 export interface SidelineBackendPlugin {
   readonly manifest: PluginManifest;
   readonly migrations?: Array<{ name: string; sql: string }>;
+  readonly notificationChannels?: PluginNotificationChannel[];
+  deliverNotification?: (
+    event: NotificationDispatchEvent,
+    ctx: PluginNotificationChannelKontext
+  ) => Promise<{ delivered: number; error?: string }>;
   handleRequest?: (
     req: {
       method: string;
@@ -267,6 +370,8 @@ export const PERMISSION_BESCHREIBUNGEN: Record<PluginPermission, string> = {
   's3:cleanup-queue': 'Registriert verwaiste S3-Objekte in der Sysadmin-Schonfrist',
   'db:plugin-tables': 'Verwaltet eigene isolierte PostgreSQL-Tabellen',
   'share:public-links': 'Erzeugt zeitlich befristete öffentliche /share/-Links',
+  'notifications:send': 'Löst Benachrichtigungen über den Core-Notification-Endpunkt aus',
+  'notifications:channel': 'Registriert einen eigenen Zustellweg (z. B. Push/Webhook) für Core-Benachrichtigungen',
 };
 
 export const PERMISSION_BESCHREIBUNGEN_I18N: Record<
@@ -281,6 +386,8 @@ export const PERMISSION_BESCHREIBUNGEN_I18N: Record<
     's3:cleanup-queue': 'Registers orphaned S3 objects in the sysadmin retention queue',
     'db:plugin-tables': 'Manages isolated PostgreSQL plugin tables',
     'share:public-links': 'Creates time-limited public /share/ links',
+    'notifications:send': 'Triggers notifications via the core notification endpoint',
+    'notifications:channel': 'Provides an external delivery channel (e.g. push/webhook) for core notifications',
   },
 };
 

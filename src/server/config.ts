@@ -26,6 +26,7 @@ export interface CoreServerConfig {
     secretKey: string;
     forcePathStyle: boolean;
     cleanupRetentionDays: number;
+    maxUploadBytes: number;
   };
   smtp: {
     host: string;
@@ -89,6 +90,8 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
   const s3AccessKey = rawS3Access === 'YOUR_S3_ACCESS_KEY' ? '' : rawS3Access;
   const s3SecretKey = rawS3Secret === 'YOUR_S3_SECRET_KEY' ? '' : rawS3Secret;
   const s3Retention = Number(env.S3_CLEANUP_RETENTION_DAYS);
+  const s3MaxUploadRaw = Number(env.S3_MAX_UPLOAD_BYTES);
+  const defaultMaxUploadBytes = 5 * 1024 * 1024 * 1024; // 5 GiB Standardlimit für Multipart-Uploads
 
   const rawSmtpHost = env.SMTP_HOST?.trim() || '';
   const rawSmtpPass = env.SMTP_PASSWORD?.trim() || '';
@@ -119,6 +122,10 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
       secretKey: s3SecretKey,
       forcePathStyle: parseBool(env.S3_FORCE_PATH_STYLE, true),
       cleanupRetentionDays: s3Retention > 0 ? Math.min(s3Retention, 365) : 14,
+      maxUploadBytes:
+        s3MaxUploadRaw > 0 && Number.isFinite(s3MaxUploadRaw)
+          ? Math.floor(s3MaxUploadRaw)
+          : defaultMaxUploadBytes,
     },
     smtp: {
       host: smtpHost,

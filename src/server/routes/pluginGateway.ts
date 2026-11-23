@@ -1,8 +1,10 @@
 import { Router, type Request, type Response } from 'express';
+import type { S3MultipartPartRef } from '../../sdk/plugin.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import type { PluginBackendHost } from '../plugins/backendHost.ts';
+import type { NotificationService } from '../services/notificationService.ts';
 import type { S3BrokerService } from '../services/s3Broker.ts';
 import type { S3CleanupService } from '../services/s3CleanupService.ts';
 
@@ -21,7 +23,8 @@ export function erstellePluginGatewayRouter(
   config: CoreServerConfig,
   pluginHost: PluginBackendHost,
   s3Broker?: S3BrokerService,
-  s3Cleanup?: S3CleanupService
+  s3Cleanup?: S3CleanupService,
+  notificationService?: NotificationService
 ): { protectedRouter: Router; publicRouter: Router } {
   const protectedRouter = Router();
   const publicRouter = Router();
@@ -93,18 +96,122 @@ export function erstellePluginGatewayRouter(
         try {
           const contentType =
             typeof body.contentType === 'string' ? body.contentType.trim() : undefined;
+          const fileSizeBytes =
+            typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined;
           const signiert = await s3Broker.erzeugePresignedUploadUrl({
             teamId,
             pluginId,
             manifest,
             objectPath,
             contentType,
+            fileSizeBytes,
             expiresInSeconds,
           });
           res.status(200).json(signiert);
         } catch (err) {
           res.status(400).json({
             fehler: err instanceof Error ? err.message : 'Presigned Upload-URL fehlgeschlagen.',
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_s3/multipart/init') {
+        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
+          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen S3-Uploads starten.' });
+          return;
+        }
+        try {
+          const contentType =
+            typeof body.contentType === 'string' ? body.contentType.trim() : undefined;
+          const fileSizeBytes =
+            typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined;
+          const gestarted = await s3Broker.starteMultipartUpload({
+            teamId,
+            pluginId,
+            manifest,
+            objectPath,
+            contentType,
+            fileSizeBytes,
+          });
+          res.status(200).json(gestarted);
+        } catch (err) {
+          res.status(400).json({
+            fehler: err instanceof Error ? err.message : 'Multipart-Upload konnte nicht gestartet werden.',
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_s3/multipart/sign-part') {
+        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
+          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Parts signieren.' });
+          return;
+        }
+        try {
+          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
+          const partNumber = typeof body.partNumber === 'number' ? body.partNumber : 0;
+          const signiert = await s3Broker.erzeugeMultipartPartUploadUrl({
+            teamId,
+            pluginId,
+            manifest,
+            objectPath,
+            uploadId,
+            partNumber,
+            expiresInSeconds,
+          });
+          res.status(200).json(signiert);
+        } catch (err) {
+          res.status(400).json({
+            fehler: err instanceof Error ? err.message : 'Multipart-Part-URL fehlgeschlagen.',
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_s3/multipart/complete') {
+        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
+          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Uploads abschließen.' });
+          return;
+        }
+        try {
+          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
+          const parts = Array.isArray(body.parts) ? (body.parts as S3MultipartPartRef[]) : [];
+          const fertig = await s3Broker.schliesseMultipartUploadAb({
+            teamId,
+            pluginId,
+            manifest,
+            objectPath,
+            uploadId,
+            parts,
+          });
+          res.status(200).json(fertig);
+        } catch (err) {
+          res.status(400).json({
+            fehler: err instanceof Error ? err.message : 'Multipart-Abschluss fehlgeschlagen.',
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_s3/multipart/abort') {
+        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
+          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Uploads abbrechen.' });
+          return;
+        }
+        try {
+          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
+          await s3Broker.brecheMultipartUploadAb({
+            teamId,
+            pluginId,
+            manifest,
+            objectPath,
+            uploadId,
+          });
+          res.status(200).json({ ok: true });
+        } catch (err) {
+          res.status(400).json({
+            fehler: err instanceof Error ? err.message : 'Multipart-Abbruch fehlgeschlagen.',
           });
         }
         return;
@@ -191,6 +298,66 @@ export function erstellePluginGatewayRouter(
       }
 
       res.status(404).json({ fehler: 'Unbekannter Core-S3-Broker-Endpunkt.' });
+      return;
+    }
+
+    // Core-Notification-Gateway für Plugins (`notifications:send`)
+    if (subPfad.startsWith('/_notifications/')) {
+      if (!notificationService) {
+        res.status(503).json({ fehler: 'Notification-Service ist auf dieser Instanz nicht initialisiert.' });
+        return;
+      }
+      const manifest = plugin?.manifest ?? pluginStatus.manifest;
+
+      if (req.method === 'GET' && subPfad === '/_notifications/channels') {
+        const channels = await notificationService.listeKanaeleFuerTeam(teamId);
+        res.status(200).json({ channels });
+        return;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_notifications/send') {
+        if (!manifest.permissions.includes('notifications:send')) {
+          res.status(403).json({
+            fehler: `Plugin "${pluginId}" besitzt keine Berechtigung ("notifications:send").`,
+          });
+          return;
+        }
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        try {
+          const ergebnis = await notificationService.dispatchFuerPlugin({
+            sourcePluginId: pluginId,
+            team,
+            payload: {
+              eventType: typeof body.eventType === 'string' ? body.eventType : 'plugin.event',
+              title: typeof body.title === 'string' ? body.title : '',
+              message: typeof body.message === 'string' ? body.message : '',
+              linkPath: typeof body.linkPath === 'string' ? body.linkPath : undefined,
+              priority:
+                body.priority === 'warning' || body.priority === 'urgent' ? body.priority : 'info',
+              recipientUserUuids: Array.isArray(body.recipientUserUuids)
+                ? (body.recipientUserUuids as unknown[]).filter(
+                    (u): u is string => typeof u === 'string'
+                  )
+                : undefined,
+              channels: Array.isArray(body.channels)
+                ? (body.channels as unknown[]).filter((c): c is string => typeof c === 'string')
+                : undefined,
+              metadata:
+                body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+                  ? (body.metadata as Record<string, unknown>)
+                  : undefined,
+            },
+          });
+          res.status(200).json(ergebnis);
+        } catch (err) {
+          res.status(400).json({
+            fehler: err instanceof Error ? err.message : 'Notification konnte nicht versendet werden.',
+          });
+        }
+        return;
+      }
+
+      res.status(404).json({ fehler: 'Unbekannter Core-Notification-Endpunkt.' });
       return;
     }
 

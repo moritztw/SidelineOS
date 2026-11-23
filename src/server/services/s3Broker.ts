@@ -1,12 +1,20 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import type { PluginManifest, PluginS3Scope } from '../../sdk/plugin.ts';
+import type {
+  PluginManifest,
+  PluginS3Scope,
+  S3MultipartPartRef,
+} from '../../sdk/plugin.ts';
 import type { S3Konfiguration } from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
@@ -52,9 +60,44 @@ export interface S3ClientAdapter {
 export type S3ClientFactory = (konfig: VollS3Konfiguration) => S3ClientAdapter;
 export type S3PresignerFn = (
   client: S3ClientAdapter,
-  command: PutObjectCommand | GetObjectCommand,
+  command: PutObjectCommand | GetObjectCommand | UploadPartCommand,
   options: { expiresIn: number }
 ) => Promise<string>;
+
+const GUELTIGER_MIME_TYP =
+  /^[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*\/[a-zA-Z0-9][a-zA-Z0-9!#$&^_.+-]*(\s*;[^\u0000-\u001f]*)?$/;
+
+export function validiereUploadMetadaten(params: {
+  contentType?: string;
+  fileSizeBytes?: number;
+  maxUploadBytes: number;
+}): { contentType?: string } {
+  let bereinigterTyp: string | undefined;
+  if (typeof params.contentType === 'string' && params.contentType.trim().length > 0) {
+    const typ = params.contentType.trim();
+    if (!GUELTIGER_MIME_TYP.test(typ)) {
+      throw new Error('Ungültiger Content-Type für S3-Upload.');
+    }
+    bereinigterTyp = typ;
+  }
+
+  if (params.fileSizeBytes !== undefined) {
+    if (
+      typeof params.fileSizeBytes !== 'number' ||
+      !Number.isFinite(params.fileSizeBytes) ||
+      params.fileSizeBytes <= 0
+    ) {
+      throw new Error('Dateigröße (fileSizeBytes) muss größer als 0 sein.');
+    }
+    if (params.fileSizeBytes > params.maxUploadBytes) {
+      throw new Error(
+        `Datei überschreitet das konfigurierte Upload-Limit (${params.maxUploadBytes} Bytes).`
+      );
+    }
+  }
+
+  return { contentType: bereinigterTyp };
+}
 
 export function validiereS3EndpointUrl(endpoint: string): { ok: boolean; fehler?: string } {
   const bereinigt = endpoint.trim();
@@ -145,10 +188,17 @@ function defaultClientFactory(konfig: VollS3Konfiguration): S3ClientAdapter {
 
 async function defaultPresigner(
   client: S3ClientAdapter,
-  command: PutObjectCommand | GetObjectCommand,
+  command: PutObjectCommand | GetObjectCommand | UploadPartCommand,
   options: { expiresIn: number }
 ): Promise<string> {
-  return getSignedUrl(client as unknown as S3Client, command, options);
+  const s3 = client as unknown as S3Client;
+  if (command instanceof UploadPartCommand) {
+    return getSignedUrl(s3, command, options);
+  }
+  if (command instanceof GetObjectCommand) {
+    return getSignedUrl(s3, command, options);
+  }
+  return getSignedUrl(s3, command, options);
 }
 
 export class S3BrokerService {
@@ -311,8 +361,14 @@ export class S3BrokerService {
     manifest: PluginManifest;
     objectPath: string;
     contentType?: string;
+    fileSizeBytes?: number;
     expiresInSeconds?: number;
   }): Promise<{ url: string; key: string; expiresIn: number }> {
+    const { contentType } = validiereUploadMetadaten({
+      contentType: params.contentType,
+      fileSizeBytes: params.fileSizeBytes,
+      maxUploadBytes: this.config.s3.maxUploadBytes,
+    });
     const konfig = await this.holeAktivenClient();
     const { key } = normalisiereUndPruefeS3Key({
       teamId: params.teamId,
@@ -325,10 +381,151 @@ export class S3BrokerService {
     const cmd = new PutObjectCommand({
       Bucket: konfig.bucket,
       Key: key,
-      ...(params.contentType ? { ContentType: params.contentType } : {}),
+      ...(contentType ? { ContentType: contentType } : {}),
     });
     const url = await this.presigner(client, cmd, { expiresIn });
     return { url, key, expiresIn };
+  }
+
+  async starteMultipartUpload(params: {
+    teamId: string;
+    pluginId: string;
+    manifest: PluginManifest;
+    objectPath: string;
+    contentType?: string;
+    fileSizeBytes?: number;
+  }): Promise<{ uploadId: string; key: string; maxFileSizeBytes: number }> {
+    const { contentType } = validiereUploadMetadaten({
+      contentType: params.contentType,
+      fileSizeBytes: params.fileSizeBytes,
+      maxUploadBytes: this.config.s3.maxUploadBytes,
+    });
+    const konfig = await this.holeAktivenClient();
+    const { key } = normalisiereUndPruefeS3Key({
+      teamId: params.teamId,
+      pluginId: params.pluginId,
+      s3Prefix: params.manifest.s3Prefix,
+      objectPath: params.objectPath,
+    });
+    const client = this.clientFactory(konfig);
+    const antwort = (await client.send(
+      new CreateMultipartUploadCommand({
+        Bucket: konfig.bucket,
+        Key: key,
+        ...(contentType ? { ContentType: contentType } : {}),
+      })
+    )) as { UploadId?: string };
+
+    if (!antwort?.UploadId) {
+      throw new Error('S3 hat keine UploadId für den Multipart-Upload zurückgegeben.');
+    }
+    return {
+      uploadId: antwort.UploadId,
+      key,
+      maxFileSizeBytes: this.config.s3.maxUploadBytes,
+    };
+  }
+
+  async erzeugeMultipartPartUploadUrl(params: {
+    teamId: string;
+    pluginId: string;
+    manifest: PluginManifest;
+    objectPath: string;
+    uploadId: string;
+    partNumber: number;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; partNumber: number; expiresIn: number }> {
+    const uploadId = validiereUploadId(params.uploadId);
+    const partNumber = validierePartNumber(params.partNumber);
+    const konfig = await this.holeAktivenClient();
+    const { key } = normalisiereUndPruefeS3Key({
+      teamId: params.teamId,
+      pluginId: params.pluginId,
+      s3Prefix: params.manifest.s3Prefix,
+      objectPath: params.objectPath,
+    });
+    const expiresIn = clampAblaufzeit(params.expiresInSeconds, 900);
+    const client = this.clientFactory(konfig);
+    const cmd = new UploadPartCommand({
+      Bucket: konfig.bucket,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+    const url = await this.presigner(client, cmd, { expiresIn });
+    return { url, key, partNumber, expiresIn };
+  }
+
+  async schliesseMultipartUploadAb(params: {
+    teamId: string;
+    pluginId: string;
+    manifest: PluginManifest;
+    objectPath: string;
+    uploadId: string;
+    parts: S3MultipartPartRef[];
+  }): Promise<{ key: string; etag?: string; location?: string }> {
+    const uploadId = validiereUploadId(params.uploadId);
+    if (!Array.isArray(params.parts) || params.parts.length === 0) {
+      throw new Error('Mindestens ein hochgeladener Part (parts) ist erforderlich.');
+    }
+    const bereinigteParts = params.parts
+      .map((p) => ({
+        PartNumber: validierePartNumber(p.partNumber),
+        ETag: typeof p.etag === 'string' && p.etag.trim() ? p.etag.trim() : '',
+      }))
+      .sort((a, b) => a.PartNumber - b.PartNumber);
+
+    if (bereinigteParts.some((p) => !p.ETag)) {
+      throw new Error('Jeder Multipart-Part benötigt ein gültiges ETag.');
+    }
+
+    const konfig = await this.holeAktivenClient();
+    const { key } = normalisiereUndPruefeS3Key({
+      teamId: params.teamId,
+      pluginId: params.pluginId,
+      s3Prefix: params.manifest.s3Prefix,
+      objectPath: params.objectPath,
+    });
+    const client = this.clientFactory(konfig);
+    const antwort = (await client.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: konfig.bucket,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: { Parts: bereinigteParts },
+      })
+    )) as { ETag?: string; Location?: string };
+
+    return {
+      key,
+      ...(antwort?.ETag ? { etag: antwort.ETag } : {}),
+      ...(antwort?.Location ? { location: antwort.Location } : {}),
+    };
+  }
+
+  async brecheMultipartUploadAb(params: {
+    teamId: string;
+    pluginId: string;
+    manifest: PluginManifest;
+    objectPath: string;
+    uploadId: string;
+  }): Promise<void> {
+    const uploadId = validiereUploadId(params.uploadId);
+    const konfig = await this.holeAktivenClient();
+    const { key } = normalisiereUndPruefeS3Key({
+      teamId: params.teamId,
+      pluginId: params.pluginId,
+      s3Prefix: params.manifest.s3Prefix,
+      objectPath: params.objectPath,
+    });
+    const client = this.clientFactory(konfig);
+    await client.send(
+      new AbortMultipartUploadCommand({
+        Bucket: konfig.bucket,
+        Key: key,
+        UploadId: uploadId,
+      })
+    );
   }
 
   async erzeugePresignedDownloadUrl(params: {
@@ -385,13 +582,14 @@ export class S3BrokerService {
     const prefix = ermittleTeamPluginPrefix(teamId, manifest.id, manifest.s3Prefix);
     return {
       prefix,
-      getSignedUploadUrl: ({ objectPath, contentType, expiresInSeconds }) =>
+      getSignedUploadUrl: ({ objectPath, contentType, fileSizeBytes, expiresInSeconds }) =>
         this.erzeugePresignedUploadUrl({
           teamId,
           pluginId: manifest.id,
           manifest,
           objectPath,
           contentType,
+          fileSizeBytes,
           expiresInSeconds,
         }),
       getSignedDownloadUrl: ({ objectPath, expiresInSeconds }) =>
@@ -402,6 +600,42 @@ export class S3BrokerService {
           objectPath,
           expiresInSeconds,
         }),
+      initiateMultipartUpload: ({ objectPath, contentType, fileSizeBytes }) =>
+        this.starteMultipartUpload({
+          teamId,
+          pluginId: manifest.id,
+          manifest,
+          objectPath,
+          contentType,
+          fileSizeBytes,
+        }),
+      getSignedMultipartPartUrl: ({ objectPath, uploadId, partNumber, expiresInSeconds }) =>
+        this.erzeugeMultipartPartUploadUrl({
+          teamId,
+          pluginId: manifest.id,
+          manifest,
+          objectPath,
+          uploadId,
+          partNumber,
+          expiresInSeconds,
+        }),
+      completeMultipartUpload: ({ objectPath, uploadId, parts }) =>
+        this.schliesseMultipartUploadAb({
+          teamId,
+          pluginId: manifest.id,
+          manifest,
+          objectPath,
+          uploadId,
+          parts,
+        }),
+      abortMultipartUpload: ({ objectPath, uploadId }) =>
+        this.brecheMultipartUploadAb({
+          teamId,
+          pluginId: manifest.id,
+          manifest,
+          objectPath,
+          uploadId,
+        }),
       deleteObject: (objectPath) =>
         this.loescheObjekt({
           teamId,
@@ -411,6 +645,21 @@ export class S3BrokerService {
         }),
     };
   }
+}
+
+function validiereUploadId(raw: string): string {
+  const bereinigt = typeof raw === 'string' ? raw.trim() : '';
+  if (!bereinigt || /[\u0000-\u001f]/.test(bereinigt)) {
+    throw new Error('Ungültige Multipart-UploadId.');
+  }
+  return bereinigt;
+}
+
+function validierePartNumber(raw: number): number {
+  if (!Number.isInteger(raw) || raw < 1 || raw > 10_000) {
+    throw new Error('Part-Nummer (partNumber) muss eine Ganzzahl zwischen 1 und 10000 sein.');
+  }
+  return raw;
 }
 
 function clampAblaufzeit(raw: number | undefined, fallback: number): number {

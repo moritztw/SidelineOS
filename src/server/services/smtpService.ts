@@ -277,4 +277,30 @@ export class SmtpService {
       };
     }
   }
+
+  async sendeTextMail(params: {
+    empfaenger: string;
+    betreff: string;
+    text: string;
+  }): Promise<{ gesendet: boolean; messageId?: string; fehler?: string }> {
+    const konfig = await this.holeEffektiveKonfig();
+    if (!istSmtpKonfiguriert(konfig)) {
+      return { gesendet: false, fehler: 'SMTP ist nicht konfiguriert.' };
+    }
+    try {
+      const transport = this.transportFactory(konfig);
+      const info = await transport.sendMail({
+        from: konfig.absender,
+        to: params.empfaenger,
+        subject: params.betreff,
+        text: params.text,
+      });
+      return { gesendet: true, messageId: info.messageId };
+    } catch (err) {
+      return {
+        gesendet: false,
+        fehler: err instanceof Error ? err.message : 'SMTP-Versand fehlgeschlagen.',
+      };
+    }
+  }
 }

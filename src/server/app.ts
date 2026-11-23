@@ -5,10 +5,12 @@ import { CoreRepository } from './db/coreRepository.ts';
 import { PluginBackendHost } from './plugins/backendHost.ts';
 import { PluginRuntimeLoader } from './plugins/runtimeLoader.ts';
 import { erstelleAuthRouter } from './routes/auth.ts';
+import { erstelleNotificationRouter } from './routes/notifications.ts';
 import { erstellePluginGatewayRouter } from './routes/pluginGateway.ts';
 import { erstellePluginRuntimeRouter } from './routes/pluginRuntime.ts';
 import { erstelleSysadminRouter } from './routes/sysadmin.ts';
 import { erstelleTeamRouter } from './routes/teams.ts';
+import { NotificationService } from './services/notificationService.ts';
 import { PluginInstallerService } from './services/pluginInstaller.ts';
 import { S3BrokerService } from './services/s3Broker.ts';
 import { S3CleanupService } from './services/s3CleanupService.ts';
@@ -23,6 +25,7 @@ export interface CreateCoreAppOptionen {
   smtpService?: SmtpService;
   pluginInstaller?: PluginInstallerService;
   runtimeLoader?: PluginRuntimeLoader;
+  notificationService?: NotificationService;
 }
 
 /**
@@ -38,6 +41,7 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
   s3Cleanup: S3CleanupService;
   smtpService: SmtpService;
   pluginInstaller: PluginInstallerService;
+  notificationService: NotificationService;
 } {
   const { db, config } = optionen;
   const repo = new CoreRepository(db);
@@ -47,6 +51,10 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
   const pluginInstaller =
     optionen.pluginInstaller ?? new PluginInstallerService(db, repo, config);
   const pluginHost = optionen.pluginHost ?? new PluginBackendHost(db, s3Broker, s3Cleanup);
+  const notificationService =
+    optionen.notificationService ??
+    new NotificationService(repo, config, pluginHost, smtpService);
+  pluginHost.setzeNotificationBridge(notificationService);
   const runtimeLoader =
     optionen.runtimeLoader ?? new PluginRuntimeLoader(repo, config, pluginHost);
 
@@ -76,6 +84,7 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
 
   app.use('/api/v1/auth', erstelleAuthRouter(repo, config));
   app.use('/api/v1/teams', erstelleTeamRouter(repo, config, smtpService));
+  app.use('/api/v1/notifications', erstelleNotificationRouter(repo, config, notificationService));
   app.use(
     '/api/v1/sysadmin',
     erstelleSysadminRouter(repo, config, {
@@ -94,7 +103,8 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
     config,
     pluginHost,
     s3Broker,
-    s3Cleanup
+    s3Cleanup,
+    notificationService
   );
   app.use('/api/v1/plugins', protectedRouter);
   app.use('/api/v1/public/plugins', publicRouter);
@@ -123,5 +133,6 @@ export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
     s3Cleanup,
     smtpService,
     pluginInstaller,
+    notificationService,
   };
 }

@@ -37,6 +37,8 @@ const GUELTIGE_PERMISSIONS = new Set<PluginPermission>([
   's3:cleanup-queue',
   'db:plugin-tables',
   'share:public-links',
+  'notifications:send',
+  'notifications:channel',
 ]);
 
 export class PluginInstallerFehler extends Error {

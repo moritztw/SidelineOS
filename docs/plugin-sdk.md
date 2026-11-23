@@ -100,8 +100,10 @@ Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
 * Plugins importieren **niemals** interne Core-Dateien (`src/core/*`) und der Core importiert **niemals** Plugin-Interna (`src/plugins/*`).
 * Sämtliche Kommunikation zwischen Core und Plugin erfolgt über `@sidelineos/plugin-sdk` (kompilierbar über `npm run build:sdk` aus `packages/plugin-sdk/`).
 * Saison-Filterung nutzt generische SDK-Helper (`filtereNachSaison`, `ermittleEintragSaison`).
-* **Cleanup- & Exchange-Contracts (vorbereitet für Phase 4/5):**
+* **Cleanup-, Multipart- & Notification-Contracts:**
+  * `ctx.s3?.initiateMultipartUpload / getSignedMultipartPartUrl / completeMultipartUpload / abortMultipartUpload` für große Uploads (z. B. Game-Film) innerhalb des Team-Präfixes.
   * `ctx.cleanupQueue?.enqueueOrphanedObjects(objectPaths, reason)` im Backend-Kontext (erfordert `s3:cleanup-queue`).
+  * `ctx.notifications?.send(payload)` zum Auslösen von Benachrichtigungen über den Core-Endpunkt (`notifications:send`); Channel-Plugins registrieren über `notificationChannels` + `deliverNotification(event, ctx)` neue Zustellwege (`notifications:channel`).
   * Optionale Scope-Methoden auf `SidelineBackendPlugin`: `listExportableItems(ctx)`, `exportScope(ctx, itemIds, target: ExchangeTarget)` und `importScope(ctx, payload, { mode: 'replace' | 'merge', sourceTarget })` für `LOCAL` vs. `REMOTE` (`teamId@instanceId`).
 
 ---
@@ -114,10 +116,12 @@ Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. I
 | :--- | :--- | :--- |
 | `team:read` | Aktive `teamId`, Name, Saisons, Rolle des aktuellen Nutzers | Zugriff auf andere Teams/Mandanten |
 | `team:roster-read` | Kaderliste, Units, Trikotnummern & Positionen des Teams | Globale E-Mail-/Passwort-Tabellen |
-| `s3:team-rw` | Signierte Presigned-URLs ausschließlich für `teams/{teamId}/${s3Prefix}*` | Rohe S3-Credentials oder fremde Bucket-Pfade |
+| `s3:team-rw` | Signierte Single-PUT-/Multipart-/Download-URLs ausschließlich für `teams/{teamId}/${s3Prefix}*` | Rohe S3-Credentials oder fremde Bucket-Pfade |
 | `s3:cleanup-queue` | Vormerken verwaister Assets mit Schonfrist in der Core-Queue | Direktes Löschen fremder S3-Objekte |
 | `db:plugin-tables` | SQL-Queries auf Tabellen mit dem eigenen `dbPrefix` inkl. erzwungenem `team_id` | Lesen/Schreiben in Core-Auth-Tabellen oder Tabellen anderer Plugins |
 | `share:public-links` | Erzeugen signierter `/share/<token>`-Tokens über den Core-Share-Broker | Direkte Umgehung der RBAC-Prüfung |
+| `notifications:send` | Auslösen von Benachrichtigungen über den Core-Notification-Dispatcher (`/_notifications/send`) | Direktes Auslesen privater User-E-Mails |
+| `notifications:channel` | Bereitstellen eigener Zustellwege (`notificationChannels` + `deliverNotification`) | Zugriff auf andere Teams oder unverschlüsselte Passwörter |
 
 ---
 
