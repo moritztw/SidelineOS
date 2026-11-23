@@ -9,7 +9,6 @@ import {
   OFFIZIELLER_PLUGIN_KATALOG,
   STANDARD_AKTIVIERTE_PLUGIN_IDS,
   STANDARD_INSTALLIERTE_PLUGIN_IDS,
-  VIDEO_STORE_MANIFEST,
 } from '../../src/core/pluginStoreCatalog.ts';
 import { fuegeNeueSaisonHinzu } from '../../src/core/seasonUtils.ts';
 import { ermittleEintragSaison, filtereNachSaison } from '../../src/sdk/plugin.ts';
@@ -66,16 +65,10 @@ describe('SidelineOS Plugin-SDK & Store-Katalog', () => {
     assert.equal(manifest.s3Prefix, 'plugins/scouting/');
   });
 
-  it('listet ausschließlich SidelineOS-video als offizielles externes Store-Plugin ohne Vorinstallation', () => {
+  it('startet mit leerem offiziellem Store-Katalog ohne vorinstallierte Module', () => {
     assert.deepEqual(STANDARD_INSTALLIERTE_PLUGIN_IDS, []);
     assert.deepEqual(STANDARD_AKTIVIERTE_PLUGIN_IDS, []);
-    assert.equal(OFFIZIELLER_PLUGIN_KATALOG.length, 1);
-    assert.equal(VIDEO_STORE_MANIFEST.id, 'video-analysis');
-    assert.equal(
-      VIDEO_STORE_MANIFEST.repositoryUrl,
-      'https://github.com/moritztw/SidelineOS-video'
-    );
-    assert.equal(OFFIZIELLER_PLUGIN_KATALOG[0].manifest.id, 'video-analysis');
+    assert.deepEqual(OFFIZIELLER_PLUGIN_KATALOG, []);
   });
 });
 

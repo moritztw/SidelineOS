@@ -513,6 +513,19 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(scoutingUpdate.verfuegbar, '0.2.0');
     assert.ok(updateBody.anzahlVerfuegbar >= 2);
 
+    // Branch-Version (z. B. dev-c8dc8f0) darf keinen falschen Release-Update-Hinweis auslösen
+    const branchConfig = loadCoreConfig({
+      NODE_ENV: 'production',
+      CORE_VERSION: 'dev-c8dc8f0',
+      GITHUB_API_BASE_URL: mockGitHubBaseUrl,
+      CORE_GITHUB_REPO: 'sidelineos/sidelineos-core',
+      PLUGIN_DATA_DIR: tmpDataDir,
+    });
+    const branchInstaller = new PluginInstallerService(db, repo, branchConfig);
+    const branchUpdates = await branchInstaller.pruefeUpdates({ forceRefresh: true });
+    assert.equal(branchUpdates.coreUpdate?.aktuell, 'dev-c8dc8f0');
+    assert.equal(branchUpdates.coreUpdate?.updateVerfuegbar, false);
+
     // Update installieren
     const upgRes = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-release`, {
       method: 'POST',
