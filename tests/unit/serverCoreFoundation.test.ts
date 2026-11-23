@@ -40,7 +40,6 @@ test('bootstrapCoreInstance legt ENV-Sysadmin idempotent in PGlite an', async ()
     INITIAL_SYSADMIN_EMAIL: 'Admin@Stallions.de',
     INITIAL_SYSADMIN_USERNAME: 'rootcoach',
     INITIAL_SYSADMIN_PASSWORD: 'SehrSicheresInitPasswort99!',
-    ENABLED_MODULES: 'video-analysis,playbook',
     SESSION_SECRET: 'test-session-secret-mindestens-16-zeichen',
   });
 
@@ -70,7 +69,7 @@ test('bootstrapCoreInstance legt ENV-Sysadmin idempotent in PGlite an', async ()
 });
 
 test('CoreRepository verwaltet Multi-Saison-Teams, Sessions, Einladungen und isolierte Plugin-Schemas', async () => {
-  const config = loadCoreConfig({ NODE_ENV: 'development', ENABLED_MODULES: 'video-analysis' });
+  const config = loadCoreConfig({ NODE_ENV: 'development' });
   const db = await erstelleDatenbankClient({ databaseUrl: undefined });
 
   try {

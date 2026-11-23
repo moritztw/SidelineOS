@@ -16,6 +16,7 @@ import {
   coreApi,
   type AuthSessionResponse,
   type InviteAcceptResponse,
+  type RuntimePluginClientDTO,
   type S3CleanupStatistikDTO,
   type SysadminCapabilitiesDTO,
   type SysadminPluginStatusDTO,
@@ -40,7 +41,10 @@ import {
   darfAnsichtWechseln,
   ermittleWaehlbareTeamAnsichten,
 } from './core/rolePermissions.ts';
-import { ladeInstalliertePlugins } from './plugins/pluginLoader.ts';
+import {
+  ladeInstalliertePlugins,
+  ladeRuntimePluginBundles,
+} from './plugins/pluginLoader.ts';
 import type {
   PluginLaufzeitKontext,
   PluginManifest,
@@ -103,6 +107,7 @@ interface SidelineShellProps {
   onGlobalModulToggle: (modulId: PluginId) => void;
   onGlobalModuleSynchronisieren: (ids: PluginId[]) => void;
   onInstalledPluginsSynchronisieren: (ids: PluginId[]) => void;
+  onRuntimeBundlesSynchronisieren: (bundles: RuntimePluginClientDTO[]) => Promise<void>;
 }
 
 function SidelineCoreShell({
@@ -117,6 +122,7 @@ function SidelineCoreShell({
   onGlobalModulToggle,
   onGlobalModuleSynchronisieren,
   onInstalledPluginsSynchronisieren,
+  onRuntimeBundlesSynchronisieren,
 }: SidelineShellProps) {
   const { locale, setLocale, setBrandName, t } = useI18n();
   const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
@@ -214,6 +220,31 @@ function SidelineCoreShell({
     }
   }, [onGlobalModuleSynchronisieren, onInstalledPluginsSynchronisieren, setBrandName]);
 
+  const synchronisiereRuntimePlugins = useCallback(
+    async (nurPublicShare = false) => {
+      try {
+        if (nurPublicShare) {
+          const pub = await coreApi.holePublicRuntimePlugins();
+          onInstalledPluginsSynchronisieren(pub.bundles.map((b) => b.pluginId));
+          onGlobalModuleSynchronisieren(pub.bundles.map((b) => b.pluginId));
+          await onRuntimeBundlesSynchronisieren(pub.bundles);
+          return;
+        }
+        const rt = await coreApi.holeRuntimePlugins();
+        onInstalledPluginsSynchronisieren(rt.installedPluginIds);
+        onGlobalModuleSynchronisieren(rt.enabledPluginIds);
+        await onRuntimeBundlesSynchronisieren(rt.bundles);
+      } catch {
+        // Stille Fehlerbehandlung, falls Backend offline oder Bundle noch nicht gebaut ist
+      }
+    },
+    [
+      onGlobalModuleSynchronisieren,
+      onInstalledPluginsSynchronisieren,
+      onRuntimeBundlesSynchronisieren,
+    ]
+  );
+
   const uebernehmeSitzung = useCallback(
     async (sitzung: AuthSessionResponse) => {
       setAktuellerBenutzer(sitzung.user);
@@ -237,18 +268,27 @@ function SidelineCoreShell({
       setBereich(profil.teamRolle === null ? 'sysadmin' : 'hub');
 
       if (sitzung.user.istSysadmin) {
-        await ladeSysadminUebersicht();
+        await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       } else {
         setBenutzerListe([sitzung.user]);
+        await synchronisiereRuntimePlugins(false);
       }
     },
-    [ladeSysadminUebersicht, setLocale]
+    [ladeSysadminUebersicht, setLocale, synchronisiereRuntimePlugins]
   );
 
   // Initialer Session-Check beim App-Start
   useEffect(() => {
     let aktiv = true;
-    if (routeModus.art === 'share' || routeModus.art === 'invite') {
+    if (routeModus.art === 'share') {
+      void synchronisiereRuntimePlugins(true).finally(() => {
+        if (aktiv) setSessionWirdGeprueft(false);
+      });
+      return () => {
+        aktiv = false;
+      };
+    }
+    if (routeModus.art === 'invite') {
       setSessionWirdGeprueft(false);
       return;
     }
@@ -270,7 +310,7 @@ function SidelineCoreShell({
     return () => {
       aktiv = false;
     };
-  }, [routeModus.art, uebernehmeSitzung]);
+  }, [routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
 
   const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0] ?? null;
 
@@ -443,6 +483,7 @@ function SidelineCoreShell({
     setTeams([]);
     setMitgliedschaften([]);
     setEinladungen([]);
+    await onRuntimeBundlesSynchronisieren([]);
     navigiereZuRoute({ art: 'login' });
   };
 
@@ -721,6 +762,7 @@ function SidelineCoreShell({
         setBereich('hub');
       }
       onGlobalModulToggle(pluginId);
+      await synchronisiereRuntimePlugins(false);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Globaler Plugin-Status konnte nicht gespeichert werden.');
@@ -913,7 +955,7 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginRelease(repoUrl, tag);
       onBackendPluginRegistrieren(res.manifest, res.releaseTag);
-      await ladeSysadminUebersicht();
+      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Release-Installation fehlgeschlagen.');
@@ -927,7 +969,7 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginUpload(contentBase64, expectedSha256);
       onBackendPluginRegistrieren(res.manifest, `v${res.manifest.version}`);
-      await ladeSysadminUebersicht();
+      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Offline-Paket konnte nicht installiert werden.');
@@ -941,7 +983,7 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginDevGit(repoUrl, branch);
       onBackendPluginRegistrieren(res.manifest, `dev:${res.branch}`);
-      await ladeSysadminUebersicht();
+      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Dev-Git-Installation fehlgeschlagen.');
@@ -952,7 +994,7 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.rollbackPlugin(pluginId);
       onBackendPluginRegistrieren(res.manifest, `v${res.version}`);
-      await ladeSysadminUebersicht();
+      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Rollback fehlgeschlagen.');
@@ -968,7 +1010,7 @@ function SidelineCoreShell({
         setAktivesPluginId(null);
         setBereich('sysadmin');
       }
-      await ladeSysadminUebersicht();
+      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Plugin konnte nicht deinstalliert werden.');
@@ -989,6 +1031,13 @@ function SidelineCoreShell({
 
   // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
   if (routeModus.art === 'share') {
+    if (sessionWirdGeprueft) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
+          {t('app.checkingSession')}
+        </div>
+      );
+    }
     const sharePlugin = installiertePlugins.find(
       (p) => typeof p.renderPublicShareView === 'function'
     );
@@ -1368,9 +1417,19 @@ export default function App() {
     STANDARD_AKTIVIERTE_PLUGIN_IDS
   );
 
+  const [geladeneRuntimePlugins, setGeladeneRuntimePlugins] = useState<SidelinePlugin[]>([]);
+
   const installiertePlugins = useMemo(
-    () => ladeInstalliertePlugins(storeKatalog, installiertePluginIds),
-    [storeKatalog, installiertePluginIds]
+    () => ladeInstalliertePlugins(storeKatalog, installiertePluginIds, geladeneRuntimePlugins),
+    [storeKatalog, installiertePluginIds, geladeneRuntimePlugins]
+  );
+
+  const handleRuntimeBundlesSynchronisieren = useCallback(
+    async (bundles: RuntimePluginClientDTO[]) => {
+      const geladen = await ladeRuntimePluginBundles(bundles);
+      setGeladeneRuntimePlugins(geladen);
+    },
+    []
   );
 
   const handlePluginInstallieren = (pluginId: PluginId) => {
@@ -1381,6 +1440,7 @@ export default function App() {
   const handlePluginDeinstallieren = (pluginId: PluginId) => {
     setInstalliertePluginIds((alt) => alt.filter((id) => id !== pluginId));
     setGlobalAktivierteModule((alt) => alt.filter((id) => id !== pluginId));
+    setGeladeneRuntimePlugins((alt) => alt.filter((p) => p.manifest.id !== pluginId));
   };
 
   const handleCustomGitHubPluginHinzufuegen = (repoUrl: string, slug: string) => {
@@ -1439,6 +1499,7 @@ export default function App() {
           onGlobalModulToggle={handleGlobalModulToggle}
           onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
           onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
+          onRuntimeBundlesSynchronisieren={handleRuntimeBundlesSynchronisieren}
         />
       </PluginProviderStack>
     </I18nProvider>

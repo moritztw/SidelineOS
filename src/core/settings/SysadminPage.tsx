@@ -966,10 +966,6 @@ export function SysadminPage({
               </p>
             </div>
           </div>
-
-          <code className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 font-mono text-[11px] text-[#E6EDF3]">
-            ENABLED_MODULES=&quot;{globalAktivierteModule.join(',')}&quot;
-          </code>
         </div>
 
         {globalAktivePlugins.length === 0 ? (

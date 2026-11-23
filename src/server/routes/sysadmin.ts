@@ -12,6 +12,7 @@ import {
 import type { S3BrokerService } from '../services/s3Broker.ts';
 import type { S3CleanupService } from '../services/s3CleanupService.ts';
 import type { SmtpService } from '../services/smtpService.ts';
+import type { PluginRuntimeLoader } from '../plugins/runtimeLoader.ts';
 
 const MIN_PASSWORT_LAENGE = 10;
 
@@ -23,6 +24,7 @@ export function erstelleSysadminRouter(
     s3Cleanup?: S3CleanupService;
     smtpService?: SmtpService;
     pluginInstaller?: PluginInstallerService;
+    runtimeLoader?: PluginRuntimeLoader;
   }
 ): Router {
   const router = Router();
@@ -284,6 +286,20 @@ export function erstelleSysadminRouter(
         res.status(404).json({ fehler: 'Plugin nicht installiert.' });
         return;
       }
+      if (services?.runtimeLoader) {
+        if (aktiv) {
+          const status = await repo.findePluginStatus(pluginId);
+          if (status) {
+            await services.runtimeLoader
+              .ladeBackendPlugin(pluginId, status.installedVersion)
+              .catch((err) => {
+                console.warn(`[SidelineOS-Core] Live-Load für "${pluginId}" fehlgeschlagen:`, err);
+              });
+          }
+        } else {
+          services.runtimeLoader.entladeBackendPlugin(pluginId);
+        }
+      }
       res.status(200).json({ pluginId, enabledGlobally: aktiv });
     } catch (err) {
       next(err);
@@ -465,6 +481,16 @@ export function erstelleSysadminRouter(
         return;
       }
       const ergebnis = await services.pluginInstaller.installiereAusReleaseBundle({ repoUrl, tag });
+      if (services.runtimeLoader) {
+        const status = await repo.findePluginStatus(ergebnis.manifest.id);
+        if (status?.enabledGlobally) {
+          await services.runtimeLoader
+            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
+            .catch((err) => {
+              console.warn(`[SidelineOS-Core] Live-Load nach Release fehlgeschlagen:`, err);
+            });
+        }
+      }
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -497,6 +523,16 @@ export function erstelleSysadminRouter(
         expectedSha256,
         installMode: 'OFFLINE_UPLOAD',
       });
+      if (services.runtimeLoader) {
+        const status = await repo.findePluginStatus(ergebnis.manifest.id);
+        if (status?.enabledGlobally) {
+          await services.runtimeLoader
+            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
+            .catch((err) => {
+              console.warn(`[SidelineOS-Core] Live-Load nach Upload fehlgeschlagen:`, err);
+            });
+        }
+      }
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -522,6 +558,16 @@ export function erstelleSysadminRouter(
         return;
       }
       const ergebnis = await services.pluginInstaller.installiereDevAusGit({ repoUrl, branch });
+      if (services.runtimeLoader) {
+        const status = await repo.findePluginStatus(ergebnis.manifest.id);
+        if (status?.enabledGlobally) {
+          await services.runtimeLoader
+            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
+            .catch((err) => {
+              console.warn(`[SidelineOS-Core] Live-Load nach Dev-Git fehlgeschlagen:`, err);
+            });
+        }
+      }
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -538,7 +584,18 @@ export function erstelleSysadminRouter(
         res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
         return;
       }
-      const ergebnis = await services.pluginInstaller.rollbackPlugin(String(req.params.pluginId));
+      const pluginId = String(req.params.pluginId);
+      const ergebnis = await services.pluginInstaller.rollbackPlugin(pluginId);
+      if (services.runtimeLoader) {
+        const status = await repo.findePluginStatus(pluginId);
+        if (status?.enabledGlobally) {
+          await services.runtimeLoader
+            .ladeBackendPlugin(pluginId, ergebnis.version)
+            .catch((err) => {
+              console.warn(`[SidelineOS-Core] Live-Load nach Rollback fehlgeschlagen:`, err);
+            });
+        }
+      }
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -555,7 +612,9 @@ export function erstelleSysadminRouter(
         res.status(503).json({ fehler: 'Plugin-Installer ist nicht initialisiert.' });
         return;
       }
-      await services.pluginInstaller.deinstallierePlugin(String(req.params.pluginId));
+      const pluginId = String(req.params.pluginId);
+      await services.pluginInstaller.deinstallierePlugin(pluginId);
+      services.runtimeLoader?.entladeBackendPlugin(pluginId);
       res.status(200).json({ ok: true });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {

@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   erstelleCustomPluginManifest,
   istPluginFuerTeamAktiv,
-  parseAktivierteModuleAusEnv,
   parseGitHubPluginQuelle,
 } from '../../src/core/pluginRegistry.ts';
 import {
@@ -16,37 +15,7 @@ import { fuegeNeueSaisonHinzu } from '../../src/core/seasonUtils.ts';
 import { ermittleEintragSaison, filtereNachSaison } from '../../src/sdk/plugin.ts';
 import type { TeamKontext } from '../../src/shared/types.ts';
 
-describe('SidelineOS Plugin-SDK, Store-Katalog & ENV-Aktivierung', () => {
-  it('parst ENABLED_MODULES aus ENV kommagetrennt und ignoriert unbekannte IDs', () => {
-    assert.deepEqual(
-      parseAktivierteModuleAusEnv(
-        'video-analysis, unbekannt',
-        ['video-analysis', 'scouting'],
-        STANDARD_AKTIVIERTE_PLUGIN_IDS
-      ),
-      ['video-analysis']
-    );
-  });
-
-  it('fällt bei leerer oder fehlender ENV-Variable auf Standard-Plugins zurück', () => {
-    assert.deepEqual(
-      parseAktivierteModuleAusEnv(
-        '',
-        ['video-analysis'],
-        STANDARD_AKTIVIERTE_PLUGIN_IDS
-      ),
-      STANDARD_AKTIVIERTE_PLUGIN_IDS
-    );
-    assert.deepEqual(
-      parseAktivierteModuleAusEnv(
-        undefined,
-        ['video-analysis'],
-        STANDARD_AKTIVIERTE_PLUGIN_IDS
-      ),
-      STANDARD_AKTIVIERTE_PLUGIN_IDS
-    );
-  });
-
+describe('SidelineOS Plugin-SDK & Store-Katalog', () => {
   it('aktiviert ein Plugin für ein Team nur bei Installation + Instanz- und Team-Freigabe', () => {
     assert.equal(
       istPluginFuerTeamAktiv(

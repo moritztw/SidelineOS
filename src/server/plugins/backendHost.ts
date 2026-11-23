@@ -35,6 +35,10 @@ export class PluginBackendHost {
     this.plugins.set(id, plugin);
   }
 
+  entferneBackendPlugin(pluginId: PluginId): boolean {
+    return this.plugins.delete(pluginId);
+  }
+
   holePlugin(pluginId: PluginId): SidelineBackendPlugin | undefined {
     return this.plugins.get(pluginId);
   }
