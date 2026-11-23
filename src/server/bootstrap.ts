@@ -44,6 +44,13 @@ const CORE_MIGRATIONS: Array<{ name: string; sql: string }> = [
       'utf8'
     ),
   },
+  {
+    name: '005_notifications.sql',
+    sql: fs.readFileSync(
+      new URL('./db/migrations/005_notifications.sql', import.meta.url),
+      'utf8'
+    ),
+  },
 ];
 
 async function fuehreCoreMigrationenAus(db: CoreDatabaseClient): Promise<void> {

@@ -6,7 +6,7 @@
 
 **SidelineOS-Core** ist eine quelloffene, modulare und selbstgehostete Multi-Tenant-Plattform von Coaches für Coaches (American Football & andere Teamsportarten). Der schlanke **SidelineOS-Core** übernimmt Benutzerkonten, Teams/Saisons, Auth/Einladungen, S3-Infrastruktur und einen **Plugin Store**, über den eigenständige GitHub-Module (wie die Videoanalyse) unabhängig entwickelt und installiert werden.
 
-> **Projektstatus:** **SidelineOS-Core** ist bereit für den **Alpha-Selbsttest (`v0.1.0-alpha.1`)**: Produktionsnahes Backend (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), **S3-Broker** inkl. Cloudflare-R2-Support (Presigned-URLs, Präfix-Isolation, AES-256-GCM, anonymisierte **S3-Cleanup-Queue**), **SMTP-Service**, `@sidelineos/plugin-sdk` samt Plugin-Installer, **Rebranding-Vorbereitung** & **i18n (DE/EN)** sowie **Proxmox-LXC-Deployment** (`systemd` + Cloudflare R2 + Multi-Arch-`Dockerfile`). Als nächstes folgt der Post-Alpha-Ausbau (**Upload & File-Handling**, **Benachrichtigungen**) für die **Closed Beta**.
+> **Projektstatus:** **SidelineOS-Core** ist bereit für den **Alpha-Selbsttest (`v0.1.0-alpha.1`)**: Produktionsnahes Backend (`Express`, `PostgreSQL`/`PGlite`, `scrypt`-Auth, `HttpOnly`-Sessions, RBAC, isolierte `plugin_<slug>`-Schemas), **S3-Broker** inkl. Multipart-Uploads & Cloudflare-R2-Support (Presigned-URLs, Größen-/MIME-Prüfung, Präfix-Isolation, AES-256-GCM, anonymisierte **S3-Cleanup-Queue**), **SMTP-Service**, **Notification-Endpunkt** (`in-app` & `smtp` + erweiterbare Channel-Plugins), `@sidelineos/plugin-sdk` samt **dynamischem Plugin-Runtime-Loader** (Client-ESM + Server-Backend-Bundles ohne Core-Rebuild), **Rebranding-Vorbereitung** & **i18n (DE/EN)** sowie **Proxmox-LXC-Deployment** (`systemd` + Multi-Arch-`Dockerfile`). Damit ist der funktionale Core-Unterbau vorerst abgeschlossen; weitere Zustellwege und Fachfunktionen folgen als eigenständige Plugins.
 
 ---
 
@@ -109,24 +109,31 @@ sidelineos/
 - [x] **Core-Phase 3 – Eigenständiges SDK & GitHub Plugin-Installer:** Auskopplung von `@sidelineos/plugin-sdk` (`packages/plugin-sdk/` inkl. `ExchangeTarget` & Scope-Export/Import-Vertrag), Dual-Mode Plugin-Installer (verifizierte GitHub-Releases + SHA-256, Offline-`.tar.gz`-Upload, Dev-Git-Clone mit `403`-Production-Sperre, `previous_version`-Rollback), Core-/Plugin-Update-Checker mit Sysadmin-Badge & Banner sowie `core.schema_migrations` + anonymisierte `core.s3_cleanup_queue` mit Schonfrist
 - [x] **R1 – Rebranding-Vorbereitung & i18n-Fundament (DE/EN + Plugin-Sprachpakete):** Zentrale Brand-Konfiguration (`APP_BRAND_NAME` / `VITE_APP_BRAND_NAME`) für UI, E-Mails und Header ohne Umbau technischer IDs; typsicheres Core-i18n (`de` Standard, `en` erweiterbar), persistente Benutzer-Sprache (`preferred_locale`) sowie Weiterleitung über `@sidelineos/plugin-sdk` (`locale` + `createPluginTranslator`) inkl. vollständig lokalisierter Videoanalyse
 - [x] **R2 – Basis-Deployment (Proxmox LXC, Cloudflare R2 & Multi-Arch):** Idempotenter Debian-/systemd-Installer (`deploy/lxc/install-core.sh`, `update-core.sh` für `amd64` & `arm64`), Cloudflare-R2-Presigned-Fix (`WHEN_REQUIRED`), optionales Multi-Arch-`Dockerfile` sowie Betriebsanleitung & Alpha-Checkliste (`docs/deployment-proxmox-lxc.md`)
+- [x] **Dynamischer Plugin-Runtime-Loader:** Automatisches Laden installierter Server-Bundles (`dist/server.js`) beim Boot & live im Betrieb sowie Client-ESM-Bundles (`dist/client.js`, `dist/client.css`) über Browser-ImportMap & Core-Shims ohne Core-Rebuild
+- [x] **Zentrales Upload- & File-Handling (Core-S3-Broker):** Presigned Single-PUT & S3-Multipart-Uploads (`init`, `sign-part`, `complete`, `abort`), MIME-Typ-Validierung sowie konfigurierbares Upload-Größenlimit (`S3_MAX_UPLOAD_BYTES`)
+- [x] **Core-Notification-Endpunkt & erweiterbare Kanäle:** Zentraler Dispatcher (`/api/v1/notifications`, `/_notifications/send`) mit Core-Standardkanälen (`in-app`, `smtp`) sowie SDK-Vertrag (`notifications:channel` / `deliverNotification`) für nachgelieferte Channel-Plugins
 
 ### Aktuell: Alpha-Release (`v0.1.0-alpha.1` – Einzelnutzer-Selbsttest)
 - [ ] **Einzelnutzer-Selbsttest im Proxmox-LXC** gemäß [Alpha-Checkliste](docs/deployment-proxmox-lxc.md#7-alpha-selbsttest-checkliste-v010-alpha1) durchführen
 
-### Post-Alpha: Core-Ausbau vor Testnutzern → Closed Beta (`v0.1.0-beta.1`)
-- [ ] **Zentrales Upload- & File-Handling:** Einheitlicher S3-Upload-Proxy / Presigned-Multipart-Service, Quotas/Limits, Upload-Fortschritt sowie sichere Datei-Validierung für alle Plugins
-- [ ] **Benachrichtigungs-System:** In-App-Notification-Center, E-Mail-Versand via SMTP (z. B. Team-Freigaben, neue Einladungen, Updates) und `@sidelineos/plugin-sdk`-Hooks für Plugin-Benachrichtigungen
+### Geplante Erweiterungen (aufgeteilt in Core vs. Plugin)
 
-### Spätere `v1.x`-Meilensteine
-- [ ] **Core-Phase 4 – Instanz-Federation (`team@instance`):** Gegenseitiges Sysadmin-Pairing zweier SidelineOS-Core-Instanzen per Pairing-Token (Ed25519-/HMAC-signierte Server-to-Server-API), Synchronisation minimaler Team-Metadaten und transparente SDK-Adressierung (`ExchangeTarget`: `LOCAL` | `REMOTE`)
-- [ ] **Core-Phase 5 – Lokale Teamkopie & Camp-Modus (Offline / Raspberry Pi):** Selektive Teamkopie (Sysadmin / Team Admin) inkl. optionaler Passwort-Hashes, Modul-/S3-Medien-Filter sowie `.sideline-camp.tar`-Transfer & Delta-Rück-Sync (`origin_instance_id` + UUID-Merge)
-- [ ] **Konto-Portabilität & Multi-Arch-Extras:** Export-/Migrations-Token für globale Benutzerkonten sowie optionale Mobile-/Desktop-Wrapper (Capacitor/Tauri)
-
-### Später (ganz am Schluss)
-- [ ] **Widgets (Dashboard & Extern):** Konfigurierbare Dashboard-Widgets im Hub sowie sicher signierte, extern einbettbare HTML-/iframe-Widgets für Vereinswebsites & Apps
+| Feature | Was gehört in **SidelineOS-Core** | Was wird als **Plugin** nachgeliefert |
+| :--- | :--- | :--- |
+| **Benachrichtigungs-Wege** | Zentraler Notification-Endpunkt, In-App-Posteingang & SMTP *(bereits umgesetzt)* | Zusätzliche Zustellwege über `notifications:channel` (z. B. Web-Push, Discord/Slack-Webhooks, Matrix, Telegram, SMS) |
+| **Instanz-Federation (`team@instance`)** | Sysadmin-Pairing zweier Instanzen (Ed25519-/HMAC-Tokens), minimaler Team-Metadaten-Abgleich & `ExchangeTarget`-Routing | Umsetzung der SDK-Hooks (`listExportableItems`, `exportScope`, `importScope`) für die jeweiligen Fachdaten des Moduls |
+| **Lokale Teamkopie & Camp-Modus** | Selektiver Team-/User-Export (inkl. optionaler Passwort-Hashes), `.sideline-camp.tar`-Container & UUID-Delta-Merge-Rahmen | Bereitstellung der modulbezogenen Scope-Exports & S3-Asset-Listen über die SDK-Scope-Schnittstelle |
+| **Konto-Portabilität & Multi-Arch** | Signierter Account-Export-/Migrations-Token (Multi-Arch-`Dockerfile` bereits im Core) | Optionale native/Desktop-Client-Wrapper (z. B. Capacitor / Tauri) und modulspezifische Offline-Caches |
+| **Widgets (Dashboard & Extern)** | Optionaler generischer SDK-Slot (`renderWidget?`) bzw. signierter Embed-Endpunkt im Core | Konkrete Widget-Darstellungen (z. B. Kader-Status, Film-Room-Aktivität, öffentliche Vereinswebsite-Embeds) |
 
 ---
 
 ## Lizenz
 
 Lizenziert unter der **GNU Affero General Public License v3.0 (AGPLv3)** – siehe [LICENSE](LICENSE).
+
+---
+
+## KI-Hinweis
+
+Dieses Projekt wurde mithilfe von KI-Unterstützung (u. a. für Architektur-Entwürfe, Implementierung, Tests und Dokumentation) entwickelt und iterativ verfeinert. Trotz automatisierter TypeScript-Prüfungen und Unit-/API-Tests ersetzt KI-gestützte Generierung keine eigenverantwortliche Prüfung vor dem Produktiveinsatz (insbesondere hinsichtlich Sicherheit, Datenschutz, Backup-Strategie und Infrastruktur-Härtung). Sämtliche Inhalte stehen unter den Bedingungen der **GNU AGPLv3**.

@@ -769,4 +769,167 @@ export class CoreRepository {
       [key, JSON.stringify(value)]
     );
   }
+
+  // --- Benachrichtigungen (In-App-Standardkanal) ---
+
+  async erstelleNotification(params: {
+    userUuid: string;
+    teamId?: string;
+    sourcePluginId: string;
+    eventType: string;
+    title: string;
+    message: string;
+    linkPath?: string;
+    priority: 'info' | 'warning' | 'urgent';
+    metadata?: Record<string, unknown>;
+  }): Promise<{
+    id: string;
+    userUuid: string;
+    teamId?: string;
+    sourcePluginId: string;
+    eventType: string;
+    title: string;
+    message: string;
+    linkPath?: string;
+    priority: 'info' | 'warning' | 'urgent';
+    metadata: Record<string, unknown>;
+    readAt: string | null;
+    createdAt: string;
+  }> {
+    const id = `ntf-${crypto.randomUUID()}`;
+    const res = await this.db.query<{ created_at: unknown }>(
+      `INSERT INTO core.notifications (
+         id, user_uuid, team_id, source_plugin_id, event_type, title, message, link_path, priority, metadata_json
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+       RETURNING created_at`,
+      [
+        id,
+        params.userUuid,
+        params.teamId ?? null,
+        params.sourcePluginId,
+        params.eventType,
+        params.title,
+        params.message,
+        params.linkPath ?? null,
+        params.priority,
+        JSON.stringify(params.metadata ?? {}),
+      ]
+    );
+    const createdRaw = res.rows[0]?.created_at;
+    const createdAt =
+      createdRaw instanceof Date ? createdRaw.toISOString() : new Date().toISOString();
+    return {
+      id,
+      userUuid: params.userUuid,
+      ...(params.teamId ? { teamId: params.teamId } : {}),
+      sourcePluginId: params.sourcePluginId,
+      eventType: params.eventType,
+      title: params.title,
+      message: params.message,
+      ...(params.linkPath ? { linkPath: params.linkPath } : {}),
+      priority: params.priority,
+      metadata: params.metadata ?? {},
+      readAt: null,
+      createdAt,
+    };
+  }
+
+  async listeNotificationsFuerBenutzer(
+    userUuid: string,
+    limit = 50
+  ): Promise<{
+    notifications: Array<{
+      id: string;
+      userUuid: string;
+      teamId?: string;
+      sourcePluginId: string;
+      eventType: string;
+      title: string;
+      message: string;
+      linkPath?: string;
+      priority: 'info' | 'warning' | 'urgent';
+      metadata: Record<string, unknown>;
+      readAt: string | null;
+      createdAt: string;
+    }>;
+    unreadCount: number;
+  }> {
+    const clampedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
+    const [rowsRes, unreadRes] = await Promise.all([
+      this.db.query<{
+        id: string;
+        user_uuid: string;
+        team_id: string | null;
+        source_plugin_id: string;
+        event_type: string;
+        title: string;
+        message: string;
+        link_path: string | null;
+        priority: 'info' | 'warning' | 'urgent';
+        metadata_json: unknown;
+        read_at: unknown;
+        created_at: unknown;
+      }>(
+        `SELECT id, user_uuid, team_id, source_plugin_id, event_type, title, message,
+                link_path, priority, metadata_json, read_at, created_at
+         FROM core.notifications
+         WHERE user_uuid = $1
+         ORDER BY created_at DESC
+         LIMIT $2`,
+        [userUuid, clampedLimit]
+      ),
+      this.db.query<{ anzahl: string | number }>(
+        `SELECT COUNT(*)::int AS anzahl
+         FROM core.notifications
+         WHERE user_uuid = $1 AND read_at IS NULL`,
+        [userUuid]
+      ),
+    ]);
+
+    return {
+      unreadCount: Number(unreadRes.rows[0]?.anzahl ?? 0),
+      notifications: rowsRes.rows.map((r) => ({
+        id: r.id,
+        userUuid: r.user_uuid,
+        ...(r.team_id ? { teamId: r.team_id } : {}),
+        sourcePluginId: r.source_plugin_id,
+        eventType: r.event_type,
+        title: r.title,
+        message: r.message,
+        ...(r.link_path ? { linkPath: r.link_path } : {}),
+        priority: r.priority,
+        metadata: parseJsonWert<Record<string, unknown>>(r.metadata_json, {}),
+        readAt:
+          r.read_at instanceof Date
+            ? r.read_at.toISOString()
+            : r.read_at
+              ? String(r.read_at)
+              : null,
+        createdAt:
+          r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      })),
+    };
+  }
+
+  async markiereNotificationGelesen(userUuid: string, notificationId: string): Promise<boolean> {
+    const res = await this.db.query<{ id: string }>(
+      `UPDATE core.notifications
+       SET read_at = COALESCE(read_at, NOW())
+       WHERE id = $1 AND user_uuid = $2
+       RETURNING id`,
+      [notificationId, userUuid]
+    );
+    return res.rows.length > 0;
+  }
+
+  async markiereAlleNotificationsGelesen(userUuid: string): Promise<number> {
+    const res = await this.db.query<{ id: string }>(
+      `UPDATE core.notifications
+       SET read_at = NOW()
+       WHERE user_uuid = $1 AND read_at IS NULL
+       RETURNING id`,
+      [userUuid]
+    );
+    return res.rows.length;
+  }
 }

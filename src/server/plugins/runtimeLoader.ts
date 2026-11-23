@@ -46,6 +46,7 @@ function istGueltigesPluginBackendObjekt(
   return (
     typeof obj.handleRequest === 'function' ||
     typeof obj.handlePublicRequest === 'function' ||
+    typeof obj.deliverNotification === 'function' ||
     Array.isArray(obj.migrations) ||
     typeof obj.listExportableItems === 'function' ||
     typeof obj.exportScope === 'function' ||
