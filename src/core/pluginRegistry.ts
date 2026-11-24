@@ -32,12 +32,12 @@ export function parseGitHubPluginQuelle(eingabe: string): {
   if (!match) {
     return {
       ok: false,
-      fehler: 'Bitte eine gültige GitHub-URL angeben (z. B. https://github.com/org/sidelineos-plugin-scouting).',
+      fehler: 'Bitte eine gültige GitHub-URL angeben (z. B. https://github.com/org/SidelineOS-scouting).',
     };
   }
   const slug = match[2]
     .toLowerCase()
-    .replace(/^sidelineos-plugin-/, '')
+    .replace(/^sidelineos-/, '')
     .replace(/[^a-z0-9-]+/g, '-');
 
   return {

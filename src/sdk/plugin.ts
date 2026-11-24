@@ -56,8 +56,14 @@ export interface PluginManifest {
   id: PluginId;
   name: string;
   kurzbeschreibung: string;
+  /** Basisversion im Paket (wird bei GitHub-Release vom Tag bzw. bei Dev-Git als <branch>-<commit> überschrieben) */
   version: string;
-  sdkVersion: '1.0';
+  /** SDK-Schnittstellen-Version (Major.Minor, aktuell "1.0") */
+  sdkVersion: '1.0' | (string & {});
+  /** Minimale kompatible Core-SemVer-Version (optional, z. B. "0.1.0-alpha.1") */
+  minCoreVersion?: string;
+  /** Maximale kompatible Core-SemVer-Version (optional, z. B. "0.99.99") */
+  maxCoreVersion?: string;
   autor: string;
   repositoryUrl: string;
   icon: PluginIconName;

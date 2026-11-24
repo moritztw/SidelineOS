@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { parseGitHubPluginQuelle } from '../../core/pluginRegistry.ts';
 import type { PluginManifest, PluginPermission } from '../../sdk/plugin.ts';
-import type { CoreServerConfig } from '../config.ts';
+import { PACKAGE_CORE_VERSION, type CoreServerConfig } from '../config.ts';
 import { fuehrePluginMigrationAus, type CoreDatabaseClient } from '../db/client.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 
@@ -67,6 +67,7 @@ export interface PluginUpdateEintrag {
   verfuegbar: string | null;
   updateVerfuegbar: boolean;
   sdkKompatibel: boolean;
+  coreKompatibel?: boolean;
   releaseTag: string | null;
   releaseUrl: string | null;
 }
@@ -135,13 +136,126 @@ export function vergleicheSemVer(a: string, b: string): -1 | 0 | 1 {
   return 0;
 }
 
+function istSemVerVersion(raw: string): boolean {
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(
+    raw.trim().replace(/^v/i, '')
+  );
+}
+
+function parseSdkMajorMinor(raw: string): { major: number; minor: number } | null {
+  const m = raw.trim().match(/^(\d+)\.(\d+)$/);
+  if (!m) return null;
+  return {
+    major: Number.parseInt(m[1], 10),
+    minor: Number.parseInt(m[2], 10),
+  };
+}
+
+function normalisiereInstallVersion(raw: string, fallback = '0.1.0'): string {
+  const bereinigt = raw.trim().replace(/^v(?=\d)/i, '');
+  if (
+    !bereinigt ||
+    bereinigt.includes('..') ||
+    bereinigt.includes('/') ||
+    bereinigt.includes('\\')
+  ) {
+    throw new PluginInstallerFehler(400, `Ungültige Plugin-Version "${raw}".`);
+  }
+  return bereinigt || fallback;
+}
+
+export function ermittleEffektiveCoreSemVer(
+  coreVersion?: string,
+  fallbackCoreSemVer = PACKAGE_CORE_VERSION
+): string {
+  const raw = coreVersion?.trim().replace(/^v/i, '') ?? '';
+  if (istSemVerVersion(raw)) return raw;
+  return fallbackCoreSemVer.trim().replace(/^v/i, '') || '0.1.0';
+}
+
+export function pruefePluginKompatibilitaet(
+  manifest: {
+    id: string;
+    sdkVersion: string;
+    minCoreVersion?: string;
+    maxCoreVersion?: string;
+  },
+  optionen: {
+    supportedSdkVersion?: string;
+    coreVersion?: string;
+    fallbackCoreSemVer?: string;
+  } = {}
+): { ok: boolean; sdkKompatibel: boolean; coreKompatibel: boolean; grund?: string } {
+  const supportedSdk = optionen.supportedSdkVersion ?? '1.0';
+  const pluginSdk = parseSdkMajorMinor(manifest.sdkVersion);
+  const coreSdk = parseSdkMajorMinor(supportedSdk);
+  const sdkKompatibel = Boolean(
+    pluginSdk &&
+      coreSdk &&
+      pluginSdk.major === coreSdk.major &&
+      pluginSdk.minor <= coreSdk.minor
+  );
+
+  if (!sdkKompatibel) {
+    return {
+      ok: false,
+      sdkKompatibel: false,
+      coreKompatibel: true,
+      grund: `Inkompatible SDK-Version "${manifest.sdkVersion}" (Core unterstützt "${supportedSdk}").`,
+    };
+  }
+
+  const effektiveCore = ermittleEffektiveCoreSemVer(
+    optionen.coreVersion,
+    optionen.fallbackCoreSemVer
+  );
+
+  if (manifest.minCoreVersion) {
+    const minClean = manifest.minCoreVersion.trim().replace(/^v/i, '');
+    if (vergleicheSemVer(effektiveCore, minClean) < 0) {
+      return {
+        ok: false,
+        sdkKompatibel: true,
+        coreKompatibel: false,
+        grund: `Plugin "${manifest.id}" erfordert mindestens SidelineOS-Core v${minClean} (aktuell ${optionen.coreVersion ?? effektiveCore}).`,
+      };
+    }
+  }
+
+  if (manifest.maxCoreVersion) {
+    const maxClean = manifest.maxCoreVersion.trim().replace(/^v/i, '');
+    if (vergleicheSemVer(effektiveCore, maxClean) > 0) {
+      return {
+        ok: false,
+        sdkKompatibel: true,
+        coreKompatibel: false,
+        grund: `Plugin "${manifest.id}" unterstützt maximal SidelineOS-Core v${maxClean} (aktuell ${optionen.coreVersion ?? effektiveCore}).`,
+      };
+    }
+  }
+
+  return { ok: true, sdkKompatibel: true, coreKompatibel: true };
+}
+
+export interface ManifestValidierungsOptionen {
+  supportedSdkVersion?: string;
+  coreVersion?: string;
+  skipCompatibilityCheck?: boolean;
+}
+
 /**
- * Validiert ein `plugin.manifest.json` gegen das Core-SDK-Schema (`v1.0`).
+ * Validiert ein `plugin.manifest.json` gegen das Core-SDK-Schema (`v1.0`)
+ * und prüft (sofern nicht explizit für Dev-Git übersprungen) SDK- und Core-Kompatibilität.
  */
 export function validierePluginManifest(
   raw: unknown,
-  supportedSdkVersion = '1.0'
+  optionenOrSdk: string | ManifestValidierungsOptionen = '1.0'
 ): PluginManifest {
+  const optionen: ManifestValidierungsOptionen =
+    typeof optionenOrSdk === 'string'
+      ? { supportedSdkVersion: optionenOrSdk }
+      : optionenOrSdk;
+
   if (!raw || typeof raw !== 'object') {
     throw new PluginInstallerFehler(400, 'Ungültiges plugin.manifest.json (kein JSON-Objekt).');
   }
@@ -159,12 +273,42 @@ export function validierePluginManifest(
   if (!name || !version) {
     throw new PluginInstallerFehler(400, 'Manifest benötigt mindestens "name" und "version".');
   }
-  if (sdkVersion !== supportedSdkVersion) {
+
+  const minCoreVersion =
+    typeof m.minCoreVersion === 'string' && m.minCoreVersion.trim()
+      ? m.minCoreVersion.trim().replace(/^v/i, '')
+      : undefined;
+  const maxCoreVersion =
+    typeof m.maxCoreVersion === 'string' && m.maxCoreVersion.trim()
+      ? m.maxCoreVersion.trim().replace(/^v/i, '')
+      : undefined;
+
+  if (minCoreVersion && !istSemVerVersion(minCoreVersion)) {
     throw new PluginInstallerFehler(
-      409,
-      `Inkompatible SDK-Version "${sdkVersion}" (Core unterstützt "${supportedSdkVersion}").`
+      400,
+      `Ungültiges SemVer-Format für minCoreVersion: "${minCoreVersion}".`
     );
   }
+  if (maxCoreVersion && !istSemVerVersion(maxCoreVersion)) {
+    throw new PluginInstallerFehler(
+      400,
+      `Ungültiges SemVer-Format für maxCoreVersion: "${maxCoreVersion}".`
+    );
+  }
+
+  if (!optionen.skipCompatibilityCheck) {
+    const komp = pruefePluginKompatibilitaet(
+      { id, sdkVersion, minCoreVersion, maxCoreVersion },
+      {
+        supportedSdkVersion: optionen.supportedSdkVersion ?? '1.0',
+        coreVersion: optionen.coreVersion,
+      }
+    );
+    if (!komp.ok) {
+      throw new PluginInstallerFehler(409, komp.grund ?? 'Inkompatible Plugin-Version.');
+    }
+  }
+
   if (!/^mod_[a-z0-9_]+_$/.test(dbPrefix)) {
     throw new PluginInstallerFehler(
       400,
@@ -187,7 +331,9 @@ export function validierePluginManifest(
     kurzbeschreibung:
       typeof m.kurzbeschreibung === 'string' ? m.kurzbeschreibung.trim() : '',
     version,
-    sdkVersion: '1.0',
+    sdkVersion: sdkVersion || '1.0',
+    ...(minCoreVersion ? { minCoreVersion } : {}),
+    ...(maxCoreVersion ? { maxCoreVersion } : {}),
     autor: typeof m.autor === 'string' ? m.autor.trim() : 'Unbekannt',
     repositoryUrl: typeof m.repositoryUrl === 'string' ? m.repositoryUrl.trim() : '',
     icon:
@@ -428,6 +574,7 @@ export class PluginInstallerService {
     expectedSha256?: string;
     sourceUrl?: string;
     releaseTag?: string;
+    effectiveVersion?: string;
     installMode?: 'RELEASE_BUNDLE' | 'OFFLINE_UPLOAD';
   }): Promise<{
     manifest: PluginManifest;
@@ -462,9 +609,15 @@ export class PluginInstallerService {
       throw new PluginInstallerFehler(400, '"plugin.manifest.json" ist kein gültiges JSON.');
     }
 
-    const manifest = validierePluginManifest(rawManifest, this.config.supportedSdkVersion);
+    const manifest = validierePluginManifest(rawManifest, {
+      supportedSdkVersion: this.config.supportedSdkVersion,
+      coreVersion: this.config.coreVersion,
+    });
     if (!manifest.repositoryUrl && params.sourceUrl) {
       manifest.repositoryUrl = params.sourceUrl;
+    }
+    if (params.effectiveVersion) {
+      manifest.version = normalisiereInstallVersion(params.effectiveVersion, manifest.version);
     }
 
     await this.schreibeDateienAufPlatte(manifest.id, manifest.version, dateien);
@@ -538,11 +691,13 @@ export class PluginInstallerService {
     }
     const tarGzBuffer = Buffer.from(await tarRes.arrayBuffer());
 
+    const releaseVersion = normalisiereInstallVersion(release.tag_name);
     const ergebnis = await this.installiereAusOfflineTarGz({
       tarGzBuffer,
       expectedSha256,
       sourceUrl: quelle.repoUrl,
       releaseTag: release.tag_name,
+      effectiveVersion: releaseVersion,
       installMode: 'RELEASE_BUNDLE',
     });
 
@@ -604,13 +759,34 @@ export class PluginInstallerService {
         path.join(stagingDir, 'plugin.manifest.json'),
         'utf8'
       );
-      const manifest = validierePluginManifest(
-        JSON.parse(manifestRawStr),
-        this.config.supportedSdkVersion
-      );
+      // Bei Dev-Git-Clone bewusst kein SDK-/Core-Kompatibilitätsabgleich
+      const manifest = validierePluginManifest(JSON.parse(manifestRawStr), {
+        skipCompatibilityCheck: true,
+      });
       if (!manifest.repositoryUrl) {
         manifest.repositoryUrl = quelle.repoUrl;
       }
+
+      const erkannteBranch = await this.commandRunner(
+        'git',
+        ['symbolic-ref', '--short', 'HEAD'],
+        { cwd: stagingDir, env: buildEnv }
+      ).catch(() => ({ stdout: '', stderr: '' }));
+      const effektiverBranch = branch || erkannteBranch.stdout.trim() || 'main';
+
+      const erkannterCommit = await this.commandRunner(
+        'git',
+        ['rev-parse', '--short', 'HEAD'],
+        { cwd: stagingDir, env: buildEnv }
+      ).catch(() => ({ stdout: '', stderr: '' }));
+      const shortSha = erkannterCommit.stdout.trim();
+      const saubererBranch =
+        effektiverBranch
+          .replace(/[^a-zA-Z0-9._-]+/g, '-')
+          .replace(/^-+|-+$/g, '') || 'main';
+      const commitSuffix = /^[a-zA-Z0-9]{4,40}$/.test(shortSha) ? shortSha : 'dev';
+      const devVersion = normalisiereInstallVersion(`${saubererBranch}-${commitSuffix}`);
+      manifest.version = devVersion;
 
       // Lockfile prüfen für reproduzierbaren Dev-Build
       let hatLockfile = false;
@@ -647,13 +823,12 @@ export class PluginInstallerService {
         gesammelteDateien
       );
 
-      await this.schreibeDateienAufPlatte(manifest.id, manifest.version, gesammelteDateien);
+      await this.schreibeDateienAufPlatte(manifest.id, devVersion, gesammelteDateien);
       const migrationenAusgefuehrt = await this.fuehreMigrationenAusDateienAus(
         manifest.id,
         gesammelteDateien
       );
 
-      const effektiverBranch = branch || 'main';
       await this.repo.speicherePluginInstallation({
         manifest,
         source: 'DEV_GITHUB',
@@ -710,16 +885,24 @@ export class PluginInstallerService {
     };
     try {
       const raw = await fs.readFile(path.join(prevDir, 'plugin.manifest.json'), 'utf8');
-      manifest = validierePluginManifest(JSON.parse(raw), this.config.supportedSdkVersion);
+      manifest = validierePluginManifest(JSON.parse(raw), {
+        skipCompatibilityCheck: !istSemVerVersion(status.previousVersion),
+        supportedSdkVersion: this.config.supportedSdkVersion,
+        coreVersion: this.config.coreVersion,
+      });
+      manifest.version = status.previousVersion;
     } catch {
       // Fallback auf Metadaten-Version falls Katalog-Rollback
     }
 
+    const rollbackTag = istSemVerVersion(status.previousVersion)
+      ? `v${status.previousVersion}`
+      : status.previousVersion;
     await this.repo.rollbackPluginVersion(
       pluginId,
       manifest,
       status.previousVersion,
-      `v${status.previousVersion}`
+      rollbackTag
     );
     this.updateCache = null;
     return { manifest, version: status.previousVersion };
@@ -797,18 +980,37 @@ export class PluginInstallerService {
         const rel = await this.holeGitHubRelease(repoSlug);
         const neusteVersion = rel.tag_name.replace(/^v/i, '');
         const aktuell = eintrag.installedVersion || eintrag.manifest.version;
-        const updateVerfuegbar = vergleicheSemVer(aktuell, neusteVersion) < 0;
+        const istSemVerPlugin =
+          eintrag.installMode !== 'DEV_GIT' && istSemVerVersion(aktuell);
+        const updateVerfuegbar =
+          istSemVerPlugin && vergleicheSemVer(aktuell, neusteVersion) < 0;
 
         let sdkKompatibel = true;
+        let coreKompatibel = true;
         const manifestAsset = (rel.assets ?? []).find((a) => a.name === 'plugin.manifest.json');
         if (manifestAsset) {
           try {
             const mRes = await this.fetchImpl(manifestAsset.browser_download_url);
             if (mRes.ok) {
-              const mJson = (await mRes.json()) as { sdkVersion?: string };
-              if (mJson.sdkVersion && mJson.sdkVersion !== this.config.supportedSdkVersion) {
-                sdkKompatibel = false;
-              }
+              const mJson = (await mRes.json()) as {
+                sdkVersion?: string;
+                minCoreVersion?: string;
+                maxCoreVersion?: string;
+              };
+              const komp = pruefePluginKompatibilitaet(
+                {
+                  id: eintrag.manifest.id,
+                  sdkVersion: mJson.sdkVersion ?? eintrag.manifest.sdkVersion ?? '1.0',
+                  minCoreVersion: mJson.minCoreVersion,
+                  maxCoreVersion: mJson.maxCoreVersion,
+                },
+                {
+                  supportedSdkVersion: this.config.supportedSdkVersion,
+                  coreVersion: this.config.coreVersion,
+                }
+              );
+              sdkKompatibel = komp.sdkKompatibel;
+              coreKompatibel = komp.coreKompatibel;
             }
           } catch {
             // Optionaler Check
@@ -822,6 +1024,7 @@ export class PluginInstallerService {
           verfuegbar: neusteVersion,
           updateVerfuegbar,
           sdkKompatibel,
+          coreKompatibel,
           releaseTag: rel.tag_name,
           releaseUrl: rel.html_url ?? null,
         });

@@ -169,7 +169,8 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         const bundle = erstelleTestBundle({
           id: 'scouting-demo',
           name: 'Scouting Demo',
-          version,
+          // Bewusst abweichende Manifest-Version, um Überschreibung durch Release-Tag zu testen
+          version: '0.0.9-manifest',
           sdkVersion: aktuellesSdkSollInkompatibelSein ? '2.0' : '1.0',
           mitMigration: true,
         });
@@ -252,9 +253,11 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
               name: 'Dev Analytics',
               kurzbeschreibung: 'Aus Git geklontes Dev-Plugin',
               version: '0.4.0-dev',
-              sdkVersion: '1.0',
+              // Bewusst abweichende SDK- und Core-Version, um den Verzicht auf Kompatibilitätsprüfung im Git-Clone zu belegen
+              sdkVersion: '9.0',
+              minCoreVersion: '99.0.0',
               autor: 'Verein Dev',
-              repositoryUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+              repositoryUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
               icon: 'layers',
               status: 'AKTIV',
               standardAktiviert: false,
@@ -265,6 +268,12 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
             'utf8'
           );
           await fs.writeFile(path.join(targetDir, 'package-lock.json'), '{}', 'utf8');
+        }
+        if (cmd === 'git' && args[0] === 'rev-parse' && args.includes('--short')) {
+          return { stdout: 'a1b2c3d\n', stderr: '' };
+        }
+        if (cmd === 'git' && args[0] === 'symbolic-ref') {
+          return { stdout: 'feature/metrics\n', stderr: '' };
         }
         if (cmd === 'npm' && opts.cwd && args.includes('build')) {
           await fs.writeFile(path.join(opts.cwd, 'dist', 'index.js'), 'export default {};', 'utf8');
@@ -411,10 +420,41 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
       () =>
         validierePluginManifest(
           { id: 'valid-plugin', name: 'NewSDK', version: '1.0.0', sdkVersion: '2.0', dbPrefix: 'mod_valid_' },
-          '1.0'
+          { supportedSdkVersion: '1.0', coreVersion: '0.1.0' }
         ),
       (err: unknown) => err instanceof PluginInstallerFehler && err.status === 409
     );
+
+    assert.throws(
+      () =>
+        validierePluginManifest(
+          {
+            id: 'valid-plugin',
+            name: 'RequiresNewCore',
+            version: '1.0.0',
+            sdkVersion: '1.0',
+            minCoreVersion: '0.5.0',
+            dbPrefix: 'mod_valid_',
+          },
+          { supportedSdkVersion: '1.0', coreVersion: '0.1.0-alpha.1' }
+        ),
+      (err: unknown) => err instanceof PluginInstallerFehler && err.status === 409
+    );
+
+    const compatOk = validierePluginManifest(
+      {
+        id: 'valid-plugin',
+        name: 'CompatCore',
+        version: '1.0.0',
+        sdkVersion: '1.0',
+        minCoreVersion: '0.1.0-alpha.1',
+        maxCoreVersion: '0.9.9',
+        dbPrefix: 'mod_valid_',
+      },
+      { supportedSdkVersion: '1.0', coreVersion: '0.2.0' }
+    );
+    assert.equal(compatOk.minCoreVersion, '0.1.0-alpha.1');
+    assert.equal(compatOk.maxCoreVersion, '0.9.9');
   });
 
   it('blockiert Path-Traversal (Zip-Slip) und Symlinks beim Entpacken von .tar.gz-Archiven', () => {
@@ -581,7 +621,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(delRes.status, 200);
   });
 
-  it('steuert Git-Clone explizit über DEV_ALLOW_GIT_INSTALL (Default false), validiert Branch-Namen und erlaubt explizites Opt-in auch bei NODE_ENV=production', async () => {
+  it('steuert Git-Clone explizit über DEV_ALLOW_GIT_INSTALL (Default false), nutzt <branch>-<commit> als Version ohne Kompatibilitätssperre und blockiert unsichere Branches', async () => {
     // 1. Flag-Injection im Branch blockieren
     const badBranch = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
       method: 'POST',
@@ -591,13 +631,13 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         'X-Requested-With': 'XMLHttpRequest',
       },
       body: JSON.stringify({
-        repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+        repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         branch: '--upload-pack=whoami',
       }),
     });
     assert.equal(badBranch.status, 400);
 
-    // 2. Erfolgreicher Dev-Clone & Build
+    // 2. Erfolgreicher Dev-Clone & Build trotz abweichender sdkVersion/minCoreVersion -> Version = <branch>-<commit>
     const okDev = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
       method: 'POST',
       headers: {
@@ -606,17 +646,19 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         'X-Requested-With': 'XMLHttpRequest',
       },
       body: JSON.stringify({
-        repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+        repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         branch: 'feature/metrics',
       }),
     });
     assert.equal(okDev.status, 200);
     const okDevBody = (await okDev.json()) as { manifest: PluginManifest; branch: string };
     assert.equal(okDevBody.manifest.id, 'dev-analytics');
+    assert.equal(okDevBody.manifest.version, 'feature-metrics-a1b2c3d');
     assert.equal(okDevBody.branch, 'feature/metrics');
 
     const status = await repo.findePluginStatus('dev-analytics');
     assert.equal(status?.installMode, 'DEV_GIT');
+    assert.equal(status?.installedVersion, 'feature-metrics-a1b2c3d');
     assert.equal(status?.releaseTag, 'dev:feature/metrics');
 
     // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)
@@ -632,7 +674,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     await assert.rejects(
       () =>
         defaultProdInstaller.installiereDevAusGit({
-          repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+          repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         }),
       (err: unknown) => err instanceof PluginInstallerFehler && err.status === 403
     );

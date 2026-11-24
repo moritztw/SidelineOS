@@ -1,149 +1,450 @@
-# SidelineOS-Core Plugin SDK — Strukturelle Voraussetzungen für externe Module
+# SidelineOS-Core Plugin SDK — Entwickler-Leitfaden & Spezifikation
 
-Dieses Dokument definiert alle verbindlichen technischen, strukturellen und sicherheitsrelevanten Vorgaben für **eigenständige SidelineOS-Core-Plugins in separaten GitHub-Repositories**.
+Dieses Dokument beschreibt verbindlich, wie **eigenständige SidelineOS-Plugins** in separaten GitHub-Repositories programmiert, gebaut, getestet und über den **SidelineOS-Core Plugin Store** installiert werden.
 
-Ziel dieser Architektur (**Core + Plugin Store**) ist es, dass:
-* **SidelineOS-Core** dauerhaft schlank bleibt (Auth, Einladungen, Konten, Multi-Tenancy, dauerhafte Multi-Saison-Teams, S3-Broker, SMTP, Hub, Einstellungs-Shell und Plugin Store),
-* jedes Fachmodul (z. B. `video-analysis`, `playbook`, `roster-attendance`, eigene Vereins-Tools) als **unabhängiges GitHub-Repository** entwickelt, versioniert und über den **Sysadmin Plugin Store** installiert werden kann.
+Grundprinzip (**Core + Plugin Store**):
+* **SidelineOS-Core** hält ausschließlich Auth, Konten, Einladungen, Multi-Tenancy, Teams/Saisons, S3-/SMTP-/Notification-Broker, Hub, Einstellungs-Shell sowie Installer + Runtime-Loader bereit.
+* **Plugins** liefern komplette Fachmodule (z. B. Videoanalyse, Playbook, Anwesenheit) oder zusätzliche Notification-Zustellwege als eigenständig deploybare Pakete (`sideline-plugin-v1`) ohne Core-Rebuild.
 
 ---
 
-## 1. Verbindliche Lizenz- & Repo-Konventionen
+## 1. Lizenz, Naming & Repository-Struktur
 
-1. **Lizenz:** Jedes Plugin, das gegen `@sidelineos/plugin-sdk` linkt oder den Core erweitert, steht gemäß Core-Lizenz unter **GNU AGPLv3** (Datei `LICENSE` im Root des Plugin-Repos).
-2. **Namenskonvention:** `sidelineos-plugin-<slug>` (z. B. `sidelineos-plugin-video`, `sidelineos-plugin-playbook`).
-3. **Empfohlene Repo-Struktur:**
+1. **Lizenz:** Jedes Plugin gegen `@sidelineos/plugin-sdk` steht unter **GNU AGPLv3** (`LICENSE` im Repo-Root).
+2. **Repository-Namenskonvention:** `SidelineOS-<slug>` (z. B. `SidelineOS-video`, `SidelineOS-playbook`, `SidelineOS-discord-notifier`).
+3. **Verbindliche Verzeichnisstruktur:**
 
 ```text
-sidelineos-plugin-<slug>/
+SidelineOS-<slug>/
 ├── LICENSE                    # GNU AGPLv3
-├── README.md                  # Funktionsumfang, benötigte Permissions, Changelog
-├── plugin.manifest.json       # Deklaratives Manifest (Single Source of Truth für den Store)
-├── package.json               # PeerDependencies auf react / @sidelineos/plugin-sdk
+├── README.md                  # Beschreibung, Permissions, Changelog
+├── plugin.manifest.json       # Deklaratives Manifest (Pflicht im Paket-Root)
+├── package.json               # Build-Skripte & PeerDependencies
+├── vite.config.ts             # Baut dist/client.js (+ dist/client.css) und dist/server.js
+├── migrations/                # Optionale PostgreSQL-Migrationen (alphabetisch ausgeführt)
+│   └── 001_init.sql
 ├── src/
-│   ├── index.tsx              # Exportiert `SidelinePlugin` (Default/Named)
-│   ├── manifest.ts            # Typisierte Manifest-Konstante
-│   ├── types.ts               # Plugin-interne Domain-Typen
-│   ├── services/              # Headless Business-Logik (ohne Browser-DOM für Mobile/Desktop!)
-│   ├── components/            # UI-Komponenten (Tailwind Dark-Slate/Amber Design Tokens)
-│   └── backend/               # (Ab Core-Backend) Express-Router + DB-Migrationen
+│   ├── manifest.ts            # Gemeinsames Manifest-Objekt für Client & Server
+│   ├── client.tsx             # Default-Export eines `SidelinePlugin` (-> dist/client.js)
+│   ├── server.ts              # Default-/Named-Export eines `SidelineBackendPlugin` (-> dist/server.js)
+│   ├── services/              # Plattformneutrale Business-Logik (ohne window/document)
+│   └── components/            # UI-Komponenten (Tailwind)
+├── dist/                      # Gebaute Runtime-Artefakte (für Release & Dev-Git-Clone)
+│   ├── client.js              # Pflicht für UI-Plugins (ESM)
+│   ├── client.css             # Optional (wird automatisch eingebunden & bei Deinstall entfernt)
+│   └── server.js              # Optional für Backend/DB/Notification-Channel (ESM)
 └── tests/
-    └── unit/                  # Automatisierte Tests für alle Services
+    └── *.test.ts
 ```
+
+> **Reine Backend- / Notification-Channel-Plugins:** Ein Plugin ohne UI benötigt kein `dist/client.js` – ein gültiges `dist/server.js` genügt.
 
 ---
 
-## 2. Das deklarative Manifest (`plugin.manifest.json`)
+## 2. Manifest (`plugin.manifest.json`) & Kompatibilitätsregeln
 
-Der SidelineOS Plugin Store liest **ausschließlich** `plugin.manifest.json`, bevor JavaScript-Code des Plugins geladen oder ausgeführt wird.
+Der Plugin-Installer liest zuerst `plugin.manifest.json`, bevor Code entpackt oder geladen wird.
 
 ```json
 {
-  "id": "video-analysis",
-  "name": "Videoanalyse",
-  "kurzbeschreibung": "Multi-Angle Film Room, Frame-Telestration & Tagging.",
-  "version": "0.2.0",
+  "id": "scouting",
+  "name": "Scouting & Gegneranalyse",
+  "kurzbeschreibung": "Tendenzen, Gegner-Breakdowns und Spielberichte pro Saison.",
+  "version": "0.1.0",
   "sdkVersion": "1.0",
-  "autor": "SidelineOS Core Team",
-  "repositoryUrl": "https://github.com/moritztw/SidelineOS-video",
-  "icon": "film",
+  "minCoreVersion": "0.1.0-alpha.1",
+  "autor": "Dein Verein / Maintainer",
+  "repositoryUrl": "https://github.com/dein-verein/SidelineOS-scouting",
+  "icon": "clipboard-check",
   "status": "AKTIV",
-  "standardAktiviert": true,
+  "standardAktiviert": false,
   "permissions": [
     "team:read",
+    "team:roster-read",
+    "db:plugin-tables",
     "s3:team-rw",
     "s3:cleanup-queue",
-    "db:plugin-tables",
-    "share:public-links"
+    "notifications:send"
   ],
-  "dbPrefix": "mod_video_",
-  "s3Prefix": "plugins/video-analysis/",
+  "dbPrefix": "mod_scouting_",
+  "s3Prefix": "plugins/scouting/",
   "settingsAnker": {
-    "user": [
-      { "id": "modul-video-hotkeys", "label": "Film-Room-Hotkeys" }
-    ],
-    "team": [
-      { "id": "modul-video-tagging", "label": "Tagging-Schema & Wörterbuch" }
-    ],
-    "sysadmin": [
-      { "id": "modul-video-cleanup", "label": "S3-Cleanup & Schonfrist" }
-    ]
+    "user": [{ "id": "modul-scouting-prefs", "label": "Scouting-Voreinstellungen" }],
+    "team": [{ "id": "modul-scouting-schema", "label": "Scouting-Felder" }],
+    "sysadmin": []
   }
 }
 ```
 
-### Pflichtfelder & Regeln
-* `id`: Eindeutige Kebab-Case-ID (`^[a-z0-9-]+$`). Darf nicht mit Core-Routen (`hub`, `settings`, `sysadmin`, `invite`, `share`) kollidieren.
-* `sdkVersion`: Aktuell `'1.0'`. Der Core verweigert inkompatible Major-Versionen beim Store-Install.
-* `dbPrefix`: Zwingend `mod_<slug_snake_case>_`. Jede eigene Tabelle des Plugins muss dieses Präfix tragen (z. B. `mod_video_reels`).
-* `s3Prefix`: Optionaler Pfad unterhalb der Team-Isolation: `teams/{teamId}/plugins/<slug>/`.
-* `settingsAnker`: IDs der `<section id="...">`-Elemente, die das Plugin in die zentralen Core-Einstellungen (`Persönlich`, `Team`, `Sysadmin`) einhängt, damit das offene Seitenmenü direkt dorthin scrollen kann.
-
----
-
-## 3. Das `SidelinePlugin`-SDK-Interface (`src/sdk/plugin.ts`)
-
-Jedes Plugin exportiert ein Objekt vom Typ `SidelinePlugin`:
-
-| Eigenschaft | Pflicht | Zweck |
+### Feldregeln
+| Feld | Pflicht | Bedeutung |
 | :--- | :--- | :--- |
-| `manifest` | Ja | Metadaten, Berechtigungen, DB-/S3-Präfix, Settings-Anker |
-| `Provider` | Nein | Optionaler React Context Provider zur vollständigen Zustandskapselung |
-| `defaultTab` | Ja | Standard-Tab beim Öffnen der Kachel auf der Startseite |
-| `getTabs({ teamRolle })` | Ja | Liefert rollenabhängige TopBar-Tabs für Zone 2 |
-| `PrimaerAktion` | Nein | React-Komponente für den rechten Action-Button in Zone 3 der TopBar |
-| `renderMainView(ctx)` | Ja | Hauptfläche des Plugins inkl. Team-, Saison-, Rollen- und Tab-Kontext (inkl. `onPublicShareOeffnen`) |
-| `renderPublicShareView({ token, onSchliessen })` | Nein | Öffentliche Empfänger-Ansicht für `/share/<token>` ohne Anmeldung – der Core delegiert direkt an diese Methode, sodass er keine Plugin-Typen kennen muss |
-| `settingsPanels` | Nein | Optionale UI-Panels `{ user, team, sysadmin }`, die automatisch in die Core-Einstellungen eingeblendet werden |
+| `id` | Ja | `^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$`, nicht reserviert (`hub`, `settings`, `sysadmin`, `invite`, `share`, `auth`, `login`, `api`, `plugins`) |
+| `name` | Ja | Anzeigename auf Kachel, Hub und Freigabe-Matrix |
+| `version` | Ja | Fallback-SemVer (z. B. für Offline-`.tar.gz`-Uploads). Bei Installation aus **GitHub Release** gewinnt automatisch das **Release-Tag** (ohne `v`), bei **GitHub Dev-Clone** automatisch **`<branch>-<short-sha>`** (analog zu `CORE_VERSION`). |
+| `sdkVersion` | Ja | API-Vertrags-Version (`Major.Minor`, aktuell `"1.0"`). |
+| `minCoreVersion` / `maxCoreVersion` | Nein | Optionale SemVer-Grenzen für die unterstützte SidelineOS-Core-Version (z. B. `"0.1.0-alpha.1"`). |
+| `icon` | Ja | `'film' \| 'book-open' \| 'clipboard-check' \| 'layers' \| 'puzzle'` |
+| `dbPrefix` | Ja | Zwingend `mod_<slug_snake_case>_` (Regex: `^mod_[a-z0-9_]+_$`) |
+| `s3Prefix` | Nein | Relative S3-Ablage pro Team: `teams/<teamId>/<s3Prefix>` |
+| `permissions` | Ja | Liste erlaubter Least-Privilege-Scopes (siehe Abschnitt 6) |
+| `settingsAnker` | Ja | Objekt `{ user?, team?, sysadmin? }` mit `<section id="...">`-Ankern |
 
-### Strikte Entkopplungsregel & Eigenständiges Paket (`@sidelineos/plugin-sdk`)
-* Plugins importieren **niemals** interne Core-Dateien (`src/core/*`) und der Core importiert **niemals** Plugin-Interna (`src/plugins/*`).
-* Sämtliche Kommunikation zwischen Core und Plugin erfolgt über `@sidelineos/plugin-sdk` (kompilierbar über `npm run build:sdk` aus `packages/plugin-sdk/`).
-* Saison-Filterung nutzt generische SDK-Helper (`filtereNachSaison`, `ermittleEintragSaison`).
-* **Cleanup-, Multipart- & Notification-Contracts:**
-  * `ctx.s3?.initiateMultipartUpload / getSignedMultipartPartUrl / completeMultipartUpload / abortMultipartUpload` für große Uploads (z. B. Game-Film) innerhalb des Team-Präfixes.
-  * `ctx.cleanupQueue?.enqueueOrphanedObjects(objectPaths, reason)` im Backend-Kontext (erfordert `s3:cleanup-queue`).
-  * `ctx.notifications?.send(payload)` zum Auslösen von Benachrichtigungen über den Core-Endpunkt (`notifications:send`); Channel-Plugins registrieren über `notificationChannels` + `deliverNotification(event, ctx)` neue Zustellwege (`notifications:channel`).
-  * Optionale Scope-Methoden auf `SidelineBackendPlugin`: `listExportableItems(ctx)`, `exportScope(ctx, itemIds, target: ExchangeTarget)` und `importScope(ctx, payload, { mode: 'replace' | 'merge', sourceTarget })` für `LOCAL` vs. `REMOTE` (`teamId@instanceId`).
+### Wann prüft der Core die Kompatibilität?
+1. **`sdkVersion` (Major.Minor):**
+   - Major muss exakt übereinstimmen (`pluginMajor === coreMajor`).
+   - Minor darf nicht neuer sein als vom Core unterstützt (`pluginMinor <= coreMinor`, aktuell `1.0`).
+2. **`minCoreVersion` / `maxCoreVersion` (SemVer):**
+   - Bei Release- und Offline-`.tar.gz`-Installation prüft der Core `minCoreVersion <= coreVersion <= maxCoreVersion`. Läuft der Core auf einem Branch-Build (`dev-a918b95`), dient die SemVer-Basisversion aus `package.json` des Cores als Vergleichsbasis.
+   - Bei Verstoß bricht die Installation mit `409 Conflict` ab; der Update-Checker markiert betroffene Updates über `sdkKompatibel: false` bzw. `coreKompatibel: false`.
+3. **Ausnahme GitHub-Dev-Clone (`DEV_ALLOW_GIT_INSTALL=true`):**
+   - Beim direkten Klonen über Git-Branch findet **bewusst kein** SDK-/Core-Kompatibilitätsabgleich statt, damit Plugin-Entwickler frei gegen Entwicklungsstände testen können.
 
 ---
 
-## 4. Berechtigungsmodell (`permissions`) & Datensicherheit
+## 3. SDK-Einbindung & Build-Konfiguration (`vite.config.ts`)
 
-Der Core arbeitet nach dem Prinzip der **minimalen Rechte (Least Privilege)**. Im Core-Backend werden folgende Scopes durch den Core-Broker erzwungen:
+### `@sidelineos/plugin-sdk` einbinden
+Die verbindlichen TypeScript-Verträge liegen im Core-Repository unter `packages/plugin-sdk` (kompiliert per `npm run build:sdk`). In einem externen Plugin-Repo wird das Paket in `package.json` über Git-Referenz oder lokal gebautes Paket als `devDependency` referenziert:
 
+```json
+{
+  "name": "sidelineos-scouting",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && vite build --config vite.server.config.ts",
+    "test": "tsx --test tests/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@sidelineos/plugin-sdk": "github:moritztw/SidelineOS-core#main",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "vite": "^8.0.0"
+  }
+}
+```
+*(Alternativ beim Klonen per `npm run build:sdk` lokal verlinken, falls der Core direkt daneben liegt.)*
+
+### Browser-ImportMap & Pflicht-`externals`
+Der Browser lädt Plugins per `import('/api/v1/plugins/runtime/bundles/<pluginId>/<version>/client.js')`. Damit Plugins und Core **exakt dieselbe React-Instanz** und denselben SDK-Code teilen, injiziert der Core eine `<script type="importmap">` auf `/api/v1/plugins/runtime/_shared/*`.
+
+Im **Client-Build (`dist/client.js`)** müssen daher genau diese 6 Pakete als `external` gesetzt sein:
+* `react`
+* `react/jsx-runtime`
+* `react-dom`
+* `react-dom/client`
+* `lucide-react`
+* `@sidelineos/plugin-sdk`
+
+Beispiel `vite.config.ts` (Client-Bundle):
+```ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    lib: {
+      entry: 'src/client.tsx',
+      formats: ['es'],
+      fileName: () => 'client.js',
+      cssFileName: 'client',
+    },
+    rollupOptions: {
+      external: [
+        'react',
+        'react/jsx-runtime',
+        'react-dom',
+        'react-dom/client',
+        'lucide-react',
+        '@sidelineos/plugin-sdk',
+      ],
+    },
+  },
+});
+```
+
+Beispiel `vite.server.config.ts` (Backend-Bundle `dist/server.js` für Node.js ESM):
+```ts
+import { builtinModules } from 'node:module';
+import { defineConfig } from 'vite';
+
+export default defineConfig({
+  build: {
+    outDir: 'dist',
+    emptyOutDir: false,
+    ssr: 'src/server.ts',
+    lib: {
+      entry: 'src/server.ts',
+      formats: ['es'],
+      fileName: () => 'server.js',
+    },
+    rollupOptions: {
+      external: [...builtinModules, /^node:/],
+    },
+  },
+});
+```
+
+---
+
+## 4. Frontend programmieren (`SidelinePlugin`)
+
+`src/client.tsx` exportiert per `export default` (alternativ `export const plugin` oder `export const frontendPlugin`) ein `SidelinePlugin`-Objekt:
+
+```tsx
+import type { SidelinePlugin, PluginLaufzeitKontext } from '@sidelineos/plugin-sdk';
+import { createPluginTranslator } from '@sidelineos/plugin-sdk';
+import manifest from '../plugin.manifest.json';
+
+const t = createPluginTranslator({
+  de: { tabOverview: 'Übersicht', newReport: 'Neuer Bericht' },
+  en: { tabOverview: 'Overview', newReport: 'New Report' },
+});
+
+function MainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
+  // ctx.team, ctx.aktiveTeamAnsicht, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
+  return (
+    <div className="space-y-4">
+      <h2 className="text-base font-semibold text-white">
+        {t(ctx.locale, 'tabOverview')} · {ctx.team.name} ({ctx.gewaehlteSaison})
+      </h2>
+    </div>
+  );
+}
+
+const plugin: SidelinePlugin = {
+  manifest: manifest as SidelinePlugin['manifest'],
+  defaultTab: 'overview',
+  getTabs: ({ teamRolle, locale }) => {
+    // Beispiel: Spieler sehen nur bestimmte Tabs
+    if (teamRolle === 'PLAYER') {
+      return [{ id: 'overview', label: t(locale, 'tabOverview') }];
+    }
+    return [
+      { id: 'overview', label: t(locale, 'tabOverview') },
+      { id: 'editor', label: 'Scouting-Editor' },
+    ];
+  },
+  PrimaerAktion: ({ ctx, className }) =>
+    ctx.aktiveTeamAnsicht !== 'PLAYER' ? (
+      <button type="button" onClick={() => ctx.onTabWechseln('editor')} className={className}>
+        {t(ctx.locale, 'newReport')}
+      </button>
+    ) : null,
+  renderMainView: (ctx) => <MainView ctx={ctx} />,
+};
+
+export default plugin;
+```
+
+### Frontend → Core/Backend-API aufrufen (wichtig: Routing & CSRF)
+Alle geschützten Backend-Aufrufe eines Plugins laufen über das Core-Gateway:
+
+```text
+/api/v1/plugins/<pluginId>/teams/<teamId>/<dein-pfad>
+```
+
+Bei schreibenden Requests (`POST`, `PUT`, `PATCH`, `DELETE`) erzwingt der Core CSRF-Schutz über den Header `X-Requested-With: XMLHttpRequest` sowie Session-Cookies (`credentials: 'include'`):
+
+```ts
+async function pluginApi<T>(
+  pluginId: string,
+  teamId: string,
+  pfad: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const cleanPath = pfad.startsWith('/') ? pfad : `/${pfad}`;
+  const res = await fetch(`/api/v1/plugins/${pluginId}/teams/${teamId}${cleanPath}`, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(init.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { fehler?: string };
+    throw new Error(body.fehler ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+```
+
+### Öffentliche `/share/<token>`-Ansicht
+Möchte ein Plugin öffentliche Empfänger-Links unterstützen (`"share:public-links"`):
+1. Im Frontend `renderPublicShareView({ token, locale, onSchliessen })` implementieren.
+2. Im Backend `handlePublicRequest(req, db)` bereitstellen → erreichbar unter `/api/v1/public/plugins/<pluginId>/<subPfad>` (ohne Login, nur aktiv wenn das Plugin global aktiviert ist).
+
+### Einstellungs-Panels einhängen
+`settingsPanels` (`{ user?, team?, sysadmin? }`) wird automatisch auf der jeweiligen Core-Einstellungsseite gerendert. Die dort gerenderten `<section id="...">`-Elemente müssen den `id`s aus `manifest.settingsAnker` entsprechen, damit das sticky Seitenmenü direkt dorthin scrollt.
+
+---
+
+## 5. Backend programmieren (`SidelineBackendPlugin`)
+
+`src/server.ts` exportiert per `export default` (oder `export const backendPlugin`) ein `SidelineBackendPlugin`-Objekt. Der `PluginRuntimeLoader` lädt dieses Modul beim Core-Start sowie **live ohne Neustart** nach Installation/Rollback/Aktivierung.
+
+**Voraussetzung für Registrierung:** Das Export-Objekt enthält `manifest` (`manifest.id` muss exakt zur installierten Plugin-ID passen) und mindestens eines der folgenden Felder:
+* `handleRequest(req, ctx)`
+* `handlePublicRequest(req, db)`
+* `deliverNotification(event, ctx)`
+* `migrations`
+* `listExportableItems` / `exportScope` / `importScope`
+
+### Datenbank-Isolation & Migrationen
+* Der Core legt pro Plugin ein eigenes PostgreSQL-Schema **`plugin_<id_snake_case>`** an (z. B. `plugin_scouting_demo` für `scouting-demo`).
+* Jeder Aufruf von `ctx.db.query(sql, params)` setzt automatisch `SET LOCAL search_path TO "plugin_<slug>"`. Das Plugin sieht **weder** `core.*`-Tabellen **noch** Tabellen anderer Plugins.
+* Tabellen müssen mit `manifest.dbPrefix` beginnen (`mod_<slug>_*`) und bei teambezogenen Daten eine Spalte `team_id TEXT NOT NULL` enthalten.
+* Migrationen können wahlweise als SQL-Dateien in `migrations/*.sql` (beim Installieren ausgeführt) **oder** als Array `migrations: [{ name, sql }]` am `SidelineBackendPlugin` (beim Laden ausgeführt) hinterlegt werden – jede Migration läuft transaktional und idempotent via `core.plugin_migrations`.
+
+```ts
+import type { SidelineBackendPlugin } from '@sidelineos/plugin-sdk';
+import manifest from '../plugin.manifest.json' assert { type: 'json' };
+
+export const backendPlugin: SidelineBackendPlugin = {
+  manifest: manifest as SidelineBackendPlugin['manifest'],
+  migrations: [
+    {
+      name: '001_scouting_reports.sql',
+      sql: `
+        CREATE TABLE IF NOT EXISTS mod_scouting_reports (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL,
+          season TEXT NOT NULL,
+          title TEXT NOT NULL,
+          created_by TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_mod_scouting_team
+          ON mod_scouting_reports (team_id, season);
+      `,
+    },
+  ],
+  async handleRequest(req, ctx) {
+    if (req.method === 'GET' && req.path === '/reports') {
+      const season = typeof req.query.season === 'string' ? req.query.season : ctx.team.aktiveSaison;
+      const rows = await ctx.db.query(
+        `SELECT id, title, season, created_at FROM mod_scouting_reports
+         WHERE team_id = $1 AND ($2 = 'ALL' OR season = $2)
+         ORDER BY created_at DESC`,
+        [ctx.team.id, season]
+      );
+      return { status: 200, body: { reports: rows.rows } };
+    }
+
+    if (req.method === 'POST' && req.path === '/reports') {
+      if (ctx.teamRolle === 'PLAYER') {
+        return { status: 403, body: { fehler: 'Nur Coaches oder Team Admins erlaubt.' } };
+      }
+      const title = String((req.body as { title?: string })?.title ?? '').trim();
+      if (!title) return { status: 400, body: { fehler: 'Titel erforderlich.' } };
+
+      const id = `rep-${Date.now()}`;
+      await ctx.db.query(
+        `INSERT INTO mod_scouting_reports (id, team_id, season, title, created_by)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [id, ctx.team.id, ctx.team.aktiveSaison, title, ctx.user.uuid]
+      );
+
+      // Optional: Benachrichtigung über Core-Dispatcher auslösen (Permission: notifications:send)
+      await ctx.notifications?.send({
+        eventType: 'scouting.report_created',
+        title: `Neuer Scouting-Bericht: ${title}`,
+        message: `${ctx.user.vollerName} hat einen neuen Bericht erstellt.`,
+        linkPath: '/',
+        priority: 'info',
+      });
+
+      return { status: 201, body: { id, title } };
+    }
+
+    return { status: 404, body: { fehler: 'Route nicht gefunden.' } };
+  },
+};
+
+export default backendPlugin;
+```
+
+---
+
+## 6. Eingebaute Core-Broker-Schnittstellen (`S3`, `Multipart`, `Notifications`, `Permissions`)
+
+### Berechtigungsmodell (Least Privilege)
 | Scope | Erlaubter Zugriff | Verboten |
 | :--- | :--- | :--- |
-| `team:read` | Aktive `teamId`, Name, Saisons, Rolle des aktuellen Nutzers | Zugriff auf andere Teams/Mandanten |
-| `team:roster-read` | Kaderliste, Units, Trikotnummern & Positionen des Teams | Globale E-Mail-/Passwort-Tabellen |
-| `s3:team-rw` | Signierte Single-PUT-/Multipart-/Download-URLs ausschließlich für `teams/{teamId}/${s3Prefix}*` | Rohe S3-Credentials oder fremde Bucket-Pfade |
-| `s3:cleanup-queue` | Vormerken verwaister Assets mit Schonfrist in der Core-Queue | Direktes Löschen fremder S3-Objekte |
-| `db:plugin-tables` | SQL-Queries auf Tabellen mit dem eigenen `dbPrefix` inkl. erzwungenem `team_id` | Lesen/Schreiben in Core-Auth-Tabellen oder Tabellen anderer Plugins |
-| `share:public-links` | Erzeugen signierter `/share/<token>`-Tokens über den Core-Share-Broker | Direkte Umgehung der RBAC-Prüfung |
-| `notifications:send` | Auslösen von Benachrichtigungen über den Core-Notification-Dispatcher (`/_notifications/send`) | Direktes Auslesen privater User-E-Mails |
-| `notifications:channel` | Bereitstellen eigener Zustellwege (`notificationChannels` + `deliverNotification`) | Zugriff auf andere Teams oder unverschlüsselte Passwörter |
+| `team:read` | `ctx.team` (`id`, `name`, `saisons`, `aktiveSaison`), `ctx.teamRolle` | Zugriff auf andere Teams |
+| `team:roster-read` | Kaderliste, Units, Trikotnummern & Positionen | Globale E-Mail-/Passwort-Tabellen |
+| `s3:team-rw` | Signierte Single-PUT-, Multipart- & Download-URLs in `teams/<teamId>/<s3Prefix>*` | Rohe S3-Keys, fremde Teams |
+| `s3:cleanup-queue` | Verwaiste S3-Pfade mit Schonfrist vormerken (`ctx.cleanupQueue`) | Direktes Löschen fremder Objekte |
+| `db:plugin-tables` | SQL-Queries im eigenen Schema `plugin_<slug>` auf `dbPrefix`-Tabellen | Core-Tabellen oder fremde Plugins |
+| `share:public-links` | Öffentliche `/share/<token>`-Ansicht + `handlePublicRequest` | Umgehung der Team-RBAC |
+| `notifications:send` | Auslösen von Benachrichtigungen (`ctx.notifications` / `/_notifications/send`) | Direktes Auslesen von User-E-Mails |
+| `notifications:channel` | Bereitstellen eigener Zustellwege (`notificationChannels` + `deliverNotification`) | Team-übergreifender Klartext-Zugriff |
+
+### Core-S3-Broker direkt über Gateway (Frontend) oder `ctx.s3` (Backend)
+Alle Pfade beginnen mit `/api/v1/plugins/<pluginId>/teams/<teamId>`:
+
+* **Single-PUT Upload** *(nur `TEAM_ADMIN` / `COACH`)*: `POST /_s3/presign-upload` `{ objectPath, contentType, fileSizeBytes }` → `{ url, key, expiresIn }`
+* **Multipart Upload** *(für große Dateien bis `S3_MAX_UPLOAD_BYTES`, nur `TEAM_ADMIN` / `COACH`)*:
+  1. `POST /_s3/multipart/init` `{ objectPath, contentType, fileSizeBytes }` → `{ uploadId, key, maxFileSizeBytes }`
+  2. `POST /_s3/multipart/sign-part` `{ objectPath, uploadId, partNumber }` → `{ url, key, partNumber, expiresIn }`
+  3. `POST /_s3/multipart/complete` `{ objectPath, uploadId, parts: [{ partNumber, etag }] }` → `{ key, etag, location }`
+  4. `POST /_s3/multipart/abort` `{ objectPath, uploadId }` → `{ ok: true }`
+* **Download**: `POST /_s3/presign-download` `{ objectPath, expiresInSeconds? }` → `{ url, key, expiresIn }`
+* **Löschen / Cleanup-Queue** *(nur `TEAM_ADMIN` / `COACH`)*: `DELETE /_s3/object` bzw. `POST /_s3/cleanup-queue` `{ objectPaths, reason? }`
+
+Im Backend stehen identische Methoden direkt über `ctx.s3.*` und `ctx.cleanupQueue.enqueueOrphanedObjects(...)` bereit.
+
+### Notification-Broker & eigene Zustellweg-Plugins
+* **Benachrichtigung senden (`notifications:send`):** Über `ctx.notifications.send(payload)` im Backend oder `POST /api/v1/plugins/<pluginId>/teams/<teamId>/_notifications/send` im Frontend. Standardkanäle im Core sind `in-app` und `smtp`; alle aktiven Channel-Plugins des Teams sind über `GET /_notifications/channels` abrufbar.
+* **Eigenen Zustellkanal bauen (`notifications:channel`):** Benötigt weder UI noch `handleRequest`:
+
+```ts
+import type { SidelineBackendPlugin } from '@sidelineos/plugin-sdk';
+import manifest from '../plugin.manifest.json' assert { type: 'json' };
+
+export default {
+  manifest: manifest as SidelineBackendPlugin['manifest'],
+  notificationChannels: [
+    { id: 'discord-webhook', label: 'Discord Webhook', description: 'Sendet Team-Alerts an Discord.' },
+  ],
+  async deliverNotification(event, ctx) {
+    // event: { title, message, priority, linkPath, teamId, teamName, recipients, metadata }
+    // Beispiel: Webhook-URL aus ctx.db (plugin-isoliert) lesen und senden
+    return { delivered: event.recipients.length };
+  },
+} satisfies SidelineBackendPlugin;
+```
+
+### Optionale Scope-Hooks (Federation / Export-Vorbereitung)
+Auf `SidelineBackendPlugin` können optional drei Methoden für späteren Team-Austausch bereitgestellt werden (Signaturen exakt aus `@sidelineos/plugin-sdk`):
+* `listExportableItems(ctx, options?: { season?: string }) => Promise<PluginScopeItem[]>`
+* `exportScope(ctx, options?: { itemIds?: string[]; season?: string }) => Promise<PluginExportScopeResult>`
+* `importScope(ctx, bundle: PluginExportScopeResult, options?: { mode: 'replace' | 'merge' }) => Promise<{ imported: number; skipped: number }>`
 
 ---
 
-## 5. Sicherheits- & Build-Anforderungen für Store-Releases
+## 7. Sicherheits- & Qualitätsregeln
 
-1. **Keine unkontrollierte Code-Ausführung im Server-Prozess:** Backend-Routen eines Plugins dürfen niemals über unsichere `eval()`/`Function()`-Konstrukte oder rohes SQL ohne Parameterbindung laufen. Externe Plugins werden im Produktionsbetrieb als signiertes Release-Artefakt (`sideline-plugin-v1.tar.gz` + SHA256-Prüfsumme + `plugin.manifest.json`) über GitHub Releases oder per Offline-`.tar.gz`-Upload installiert. Nur bei explizit aktiviertem `DEV_ALLOW_GIT_INSTALL=true` (Standard: `false`) steht zusätzlich `git clone --depth 1` + lokaler Build bereit.
-2. **Kein Cross-Site-Scripting (XSS):** UI-Komponenten verwenden ausschließlich sicheres React-Binding (`{wert}` statt `dangerouslySetInnerHTML`) und validieren JSON/CSV-Imports strikt vor der Übernahme.
-3. **Sichtbarkeit & Ausblendung:** Ist ein Plugin instanzweit (im Sysadmin Plugin Store) oder für das gewählte Team deaktiviert, darf kein UI-Eintrag (weder Startseite noch Einstellungen) sichtbar sein und jeder API-/Routen-Zugriff liefert `403 Forbidden`.
-4. **Cross-Platform-Fähigkeit:** Services müssen frei von Browser-DOM-APIs bleiben (`window`, `document`), damit Capacitor (Android/iOS) und Tauri (Linux/Windows/macOS) dieselbe Domänenlogik nutzen können.
+1. **Kein `eval` / dynamisches SQL-String-Bauen:** Immer Parameterbindung (`$1`, `$2`) in `ctx.db.query(...)` nutzen.
+2. **Kein `dangerouslySetInnerHTML`:** Ausschließlich sicheres React-Binding (`{wert}`).
+3. **Rollenprüfung auch im Plugin-Backend:** Das Core-Gateway prüft Team-Mitgliedschaft und Modul-Aktivierung; ob ein `PLAYER` bestimmte Schreibaktionen innerhalb des Plugins ausführen darf (`ctx.teamRolle`), prüft das Plugin in `handleRequest` selbst.
+4. **Sichtbarkeit:** Ist ein Plugin global oder fürs Team deaktiviert, blendet Core alle UI-Einträge aus und blockiert Gateway-Requests mit `403 Forbidden`.
+5. **Cross-Platform-Fähigkeit:** Domain-Services unter `src/services/` frei von `window` / `document` halten.
 
-### Verbindliche Bundle-Dateien für dynamisches Laden (`dist/`)
+---
 
-Damit SidelineOS-Core ein Plugin ohne Core-Rebuild zur Laufzeit laden kann, stellt `npm run build` im Plugin-Repo folgende Dateien in `dist/` bereit:
+## 8. Release-Paket & GitHub Actions Vorlage
 
-* **`dist/client.js`** *(Pflicht für UI-Plugins, ESM)*: `export default` eines gültigen `SidelinePlugin`-Objekts (`manifest`, `getTabs`, `renderMainView`, optional `Provider`, `PrimaerAktion`, `renderPublicShareView`, `settingsPanels`).
-  * Im Frontend-Build (z. B. Vite Library Mode) werden `react`, `react/jsx-runtime`, `react-dom`, `react-dom/client`, `lucide-react` und `@sidelineos/plugin-sdk` als `external` markiert – der Browser löst sie über die Core-ImportMap automatisch gegen die laufende Core-Instanz auf.
-* **`dist/client.css`** *(optional)*: Zusätzliches Plugin-CSS; wird vom Core beim Laden automatisch eingebunden und beim Deinstallieren entfernt.
-* **`dist/server.js`** *(optional, ESM)*: `export default` (oder `export const backendPlugin`) eines `SidelineBackendPlugin`-Objekts; wird beim Core-Start sowie live nach Installation/Rollback über `PluginBackendHost` geladen *(Fallback auf `dist/index.js` für Legacy-/Test-Bundles)*.
+Für die produktive Installation per GitHub Release oder Offline-`.tar.gz`-Upload müssen `plugin.manifest.json`, `dist/` und optional `migrations/` **direkt im Root des `.tar.gz`-Archivs** liegen (keine verschachtelten Symlinks, max. 25 MB / 500 Dateien).
 
-### GitHub Actions Release-Vorlage (`.github/workflows/release.yml` für Plugin-Repos)
-
-Mit diesem Workflow baut jedes Tag `v*.*.*` automatisch ein vom Core direkt installierbares `sideline-plugin-v1.tar.gz` inklusive `.sha256`-Prüfsumme:
+Vorlage `.github/workflows/release.yml`:
 
 ```yaml
 name: SidelineOS Plugin Release
@@ -183,10 +484,8 @@ jobs:
             plugin.manifest.json
 ```
 
----
-
-## 6. Offizielles Referenz-Plugin: `SidelineOS-video`
-
-Das offizielle Videoanalyse-Plugin wurde vollständig aus dem Core ausgelagert und wird als eigenständiges Repository gepflegt:
-* Repository: **`https://github.com/moritztw/SidelineOS-video`**
-* Das Plugin nutzt `@sidelineos/plugin-sdk`, liefert das Bundle-Format `sideline-plugin-v1` (`.github/workflows/release.yml` wie oben) und wird über den Core Plugin Store installiert.
+### Entwicklungs-Workflow gegen eine laufende Core-Instanz
+1. Auf der Test-Instanz in `.env` setzen: `DEV_ALLOW_GIT_INSTALL="true"`.
+2. Im Sysadmin-Plugin-Store den Tab **Dev: Git Clone & Build** öffnen.
+3. Repo-URL `https://github.com/<org>/SidelineOS-<slug>` + Branch (z. B. `main` oder `dev`) angeben.
+4. Core klont, installiert `devDependencies`, führt `npm run build` aus, setzt die Version automatisch auf `<branch>-<short-sha>` und lädt Backend + Frontend ohne Neustart live nach.
