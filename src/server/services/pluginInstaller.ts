@@ -842,8 +842,8 @@ export class PluginInstallerService {
         'npm-Installation',
         'npm',
         hatLockfile
-          ? ['ci', '--include=dev', '--omit=peer', '--no-audit', '--no-fund']
-          : ['install', '--include=dev', '--omit=peer', '--no-audit', '--no-fund'],
+          ? ['ci', '--include=dev', '--legacy-peer-deps', '--no-audit', '--no-fund']
+          : ['install', '--include=dev', '--legacy-peer-deps', '--no-audit', '--no-fund'],
         { cwd: stagingDir, env: buildEnv }
       );
       await this.stelleLokalesSdkBereit(stagingDir);

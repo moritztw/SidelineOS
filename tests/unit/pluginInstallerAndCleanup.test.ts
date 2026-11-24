@@ -665,10 +665,10 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(status?.installedVersion, 'feature-metrics-a1b2c3d');
     assert.equal(status?.releaseTag, 'dev:feature/metrics');
 
-    // Prüfen, dass npm mit --omit=peer (ohne peerDependencies-Registry-Lookup) aufgerufen wurde
+    // Prüfen, dass npm mit --legacy-peer-deps (ohne peerDependencies-Registry-Lookup) aufgerufen wurde
     const installArgs = erfassteNpmArgs.find((a) => a[0] === 'ci' || a[0] === 'install');
     assert.ok(installArgs, 'npm ci/install muss ausgeführt worden sein');
-    assert.ok(installArgs.includes('--omit=peer'), 'npm muss --omit=peer erhalten');
+    assert.ok(installArgs.includes('--legacy-peer-deps'), 'npm muss --legacy-peer-deps erhalten');
     assert.ok(installArgs.includes('--include=dev'), 'npm muss --include=dev erhalten');
 
     // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)

@@ -111,8 +111,8 @@ Die verbindlichen TypeScript-Verträge liegen im Core-Repository unter `packages
 
 Empfohlenes Setup in `package.json`:
 * `@sidelineos/plugin-sdk` (wie `react` / `react-dom` / `lucide-react`) als **`peerDependency`** deklarieren — **nicht** als `npm`-/`github:`-`dependency`.
-* Beim **Dev-Git-Clone im Core** führt der Installer automatisch `npm install --include=dev --omit=peer` aus (verhindert `E404`-Lookups auf `npmjs.org`) und kopiert vor `npm run build` das lokal gebaute `packages/plugin-sdk` direkt in `node_modules/@sidelineos/plugin-sdk`.
-* Für **lokale IDE-Entwicklung & CI-Builds** ohne laufenden Core entweder eine lokale Typdatei `src/sdk.d.ts` im Plugin-Repo mitführen oder einen geklonten Core (`npm run build:sdk`) über `npm install --omit=peer` lokal verlinken (`npm link ../SidelineOS-core/packages/plugin-sdk`). *(Sobald `@sidelineos/plugin-sdk` als separates Paket veröffentlicht ist, wird dieser Abschnitt entsprechend aktualisiert.)*
+* Beim **Dev-Git-Clone im Core** führt der Installer automatisch `npm install --include=dev --legacy-peer-deps` aus (verhindert `E404`-Lookups auf `npmjs.org` unter npm 10+) und kopiert vor `npm run build` das lokal gebaute `packages/plugin-sdk` direkt in `node_modules/@sidelineos/plugin-sdk`.
+* Für **lokale IDE-Entwicklung & CI-Builds** ohne laufenden Core entweder eine lokale Typdatei `src/sdk.d.ts` im Plugin-Repo mitführen oder einen geklonten Core (`npm run build:sdk`) über `npm install --legacy-peer-deps` lokal verlinken (`npm link ../SidelineOS-core/packages/plugin-sdk`). *(Sobald `@sidelineos/plugin-sdk` als separates Paket veröffentlicht ist, wird dieser Abschnitt entsprechend aktualisiert.)*
 
 ```json
 {
@@ -475,7 +475,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci --omit=peer
+      - run: npm ci --legacy-peer-deps
       - run: npm test
       - run: npm run build
       - name: Plugin-Bundle packen & SHA-256 erzeugen
