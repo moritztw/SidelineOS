@@ -50,14 +50,20 @@ describe('SidelineOS Plugin-SDK & Store-Katalog', () => {
     assert.equal(ungueltig.ok, false);
 
     const gueltig = parseGitHubPluginQuelle(
-      'https://github.com/munich-stallions/sidelineos-plugin-scouting.git/'
+      'https://github.com/munich-stallions/SidelineOS-scouting.git/'
     );
     assert.equal(gueltig.ok, true);
     assert.equal(gueltig.slug, 'scouting');
     assert.equal(
       gueltig.repoUrl,
-      'https://github.com/munich-stallions/sidelineos-plugin-scouting'
+      'https://github.com/munich-stallions/SidelineOS-scouting'
     );
+
+    const videoRepo = parseGitHubPluginQuelle(
+      'https://github.com/moritztw/SidelineOS-video'
+    );
+    assert.equal(videoRepo.ok, true);
+    assert.equal(videoRepo.slug, 'video');
 
     const manifest = erstelleCustomPluginManifest(gueltig.repoUrl!, gueltig.slug!);
     assert.equal(manifest.id, 'scouting');

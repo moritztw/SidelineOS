@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
 import { normalisiereSprache, type UnterstuetzteSprache } from '../shared/i18n.ts';
 
-const PACKAGE_CORE_VERSION = (() => {
+export const PACKAGE_CORE_VERSION = (() => {
   try {
     const pkg = JSON.parse(
       fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')

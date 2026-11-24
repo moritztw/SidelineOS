@@ -32,9 +32,9 @@ Dieses Dokument beschreibt die verbindliche Architektur von **SidelineOS-Core**:
 
 ---
 
-## 3. Hybrid-Video-Modell (Videoanalyse-Plugin)
+## 3. Hybrid-Video-Modell (Externes Plugin `SidelineOS-video`)
 
-Das gekapselte Plugin `src/plugins/video-analysis/` (bereit für die Auslagerung nach `sidelineos-plugin-video`) bildet beide Praxis-Szenarien über ein gemeinsames Modell ab:
+Das gekapselte Referenz-Plugin [`SidelineOS-video`](https://github.com/moritztw/SidelineOS-video) bildet beide Praxis-Szenarien über ein gemeinsames Modell ab:
 
 ```text
 mod_video_media_reels (physisches Asset-Container-Objekt)

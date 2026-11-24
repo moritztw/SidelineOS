@@ -66,6 +66,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
   let aktuellesShaSollFehlschlagen = false;
   let aktuellesSdkSollInkompatibelSein = false;
   let coreNeuesteVersion = '0.3.0';
+  let erfassteNpmArgs: string[][] = [];
 
   const erstelleTestBundle = (params: {
     id: string;
@@ -169,7 +170,8 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         const bundle = erstelleTestBundle({
           id: 'scouting-demo',
           name: 'Scouting Demo',
-          version,
+          // Bewusst abweichende Manifest-Version, um Überschreibung durch Release-Tag zu testen
+          version: '0.0.9-manifest',
           sdkVersion: aktuellesSdkSollInkompatibelSein ? '2.0' : '1.0',
           mitMigration: true,
         });
@@ -252,9 +254,11 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
               name: 'Dev Analytics',
               kurzbeschreibung: 'Aus Git geklontes Dev-Plugin',
               version: '0.4.0-dev',
-              sdkVersion: '1.0',
+              // Bewusst abweichende SDK- und Core-Version, um den Verzicht auf Kompatibilitätsprüfung im Git-Clone zu belegen
+              sdkVersion: '9.0',
+              minCoreVersion: '99.0.0',
               autor: 'Verein Dev',
-              repositoryUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+              repositoryUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
               icon: 'layers',
               status: 'AKTIV',
               standardAktiviert: false,
@@ -265,6 +269,15 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
             'utf8'
           );
           await fs.writeFile(path.join(targetDir, 'package-lock.json'), '{}', 'utf8');
+        }
+        if (cmd === 'git' && args[0] === 'rev-parse' && args.includes('--short')) {
+          return { stdout: 'a1b2c3d\n', stderr: '' };
+        }
+        if (cmd === 'git' && args[0] === 'symbolic-ref') {
+          return { stdout: 'feature/metrics\n', stderr: '' };
+        }
+        if (cmd === 'npm') {
+          erfassteNpmArgs.push([...args]);
         }
         if (cmd === 'npm' && opts.cwd && args.includes('build')) {
           await fs.writeFile(path.join(opts.cwd, 'dist', 'index.js'), 'export default {};', 'utf8');
@@ -411,10 +424,41 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
       () =>
         validierePluginManifest(
           { id: 'valid-plugin', name: 'NewSDK', version: '1.0.0', sdkVersion: '2.0', dbPrefix: 'mod_valid_' },
-          '1.0'
+          { supportedSdkVersion: '1.0', coreVersion: '0.1.0' }
         ),
       (err: unknown) => err instanceof PluginInstallerFehler && err.status === 409
     );
+
+    assert.throws(
+      () =>
+        validierePluginManifest(
+          {
+            id: 'valid-plugin',
+            name: 'RequiresNewCore',
+            version: '1.0.0',
+            sdkVersion: '1.0',
+            minCoreVersion: '0.5.0',
+            dbPrefix: 'mod_valid_',
+          },
+          { supportedSdkVersion: '1.0', coreVersion: '0.1.0-alpha.1' }
+        ),
+      (err: unknown) => err instanceof PluginInstallerFehler && err.status === 409
+    );
+
+    const compatOk = validierePluginManifest(
+      {
+        id: 'valid-plugin',
+        name: 'CompatCore',
+        version: '1.0.0',
+        sdkVersion: '1.0',
+        minCoreVersion: '0.1.0-alpha.1',
+        maxCoreVersion: '0.9.9',
+        dbPrefix: 'mod_valid_',
+      },
+      { supportedSdkVersion: '1.0', coreVersion: '0.2.0' }
+    );
+    assert.equal(compatOk.minCoreVersion, '0.1.0-alpha.1');
+    assert.equal(compatOk.maxCoreVersion, '0.9.9');
   });
 
   it('blockiert Path-Traversal (Zip-Slip) und Symlinks beim Entpacken von .tar.gz-Archiven', () => {
@@ -581,7 +625,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(delRes.status, 200);
   });
 
-  it('steuert Git-Clone explizit über DEV_ALLOW_GIT_INSTALL (Default false), validiert Branch-Namen und erlaubt explizites Opt-in auch bei NODE_ENV=production', async () => {
+  it('steuert Git-Clone explizit über DEV_ALLOW_GIT_INSTALL (Default false), nutzt <branch>-<commit> als Version ohne Kompatibilitätssperre und blockiert unsichere Branches', async () => {
     // 1. Flag-Injection im Branch blockieren
     const badBranch = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
       method: 'POST',
@@ -591,13 +635,13 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         'X-Requested-With': 'XMLHttpRequest',
       },
       body: JSON.stringify({
-        repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+        repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         branch: '--upload-pack=whoami',
       }),
     });
     assert.equal(badBranch.status, 400);
 
-    // 2. Erfolgreicher Dev-Clone & Build
+    // 2. Erfolgreicher Dev-Clone & Build trotz abweichender sdkVersion/minCoreVersion -> Version = <branch>-<commit>
     const okDev = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
       method: 'POST',
       headers: {
@@ -606,18 +650,26 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         'X-Requested-With': 'XMLHttpRequest',
       },
       body: JSON.stringify({
-        repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+        repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         branch: 'feature/metrics',
       }),
     });
     assert.equal(okDev.status, 200);
     const okDevBody = (await okDev.json()) as { manifest: PluginManifest; branch: string };
     assert.equal(okDevBody.manifest.id, 'dev-analytics');
+    assert.equal(okDevBody.manifest.version, 'feature-metrics-a1b2c3d');
     assert.equal(okDevBody.branch, 'feature/metrics');
 
     const status = await repo.findePluginStatus('dev-analytics');
     assert.equal(status?.installMode, 'DEV_GIT');
+    assert.equal(status?.installedVersion, 'feature-metrics-a1b2c3d');
     assert.equal(status?.releaseTag, 'dev:feature/metrics');
+
+    // Prüfen, dass npm mit --legacy-peer-deps (ohne peerDependencies-Registry-Lookup) aufgerufen wurde
+    const installArgs = erfassteNpmArgs.find((a) => a[0] === 'ci' || a[0] === 'install');
+    assert.ok(installArgs, 'npm ci/install muss ausgeführt worden sein');
+    assert.ok(installArgs.includes('--legacy-peer-deps'), 'npm muss --legacy-peer-deps erhalten');
+    assert.ok(installArgs.includes('--include=dev'), 'npm muss --include=dev erhalten');
 
     // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)
     const defaultProdConfig = loadCoreConfig({
@@ -632,7 +684,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     await assert.rejects(
       () =>
         defaultProdInstaller.installiereDevAusGit({
-          repoUrl: 'https://github.com/verein/sidelineos-plugin-dev-analytics',
+          repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
         }),
       (err: unknown) => err instanceof PluginInstallerFehler && err.status === 403
     );
@@ -647,6 +699,52 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
       DEV_ALLOW_GIT_INSTALL: 'true',
     });
     assert.equal(optInProdConfig.devAllowGitInstall, true);
+
+    // 5. Fehlgeschlagener npm-Aufruf wirft sauberen PluginInstallerFehler (422) statt rohem Error (500)
+    const failingNpmInstaller = new PluginInstallerService(db, repo, optInProdConfig, {
+      commandRunner: async (cmd, args) => {
+        if (cmd === 'git' && args[0] === 'clone') {
+          const targetDir = args[args.length - 1];
+          await fs.mkdir(targetDir, { recursive: true });
+          await fs.writeFile(
+            path.join(targetDir, 'plugin.manifest.json'),
+            JSON.stringify({
+              id: 'failing-dev-plugin',
+              name: 'Failing Dev Plugin',
+              kurzbeschreibung: 'Fehler-Test',
+              version: '0.1.0',
+              sdkVersion: '1.0',
+              autor: 'Test',
+              icon: 'puzzle',
+              status: 'AKTIV',
+              standardAktiviert: false,
+              permissions: ['team:read'],
+              dbPrefix: 'mod_failing_dev_',
+              settingsAnker: {},
+            }),
+            'utf8'
+          );
+          return { stdout: '', stderr: '' };
+        }
+        if (cmd === 'npm') {
+          const err = new Error('Command failed: npm install') as Error & { stderr?: string };
+          err.stderr = "npm error code E404\nnpm error 404 '@sidelineos/plugin-sdk' not found";
+          throw err;
+        }
+        return { stdout: '', stderr: '' };
+      },
+    });
+    await assert.rejects(
+      () =>
+        failingNpmInstaller.installiereDevAusGit({
+          repoUrl: 'https://github.com/verein/SidelineOS-failing-dev',
+        }),
+      (err: unknown) =>
+        err instanceof PluginInstallerFehler &&
+        err.status === 422 &&
+        err.message.includes('npm-Installation fehlgeschlagen') &&
+        err.message.includes('E404')
+    );
   });
 
   it('verwaltet S3-Cleanup-Queue mit Permission-Prüfung, anonymisierter Sysadmin-Statistik und Schonfrist-Löschung', async () => {

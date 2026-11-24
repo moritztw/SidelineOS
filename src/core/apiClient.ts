@@ -120,6 +120,7 @@ export interface PluginUpdateEintragDTO {
   verfuegbar: string | null;
   updateVerfuegbar: boolean;
   sdkKompatibel: boolean;
+  coreKompatibel?: boolean;
   releaseTag: string | null;
   releaseUrl: string | null;
 }

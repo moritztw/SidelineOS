@@ -647,8 +647,10 @@ export function SysadminPage({
                       <span>
                         Update: v{pluginUpdate.verfuegbar}
                         {!pluginUpdate.sdkKompatibel ? ' (SDK inkompatibel)' : ''}
+                        {pluginUpdate.coreKompatibel === false ? ' (Core-Version inkompatibel)' : ''}
                       </span>
                       {pluginUpdate.sdkKompatibel &&
+                        pluginUpdate.coreKompatibel !== false &&
                         manifest.repositoryUrl &&
                         onPluginReleaseInstallieren && (
                           <button
@@ -687,6 +689,11 @@ export function SysadminPage({
                   </p>
 
                   <div className="space-y-1 border-t border-[#232933] pt-2 font-mono text-[10px] text-[#6E7681]">
+                    <div>
+                      SDK: v{manifest.sdkVersion}
+                      {manifest.minCoreVersion ? ` · Core >= v${manifest.minCoreVersion}` : ''}
+                      {manifest.maxCoreVersion ? ` · Core <= v${manifest.maxCoreVersion}` : ''}
+                    </div>
                     <div>DB: {manifest.dbPrefix}*</div>
                     {manifest.s3Prefix && <div>S3: teams/&#123;id&#125;/{manifest.s3Prefix}</div>}
                     <div
@@ -741,7 +748,7 @@ export function SysadminPage({
                                 setStoreFehler(res.fehler ?? 'Rollback fehlgeschlagen.');
                               } else {
                                 zeigeStoreHinweis(
-                                  `Rollback auf v${backendMeta.previousVersion} durchgeführt.`
+                                  `Rollback auf ${backendMeta.previousVersion} durchgeführt.`
                                 );
                               }
                             })();
@@ -749,7 +756,9 @@ export function SysadminPage({
                           className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B] disabled:opacity-50"
                         >
                           <RotateCcw className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
-                          v{backendMeta.previousVersion}
+                          {/^\d/.test(backendMeta.previousVersion)
+                            ? `v${backendMeta.previousVersion}`
+                            : backendMeta.previousVersion}
                         </button>
                       )}
                       <button
@@ -878,7 +887,7 @@ export function SysadminPage({
                 type="url"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
-                placeholder="https://github.com/dein-verein/sidelineos-plugin-scouting"
+                placeholder="https://github.com/dein-verein/SidelineOS-scouting"
                 className="rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
               />
               <input
@@ -933,7 +942,7 @@ export function SysadminPage({
                 type="url"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
-                placeholder="https://github.com/dein-verein/sidelineos-plugin-scouting"
+                placeholder="https://github.com/dein-verein/SidelineOS-scouting"
                 className="rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
               />
               <input
