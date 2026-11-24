@@ -66,6 +66,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
   let aktuellesShaSollFehlschlagen = false;
   let aktuellesSdkSollInkompatibelSein = false;
   let coreNeuesteVersion = '0.3.0';
+  let erfassteNpmArgs: string[][] = [];
 
   const erstelleTestBundle = (params: {
     id: string;
@@ -274,6 +275,9 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
         }
         if (cmd === 'git' && args[0] === 'symbolic-ref') {
           return { stdout: 'feature/metrics\n', stderr: '' };
+        }
+        if (cmd === 'npm') {
+          erfassteNpmArgs.push([...args]);
         }
         if (cmd === 'npm' && opts.cwd && args.includes('build')) {
           await fs.writeFile(path.join(opts.cwd, 'dist', 'index.js'), 'export default {};', 'utf8');
@@ -661,6 +665,12 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.equal(status?.installedVersion, 'feature-metrics-a1b2c3d');
     assert.equal(status?.releaseTag, 'dev:feature/metrics');
 
+    // Prüfen, dass npm mit --omit=peer (ohne peerDependencies-Registry-Lookup) aufgerufen wurde
+    const installArgs = erfassteNpmArgs.find((a) => a[0] === 'ci' || a[0] === 'install');
+    assert.ok(installArgs, 'npm ci/install muss ausgeführt worden sein');
+    assert.ok(installArgs.includes('--omit=peer'), 'npm muss --omit=peer erhalten');
+    assert.ok(installArgs.includes('--include=dev'), 'npm muss --include=dev erhalten');
+
     // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)
     const defaultProdConfig = loadCoreConfig({
       NODE_ENV: 'production',
@@ -689,6 +699,52 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
       DEV_ALLOW_GIT_INSTALL: 'true',
     });
     assert.equal(optInProdConfig.devAllowGitInstall, true);
+
+    // 5. Fehlgeschlagener npm-Aufruf wirft sauberen PluginInstallerFehler (422) statt rohem Error (500)
+    const failingNpmInstaller = new PluginInstallerService(db, repo, optInProdConfig, {
+      commandRunner: async (cmd, args) => {
+        if (cmd === 'git' && args[0] === 'clone') {
+          const targetDir = args[args.length - 1];
+          await fs.mkdir(targetDir, { recursive: true });
+          await fs.writeFile(
+            path.join(targetDir, 'plugin.manifest.json'),
+            JSON.stringify({
+              id: 'failing-dev-plugin',
+              name: 'Failing Dev Plugin',
+              kurzbeschreibung: 'Fehler-Test',
+              version: '0.1.0',
+              sdkVersion: '1.0',
+              autor: 'Test',
+              icon: 'puzzle',
+              status: 'AKTIV',
+              standardAktiviert: false,
+              permissions: ['team:read'],
+              dbPrefix: 'mod_failing_dev_',
+              settingsAnker: {},
+            }),
+            'utf8'
+          );
+          return { stdout: '', stderr: '' };
+        }
+        if (cmd === 'npm') {
+          const err = new Error('Command failed: npm install') as Error & { stderr?: string };
+          err.stderr = "npm error code E404\nnpm error 404 '@sidelineos/plugin-sdk' not found";
+          throw err;
+        }
+        return { stdout: '', stderr: '' };
+      },
+    });
+    await assert.rejects(
+      () =>
+        failingNpmInstaller.installiereDevAusGit({
+          repoUrl: 'https://github.com/verein/SidelineOS-failing-dev',
+        }),
+      (err: unknown) =>
+        err instanceof PluginInstallerFehler &&
+        err.status === 422 &&
+        err.message.includes('npm-Installation fehlgeschlagen') &&
+        err.message.includes('E404')
+    );
   });
 
   it('verwaltet S3-Cleanup-Queue mit Permission-Prüfung, anonymisierter Sysadmin-Statistik und Schonfrist-Löschung', async () => {

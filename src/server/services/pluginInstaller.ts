@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { parseGitHubPluginQuelle } from '../../core/pluginRegistry.ts';
@@ -11,6 +12,39 @@ import { fuehrePluginMigrationAus, type CoreDatabaseClient } from '../db/client.
 import type { CoreRepository } from '../db/coreRepository.ts';
 
 const execFileAsync = promisify(execFile);
+const CORE_PLUGIN_SDK_DIR = fileURLToPath(
+  new URL('../../../packages/plugin-sdk', import.meta.url)
+);
+
+function kuerzeFehlerAusgabe(err: unknown): string {
+  const rec = (err && typeof err === 'object' ? err : {}) as {
+    stderr?: string | Buffer;
+    stdout?: string | Buffer;
+    message?: string;
+  };
+  const stderrText =
+    typeof rec.stderr === 'string'
+      ? rec.stderr
+      : Buffer.isBuffer(rec.stderr)
+        ? rec.stderr.toString('utf8')
+        : '';
+  const stdoutText =
+    typeof rec.stdout === 'string'
+      ? rec.stdout
+      : Buffer.isBuffer(rec.stdout)
+        ? rec.stdout.toString('utf8')
+        : '';
+  const roh = (stderrText.trim() || stdoutText.trim() || rec.message || String(err)).replace(
+    /(https?:\/\/)([^/@\s]+):([^/@\s]+)@/gi,
+    '$1***@'
+  );
+  const zeilen = roh
+    .split(/\r?\n/)
+    .map((z) => z.trim())
+    .filter(Boolean);
+  const auszug = zeilen.slice(-8).join(' | ');
+  return auszug.length > 500 ? `...${auszug.slice(-497)}` : auszug || 'Unbekannter Fehler';
+}
 
 const MAX_TAR_BYTES = 25 * 1024 * 1024;
 const MAX_TAR_EINTRAEGE = 500;
@@ -753,14 +787,21 @@ export class PluginInstallerService {
         cloneArgs.push('--branch', branch);
       }
       cloneArgs.push(`${quelle.repoUrl}.git`, stagingDir);
-      await this.commandRunner('git', cloneArgs, { env: buildEnv });
+      await this.fuehreDevBefehlAus('Git-Clone', 'git', cloneArgs, { env: buildEnv });
 
-      const manifestRawStr = await fs.readFile(
-        path.join(stagingDir, 'plugin.manifest.json'),
-        'utf8'
-      );
+      let manifestRawStr: string;
+      let manifestJson: unknown;
+      try {
+        manifestRawStr = await fs.readFile(path.join(stagingDir, 'plugin.manifest.json'), 'utf8');
+        manifestJson = JSON.parse(manifestRawStr);
+      } catch {
+        throw new PluginInstallerFehler(
+          422,
+          'plugin.manifest.json fehlt im geklonten Repository oder ist kein gültiges JSON.'
+        );
+      }
       // Bei Dev-Git-Clone bewusst kein SDK-/Core-Kompatibilitätsabgleich
-      const manifest = validierePluginManifest(JSON.parse(manifestRawStr), {
+      const manifest = validierePluginManifest(manifestJson, {
         skipCompatibilityCheck: true,
       });
       if (!manifest.repositoryUrl) {
@@ -797,14 +838,19 @@ export class PluginInstallerService {
         hatLockfile = false;
       }
 
-      await this.commandRunner(
+      await this.fuehreDevBefehlAus(
+        'npm-Installation',
         'npm',
         hatLockfile
-          ? ['ci', '--include=dev', '--no-audit', '--no-fund']
-          : ['install', '--include=dev', '--no-audit', '--no-fund'],
+          ? ['ci', '--include=dev', '--omit=peer', '--no-audit', '--no-fund']
+          : ['install', '--include=dev', '--omit=peer', '--no-audit', '--no-fund'],
         { cwd: stagingDir, env: buildEnv }
       );
-      await this.commandRunner('npm', ['run', 'build'], { cwd: stagingDir, env: buildEnv });
+      await this.stelleLokalesSdkBereit(stagingDir);
+      await this.fuehreDevBefehlAus('Plugin-Build', 'npm', ['run', 'build'], {
+        cwd: stagingDir,
+        env: buildEnv,
+      });
 
       // Gebautes dist/ + Manifest + optionale Migrationen einsammeln
       const gesammelteDateien = new Map<string, Buffer>();
@@ -843,6 +889,37 @@ export class PluginInstallerService {
     } finally {
       await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
     }
+  }
+
+  private async fuehreDevBefehlAus(
+    schritt: string,
+    cmd: string,
+    args: string[],
+    options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
+  ): Promise<{ stdout: string; stderr: string }> {
+    try {
+      return await this.commandRunner(cmd, args, options);
+    } catch (err) {
+      if (err instanceof PluginInstallerFehler) throw err;
+      throw new PluginInstallerFehler(422, `${schritt} fehlgeschlagen: ${kuerzeFehlerAusgabe(err)}`);
+    }
+  }
+
+  private async stelleLokalesSdkBereit(stagingDir: string): Promise<void> {
+    const sdkPackageJson = path.join(CORE_PLUGIN_SDK_DIR, 'package.json');
+    const sdkDistDir = path.join(CORE_PLUGIN_SDK_DIR, 'dist');
+    try {
+      await fs.access(sdkPackageJson);
+      await fs.access(sdkDistDir);
+    } catch {
+      return;
+    }
+
+    const zielDir = path.join(stagingDir, 'node_modules', '@sidelineos', 'plugin-sdk');
+    await fs.rm(zielDir, { recursive: true, force: true }).catch(() => undefined);
+    await fs.mkdir(zielDir, { recursive: true });
+    await fs.cp(sdkPackageJson, path.join(zielDir, 'package.json'));
+    await fs.cp(sdkDistDir, path.join(zielDir, 'dist'), { recursive: true });
   }
 
   private async sammleVerzeichnisRekursiv(

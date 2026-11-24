@@ -105,7 +105,14 @@ Der Plugin-Installer liest zuerst `plugin.manifest.json`, bevor Code entpackt od
 ## 3. SDK-Einbindung & Build-Konfiguration (`vite.config.ts`)
 
 ### `@sidelineos/plugin-sdk` einbinden
-Die verbindlichen TypeScript-Verträge liegen im Core-Repository unter `packages/plugin-sdk` (kompiliert per `npm run build:sdk`). In einem externen Plugin-Repo wird das Paket in `package.json` über Git-Referenz oder lokal gebautes Paket als `devDependency` referenziert:
+Die verbindlichen TypeScript-Verträge liegen im Core-Repository unter `packages/plugin-sdk` (kompiliert per `npm run build:sdk`).
+
+> **Wichtiger Hinweis zur Paketauflösung:** `@sidelineos/plugin-sdk` ist aktuell **noch nicht auf `npmjs.org` veröffentlicht** und kann wegen der Monorepo-Struktur (Root-`package.json` ist `sidelineos-core`, `packages/plugin-sdk/dist/` ist in `.gitignore`) **nicht** direkt per `github:moritztw/SidelineOS-core#...` über `npm` installiert werden.
+
+Empfohlenes Setup in `package.json`:
+* `@sidelineos/plugin-sdk` (wie `react` / `react-dom` / `lucide-react`) als **`peerDependency`** deklarieren — **nicht** als `npm`-/`github:`-`dependency`.
+* Beim **Dev-Git-Clone im Core** führt der Installer automatisch `npm install --include=dev --omit=peer` aus (verhindert `E404`-Lookups auf `npmjs.org`) und kopiert vor `npm run build` das lokal gebaute `packages/plugin-sdk` direkt in `node_modules/@sidelineos/plugin-sdk`.
+* Für **lokale IDE-Entwicklung & CI-Builds** ohne laufenden Core entweder eine lokale Typdatei `src/sdk.d.ts` im Plugin-Repo mitführen oder einen geklonten Core (`npm run build:sdk`) über `npm install --omit=peer` lokal verlinken (`npm link ../SidelineOS-core/packages/plugin-sdk`). *(Sobald `@sidelineos/plugin-sdk` als separates Paket veröffentlicht ist, wird dieser Abschnitt entsprechend aktualisiert.)*
 
 ```json
 {
@@ -116,16 +123,19 @@ Die verbindlichen TypeScript-Verträge liegen im Core-Repository unter `packages
     "build": "vite build && vite build --config vite.server.config.ts",
     "test": "tsx --test tests/**/*.test.ts"
   },
-  "devDependencies": {
-    "@sidelineos/plugin-sdk": "github:moritztw/SidelineOS-core#main",
+  "peerDependencies": {
+    "@sidelineos/plugin-sdk": "^1.0.0",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1",
+    "react-dom": "^19.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.8.0",
     "vite": "^8.0.0"
   }
 }
 ```
-*(Alternativ beim Klonen per `npm run build:sdk` lokal verlinken, falls der Core direkt daneben liegt.)*
 
 ### Browser-ImportMap & Pflicht-`externals`
 Der Browser lädt Plugins per `import('/api/v1/plugins/runtime/bundles/<pluginId>/<version>/client.js')`. Damit Plugins und Core **exakt dieselbe React-Instanz** und denselben SDK-Code teilen, injiziert der Core eine `<script type="importmap">` auf `/api/v1/plugins/runtime/_shared/*`.
@@ -465,7 +475,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - run: npm ci --omit=peer
       - run: npm test
       - run: npm run build
       - name: Plugin-Bundle packen & SHA-256 erzeugen
