@@ -734,6 +734,45 @@ export function SysadminPage({
                       >
                         {globalAn ? 'Aktiv' : 'Pausiert'}
                       </button>
+                      {backendMeta?.installMode === 'DEV_GIT' &&
+                        manifest.repositoryUrl &&
+                        onPluginDevGitInstallieren && (
+                          <button
+                            type="button"
+                            disabled={storeBeschaeftigt || !capabilities?.devGitInstallErlaubt}
+                            title={
+                              capabilities?.devGitInstallErlaubt
+                                ? `Git Pull (${backendMeta.devBranch ?? 'main'})`
+                                : 'Deaktiviert (DEV_ALLOW_GIT_INSTALL=false)'
+                            }
+                            onClick={() => {
+                              void (async () => {
+                                setStoreBeschaeftigt(true);
+                                setStoreFehler(null);
+                                setStoreHinweis(null);
+                                const res = await onPluginDevGitInstallieren(
+                                  manifest.repositoryUrl,
+                                  backendMeta.devBranch ?? undefined
+                                );
+                                setStoreBeschaeftigt(false);
+                                if (!res.ok) {
+                                  setStoreFehler(
+                                    res.fehler ??
+                                      `Git Pull für "${manifest.name}" fehlgeschlagen.`
+                                  );
+                                } else {
+                                  zeigeStoreHinweis(
+                                    `Git Pull für "${manifest.name}" (${backendMeta.devBranch ?? 'main'}) abgeschlossen.`
+                                  );
+                                }
+                              })();
+                            }}
+                            className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B] disabled:opacity-50"
+                          >
+                            <RefreshCw className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
+                            Git Pull
+                          </button>
+                        )}
                       {backendMeta?.previousVersion && onPluginRollback && (
                         <button
                           type="button"

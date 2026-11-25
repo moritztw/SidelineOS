@@ -884,6 +884,8 @@ export class PluginInstallerService {
         devBranch: effektiverBranch,
       });
 
+      await this.bereinigeAltePluginVersionen(manifest.id, devVersion);
+
       this.updateCache = null;
       return { manifest, branch: effektiverBranch, migrationenAusgefuehrt };
     } finally {
@@ -920,6 +922,24 @@ export class PluginInstallerService {
     await fs.mkdir(zielDir, { recursive: true });
     await fs.cp(sdkPackageJson, path.join(zielDir, 'package.json'));
     await fs.cp(sdkDistDir, path.join(zielDir, 'dist'), { recursive: true });
+  }
+
+  private async bereinigeAltePluginVersionen(
+    pluginId: string,
+    behalteVersion: string
+  ): Promise<void> {
+    const pluginDir = path.resolve(this.config.pluginDataDir, pluginId);
+    try {
+      const eintraege = await fs.readdir(pluginDir, { withFileTypes: true });
+      for (const eintrag of eintraege) {
+        if (eintrag.name === behalteVersion) continue;
+        await fs
+          .rm(path.join(pluginDir, eintrag.name), { recursive: true, force: true })
+          .catch(() => undefined);
+      }
+    } catch {
+      // Verzeichnis existiert nicht -> ignorieren
+    }
   }
 
   private async sammleVerzeichnisRekursiv(

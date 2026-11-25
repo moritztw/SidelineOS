@@ -584,9 +584,11 @@ export class CoreRepository {
   }): Promise<void> {
     const bestehend = await this.findePluginStatus(params.manifest.id);
     const previousVersion =
-      bestehend && bestehend.installedVersion !== params.manifest.version
-        ? bestehend.installedVersion
-        : bestehend?.previousVersion ?? null;
+      params.installMode === 'DEV_GIT'
+        ? null
+        : bestehend && bestehend.installedVersion !== params.manifest.version
+          ? bestehend.installedVersion
+          : bestehend?.previousVersion ?? null;
 
     await this.db.query(
       `INSERT INTO core.installed_plugins (

@@ -66,6 +66,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
   let aktuellesShaSollFehlschlagen = false;
   let aktuellesSdkSollInkompatibelSein = false;
   let coreNeuesteVersion = '0.3.0';
+  let devGitCommitSha = 'a1b2c3d';
   let erfassteNpmArgs: string[][] = [];
 
   const erstelleTestBundle = (params: {
@@ -271,7 +272,7 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
           await fs.writeFile(path.join(targetDir, 'package-lock.json'), '{}', 'utf8');
         }
         if (cmd === 'git' && args[0] === 'rev-parse' && args.includes('--short')) {
-          return { stdout: 'a1b2c3d\n', stderr: '' };
+          return { stdout: `${devGitCommitSha}\n`, stderr: '' };
         }
         if (cmd === 'git' && args[0] === 'symbolic-ref') {
           return { stdout: 'feature/metrics\n', stderr: '' };
@@ -670,6 +671,33 @@ describe('Core-Phase 3: SDK, Plugin-Installer, Updates, Rollback & S3-Cleanup', 
     assert.ok(installArgs, 'npm ci/install muss ausgeführt worden sein');
     assert.ok(installArgs.includes('--legacy-peer-deps'), 'npm muss --legacy-peer-deps erhalten');
     assert.ok(installArgs.includes('--include=dev'), 'npm muss --include=dev erhalten');
+
+    // 2b. Manueller Git Pull auf neuem Commit aktualisiert auf <branch>-<newSha> und löscht alten Ordner
+    devGitCommitSha = 'b2c3d4e';
+    const pullDev = await fetch(`${baseUrl}/api/v1/sysadmin/plugins/install-dev-git`, {
+      method: 'POST',
+      headers: {
+        Cookie: sysadminCookie,
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      body: JSON.stringify({
+        repoUrl: 'https://github.com/verein/SidelineOS-dev-analytics',
+        branch: 'feature/metrics',
+      }),
+    });
+    assert.equal(pullDev.status, 200);
+    const pullDevBody = (await pullDev.json()) as { manifest: PluginManifest; branch: string };
+    assert.equal(pullDevBody.manifest.version, 'feature-metrics-b2c3d4e');
+
+    const statusNachPull = await repo.findePluginStatus('dev-analytics');
+    assert.equal(statusNachPull?.installedVersion, 'feature-metrics-b2c3d4e');
+    assert.equal(statusNachPull?.previousVersion, null);
+
+    await assert.rejects(() =>
+      fs.access(path.join(tmpDataDir, 'dev-analytics', 'feature-metrics-a1b2c3d'))
+    );
+    await fs.access(path.join(tmpDataDir, 'dev-analytics', 'feature-metrics-b2c3d4e'));
 
     // 3. Ohne explizites DEV_ALLOW_GIT_INSTALL=true strikt 403 erzwingen (sicherer Default)
     const defaultProdConfig = loadCoreConfig({
