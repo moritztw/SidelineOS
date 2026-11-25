@@ -95,6 +95,13 @@ export interface SysadminCapabilitiesDTO {
   defaultLocale?: UnterstuetzteSprache;
 }
 
+export interface SysadminMitgliedschaftEingabeDTO {
+  teamId: string;
+  rolle: TeamRolle;
+  units?: SpielerUnit[];
+  status?: 'AKTIV' | 'WARTET_AUF_FREIGABE';
+}
+
 export interface S3CleanupStatistikDTO {
   wartendeObjekte: number;
   faelligeObjekte: number;
@@ -400,11 +407,40 @@ export const coreApi = {
     email: string;
     passwort: string;
     istSysadmin: boolean;
+    telefon?: string;
+    trikotNummer?: string;
+    position?: string;
     preferredLocale?: UnterstuetzteSprache;
     teamZuweisung?: { teamId: string; rolle: TeamRolle };
-  }): Promise<{ user: BenutzerKonto; membership?: TeamMitgliedschaft }> {
+    mitgliedschaften?: SysadminMitgliedschaftEingabeDTO[];
+  }): Promise<{
+    user: BenutzerKonto;
+    membership?: TeamMitgliedschaft;
+    memberships?: TeamMitgliedschaft[];
+  }> {
     return apiRequest('/api/v1/sysadmin/users', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  aktualisiereBenutzer(
+    userUuid: string,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
+      neuesPasswort?: string;
+      mitgliedschaften: SysadminMitgliedschaftEingabeDTO[];
+    }
+  ): Promise<{ user: BenutzerKonto; memberships: TeamMitgliedschaft[] }> {
+    return apiRequest(`/api/v1/sysadmin/users/${encodeURIComponent(userUuid)}`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     });
   },

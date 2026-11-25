@@ -9,6 +9,7 @@ import {
   GitBranch,
   HardDrive,
   Mail,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -17,11 +18,13 @@ import {
   Trash2,
   Upload,
   UserPlus,
+  X,
 } from 'lucide-react';
 import type {
   CoreApiError as _CoreApiError,
   S3CleanupStatistikDTO,
   SysadminCapabilitiesDTO,
+  SysadminMitgliedschaftEingabeDTO,
   SysadminPluginStatusDTO,
   UpdatePruefErgebnisDTO,
 } from '../apiClient.ts';
@@ -30,10 +33,12 @@ import type {
   PluginId,
   S3Konfiguration,
   SmtpKonfiguration,
+  SpielerUnit,
   TeamKontext,
   TeamMitgliedschaft,
   TeamRolle,
 } from '../../shared/types.ts';
+import type { UnterstuetzteSprache } from '../../shared/i18n.ts';
 import { holeRollenLabel } from '../../shared/types.ts';
 import {
   holePermissionBeschreibung,
@@ -115,8 +120,28 @@ interface SysadminPageProps {
       email: string;
       passwort: string;
       istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
     },
-    teamZuweisung?: { teamId: string; rolle: TeamRolle }
+    teamZuweisung?: { teamId: string; rolle: TeamRolle },
+    mitgliedschaften?: SysadminMitgliedschaftEingabeDTO[]
+  ) => Promise<ApiAktionErgebnis>;
+  onBenutzerAktualisieren?: (
+    userUuid: string,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
+      neuesPasswort?: string;
+      mitgliedschaften: SysadminMitgliedschaftEingabeDTO[];
+    }
   ) => Promise<ApiAktionErgebnis>;
   onBenutzerSysadminToggle: (userUuid: string) => Promise<ApiAktionErgebnis>;
   onBenutzerLoeschen: (userUuid: string) => Promise<ApiAktionErgebnis>;
@@ -160,6 +185,7 @@ export function SysadminPage({
   onTeamErstellen,
   onTeamLoeschen,
   onBenutzerErstellen,
+  onBenutzerAktualisieren,
   onBenutzerSysadminToggle,
   onBenutzerLoeschen,
   onS3Speichern,
@@ -189,14 +215,32 @@ export function SysadminPage({
   const [neuesTeamKurz, setNeuesTeamKurz] = useState('');
   const [loeschTeamBestaetigungId, setLoeschTeamBestaetigungId] = useState<string | null>(null);
 
-  // Neuer Benutzer
-  const [neuName, setNeuName] = useState('');
-  const [neuUsername, setNeuUsername] = useState('');
-  const [neuEmail, setNeuEmail] = useState('');
-  const [neuPasswort, setNeuPasswort] = useState('');
-  const [neuIstSysadmin, setNeuIstSysadmin] = useState(false);
-  const [neuTeamId, setNeuTeamId] = useState<string>(teams[0]?.id ?? '');
-  const [neuTeamRolle, setNeuTeamRolle] = useState<TeamRolle>('TEAM_ADMIN');
+  // Benutzer- & Rechteverwaltung (Liste + verbundenes Create/Edit-Overlay)
+  const [benutzerSuche, setBenutzerSuche] = useState('');
+  const [benutzerDialogModus, setBenutzerDialogModus] = useState<
+    { typ: 'neu' } | { typ: 'bearbeiten'; userUuid: string } | null
+  >(null);
+  const [dialogName, setDialogName] = useState('');
+  const [dialogUsername, setDialogUsername] = useState('');
+  const [dialogEmail, setDialogEmail] = useState('');
+  const [dialogPasswort, setDialogPasswort] = useState('');
+  const [dialogTelefon, setDialogTelefon] = useState('');
+  const [dialogTrikot, setDialogTrikot] = useState('');
+  const [dialogPosition, setDialogPosition] = useState('');
+  const [dialogSprache, setDialogSprache] = useState<UnterstuetzteSprache>('de');
+  const [dialogIstSysadmin, setDialogIstSysadmin] = useState(false);
+  const [dialogMitgliedschaften, setDialogMitgliedschaften] = useState<
+    Array<{
+      teamId: string;
+      rolle: TeamRolle;
+      units: SpielerUnit[];
+      status: 'AKTIV' | 'WARTET_AUF_FREIGABE';
+    }>
+  >([]);
+  const [neuesTeamZuweisungId, setNeuesTeamZuweisungId] = useState<string>(teams[0]?.id ?? '');
+  const [neuesTeamZuweisungRolle, setNeuesTeamZuweisungRolle] = useState<TeamRolle>('PLAYER');
+  const [dialogFehler, setDialogFehler] = useState<string | null>(null);
+  const [dialogSpeichert, setDialogSpeichert] = useState(false);
   const [sysadminFehler, setSysadminFehler] = useState<string | null>(null);
 
   // S3 & SMTP lokale Formular-Kopien (Secrets werden nie im Klartext zurückgegeben)
@@ -414,39 +458,163 @@ export function SysadminPage({
     );
   };
 
-  const handleBenutzerAnlegen = async () => {
-    const name = neuName.trim();
-    const mail = neuEmail.trim();
-    const username = (neuUsername.trim() || mail.split('@')[0] || '').toLowerCase();
+  const oeffneNeuerBenutzerDialog = () => {
+    setDialogFehler(null);
+    setBenutzerDialogModus({ typ: 'neu' });
+    setDialogName('');
+    setDialogUsername('');
+    setDialogEmail('');
+    setDialogPasswort('');
+    setDialogTelefon('');
+    setDialogTrikot('');
+    setDialogPosition('');
+    setDialogSprache(locale);
+    setDialogIstSysadmin(false);
+    setDialogMitgliedschaften(
+      teams[0]
+        ? [{ teamId: teams[0].id, rolle: 'PLAYER', units: ['OFFENSE'], status: 'AKTIV' }]
+        : []
+    );
+    setNeuesTeamZuweisungId(teams[1]?.id ?? teams[0]?.id ?? '');
+    setNeuesTeamZuweisungRolle('PLAYER');
+  };
+
+  const oeffneBenutzerBearbeitenDialog = (user: BenutzerKonto) => {
+    setDialogFehler(null);
+    setBenutzerDialogModus({ typ: 'bearbeiten', userUuid: user.uuid });
+    setDialogName(user.vollerName);
+    setDialogUsername(user.benutzername);
+    setDialogEmail(user.email);
+    setDialogPasswort('');
+    setDialogTelefon(user.telefon ?? '');
+    setDialogTrikot(user.trikotNummer ?? '');
+    setDialogPosition(user.position ?? '');
+    setDialogSprache(user.preferredLocale ?? 'de');
+    setDialogIstSysadmin(user.istSysadmin);
+
+    const bestehend = mitgliedschaften
+      .filter((m) => m.userUuid === user.uuid)
+      .map((m) => ({
+        teamId: m.teamId,
+        rolle: m.rolle,
+        units: m.units.length > 0 ? [...m.units] : (['OFFENSE'] as SpielerUnit[]),
+        status: m.status,
+      }));
+    setDialogMitgliedschaften(bestehend);
+    const verfuegbaresTeam = teams.find((t) => !bestehend.some((b) => b.teamId === t.id));
+    setNeuesTeamZuweisungId(verfuegbaresTeam?.id ?? '');
+    setNeuesTeamZuweisungRolle('PLAYER');
+  };
+
+  const handleDialogTeamHinzufuegen = () => {
+    if (!neuesTeamZuweisungId) return;
+    if (dialogMitgliedschaften.some((m) => m.teamId === neuesTeamZuweisungId)) return;
+    const naechste = [
+      ...dialogMitgliedschaften,
+      {
+        teamId: neuesTeamZuweisungId,
+        rolle: neuesTeamZuweisungRolle,
+        units: ['OFFENSE'] as SpielerUnit[],
+        status: 'AKTIV' as const,
+      },
+    ];
+    setDialogMitgliedschaften(naechste);
+    const verbleibend = teams.find((t) => !naechste.some((m) => m.teamId === t.id));
+    setNeuesTeamZuweisungId(verbleibend?.id ?? '');
+  };
+
+  const handleDialogUnitToggle = (teamId: string, unit: SpielerUnit) => {
+    setDialogMitgliedschaften((alt) =>
+      alt.map((m) => {
+        if (m.teamId !== teamId) return m;
+        const aktiv = m.units.includes(unit);
+        if (aktiv && m.units.length <= 1) return m;
+        return {
+          ...m,
+          units: aktiv ? m.units.filter((u) => u !== unit) : [...m.units, unit],
+        };
+      })
+    );
+  };
+
+  const handleBenutzerDialogSpeichern = async () => {
+    if (!benutzerDialogModus) return;
+    const name = dialogName.trim();
+    const mail = dialogEmail.trim().toLowerCase();
+    const username = (dialogUsername.trim() || mail.split('@')[0] || '').toLowerCase();
+
     if (!name || !mail.includes('@') || !username) {
-      setSysadminFehler('Bitte Name, gültige E-Mail-Adresse und Benutzername eingeben.');
-      return;
-    }
-    if (neuPasswort.length < 10) {
-      setSysadminFehler('Das Initialpasswort muss mindestens 10 Zeichen lang sein.');
+      setDialogFehler('Bitte Name, gültige E-Mail-Adresse und Benutzername eingeben.');
       return;
     }
 
-    await fuehreSysAktionAus(
-      () =>
-        onBenutzerErstellen(
+    if (benutzerDialogModus.typ === 'neu' && dialogPasswort.length < 10) {
+      setDialogFehler('Das Initialpasswort muss mindestens 10 Zeichen lang sein.');
+      return;
+    }
+    if (
+      benutzerDialogModus.typ === 'bearbeiten' &&
+      dialogPasswort.length > 0 &&
+      dialogPasswort.length < 10
+    ) {
+      setDialogFehler('Ein neues Passwort muss mindestens 10 Zeichen lang sein.');
+      return;
+    }
+
+    setDialogFehler(null);
+    setDialogSpeichert(true);
+    try {
+      if (benutzerDialogModus.typ === 'neu') {
+        const res = await onBenutzerErstellen(
           {
             vollerName: name,
             benutzername: username,
             email: mail,
-            passwort: neuPasswort,
-            istSysadmin: neuIstSysadmin,
+            passwort: dialogPasswort,
+            istSysadmin: dialogIstSysadmin,
+            telefon: dialogTelefon.trim(),
+            trikotNummer: dialogTrikot.trim(),
+            position: dialogPosition.trim(),
+            preferredLocale: dialogSprache,
           },
-          neuTeamId ? { teamId: neuTeamId, rolle: neuTeamRolle } : undefined
-        ),
-      () => {
-        setNeuName('');
-        setNeuUsername('');
-        setNeuEmail('');
-        setNeuPasswort('');
-        setNeuIstSysadmin(false);
+          dialogMitgliedschaften[0]
+            ? { teamId: dialogMitgliedschaften[0].teamId, rolle: dialogMitgliedschaften[0].rolle }
+            : undefined,
+          dialogMitgliedschaften
+        );
+        if (!res.ok) {
+          setDialogFehler(res.fehler ?? 'Benutzerkonto konnte nicht angelegt werden.');
+          return;
+        }
+        setBenutzerDialogModus(null);
+        return;
       }
-    );
+
+      if (!onBenutzerAktualisieren) {
+        setDialogFehler('Bearbeitungsfunktion ist nicht verfügbar.');
+        return;
+      }
+
+      const res = await onBenutzerAktualisieren(benutzerDialogModus.userUuid, {
+        vollerName: name,
+        benutzername: username,
+        email: mail,
+        istSysadmin: dialogIstSysadmin,
+        telefon: dialogTelefon.trim(),
+        trikotNummer: dialogTrikot.trim(),
+        position: dialogPosition.trim(),
+        preferredLocale: dialogSprache,
+        ...(dialogPasswort ? { neuesPasswort: dialogPasswort } : {}),
+        mitgliedschaften: dialogMitgliedschaften,
+      });
+      if (!res.ok) {
+        setDialogFehler(res.fehler ?? 'Benutzerkonto konnte nicht gespeichert werden.');
+        return;
+      }
+      setBenutzerDialogModus(null);
+    } finally {
+      setDialogSpeichert(false);
+    }
   };
 
   const settingsKontext: PluginSettingsKontext | null =
@@ -1192,20 +1360,41 @@ export function SysadminPage({
         </div>
       </section>
 
-      {/* 4. Globale Benutzer & Rollen */}
+      {/* 4. Globale Benutzer & Rechteverwaltung */}
       <section
         id="sys-benutzer"
         className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
       >
-        <div className="flex items-center gap-2 border-b border-[#232933] pb-3">
-          <UserPlus className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-          <div>
-            <h2 className="text-sm font-semibold text-white">
-              Globale Benutzer &amp; Rollen ({benutzerListe.length})
-            </h2>
-            <p className="text-[11px] text-[#8B949E]">
-              Benutzerkonten anlegen, Sysadmin-Rechte vergeben oder Konten vollständig löschen.
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
+          <div className="flex items-center gap-2">
+            <UserPlus className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
+            <div>
+              <h2 className="text-sm font-semibold text-white">
+                Benutzer &amp; Rechteverwaltung ({benutzerListe.length})
+              </h2>
+              <p className="text-[11px] text-[#8B949E]">
+                Konten anlegen, Stammdaten aktualisieren sowie Sysadmin- und Team-Rechte pro
+                Mandant zuweisen oder entziehen.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="search"
+              value={benutzerSuche}
+              onChange={(e) => setBenutzerSuche(e.target.value)}
+              placeholder="Suchen (Name, E-Mail, Team)..."
+              className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={oeffneNeuerBenutzerDialog}
+              className="inline-flex items-center gap-1.5 rounded bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              Neuer Benutzer
+            </button>
           </div>
         </div>
 
@@ -1214,133 +1403,459 @@ export function SysadminPage({
             <thead>
               <tr className="border-b border-[#232933] text-[#8B949E]">
                 <th className="py-2 pr-3 font-medium">Benutzer</th>
-                <th className="py-2 pr-3 font-medium">Teams &amp; Rollen</th>
+                <th className="py-2 pr-3 font-medium">Teams &amp; Rechte</th>
                 <th className="py-2 pr-3 font-medium">Sysadmin</th>
-                <th className="py-2 text-right font-medium">Aktion</th>
+                <th className="py-2 text-right font-medium">Aktionen</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#232933]">
-              {benutzerListe.map((user) => {
-                const userTeams = mitgliedschaften
-                  .filter((m) => m.userUuid === user.uuid)
-                  .map((m) => {
-                    const teamObj = teams.find((team) => team.id === m.teamId);
-                    return `${teamObj?.kurzname ?? m.teamId}: ${holeRollenLabel(m.rolle, locale)}`;
-                  });
+              {benutzerListe
+                .filter((user) => {
+                  const q = benutzerSuche.trim().toLowerCase();
+                  if (!q) return true;
+                  const userTeamsText = mitgliedschaften
+                    .filter((m) => m.userUuid === user.uuid)
+                    .map((m) => {
+                      const tObj = teams.find((team) => team.id === m.teamId);
+                      return `${tObj?.name ?? ''} ${tObj?.kurzname ?? ''} ${m.rolle}`;
+                    })
+                    .join(' ')
+                    .toLowerCase();
+                  return (
+                    user.vollerName.toLowerCase().includes(q) ||
+                    user.benutzername.toLowerCase().includes(q) ||
+                    user.email.toLowerCase().includes(q) ||
+                    userTeamsText.includes(q)
+                  );
+                })
+                .map((user) => {
+                  const userMemberships = mitgliedschaften.filter((m) => m.userUuid === user.uuid);
 
-                return (
-                  <tr key={user.uuid}>
-                    <td className="py-2.5 pr-3">
-                      <div className="font-medium text-[#E6EDF3]">
-                        {user.vollerName}{' '}
-                        <span className="font-mono text-[11px] text-[#6E7681]">
-                          @{user.benutzername}
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-[#8B949E]">{user.email}</div>
-                    </td>
-                    <td className="py-2.5 pr-3 text-[#8B949E]">
-                      {userTeams.length > 0 ? userTeams.join(' · ') : 'Kein Team (nur Instanz)'}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[#E6EDF3]">
-                        <input
-                          type="checkbox"
-                          checked={user.istSysadmin}
-                          onChange={() => void fuehreSysAktionAus(() => onBenutzerSysadminToggle(user.uuid))}
-                          className="h-3.5 w-3.5 accent-[#F59E0B]"
-                        />
-                        <span>{user.istSysadmin ? 'Ja' : 'Nein'}</span>
-                      </label>
-                    </td>
-                    <td className="py-2.5 text-right">
-                      <button
-                        type="button"
-                        disabled={benutzerListe.length <= 1}
-                        onClick={() => void fuehreSysAktionAus(() => onBenutzerLoeschen(user.uuid))}
-                        className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5] disabled:opacity-40"
-                      >
-                        Konto löschen
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr key={user.uuid}>
+                      <td className="py-2.5 pr-3">
+                        <div className="font-medium text-[#E6EDF3]">
+                          {user.vollerName}{' '}
+                          <span className="font-mono text-[11px] text-[#6E7681]">
+                            @{user.benutzername}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-[#8B949E]">
+                          {user.email}
+                          {user.trikotNummer || user.position
+                            ? ` · ${[
+                                user.trikotNummer ? `#${user.trikotNummer}` : '',
+                                user.position ?? '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}`
+                            : ''}
+                        </div>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {userMemberships.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {userMemberships.map((m) => {
+                              const teamObj = teams.find((team) => team.id === m.teamId);
+                              return (
+                                <span
+                                  key={m.id}
+                                  className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${
+                                    m.status === 'AKTIV'
+                                      ? 'border-[#232933] bg-[#0B0E11] text-[#E6EDF3]'
+                                      : 'border-[#F59E0B]/40 bg-[#F59E0B]/10 text-[#FDE68A]'
+                                  }`}
+                                >
+                                  <span className="font-medium">
+                                    {teamObj?.kurzname ?? m.teamId}:
+                                  </span>
+                                  <span>{holeRollenLabel(m.rolle, locale)}</span>
+                                  {m.status !== 'AKTIV' && (
+                                    <span className="text-[10px]">(Wartet)</span>
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span className="text-[#6E7681]">Kein Team (nur Instanz)</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <label className="inline-flex cursor-pointer items-center gap-1.5 text-[#E6EDF3]">
+                          <input
+                            type="checkbox"
+                            checked={user.istSysadmin}
+                            onChange={() =>
+                              void fuehreSysAktionAus(() => onBenutzerSysadminToggle(user.uuid))
+                            }
+                            className="h-3.5 w-3.5 accent-[#F59E0B]"
+                          />
+                          <span>{user.istSysadmin ? 'Ja' : 'Nein'}</span>
+                        </label>
+                      </td>
+                      <td className="py-2.5 text-right">
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => oeffneBenutzerBearbeitenDialog(user)}
+                            className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
+                          >
+                            <Pencil className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
+                            Bearbeiten
+                          </button>
+                          <button
+                            type="button"
+                            disabled={benutzerListe.length <= 1}
+                            onClick={() =>
+                              void fuehreSysAktionAus(() => onBenutzerLoeschen(user.uuid))
+                            }
+                            className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5] disabled:opacity-40"
+                          >
+                            Löschen
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
             </tbody>
           </table>
         </div>
+      </section>
 
-        <div className="grid grid-cols-1 gap-2 rounded-md border border-[#232933] bg-[#0B0E11] p-3.5 sm:grid-cols-2 lg:grid-cols-3">
-          <input
-            type="text"
-            value={neuName}
-            onChange={(e) => setNeuName(e.target.value)}
-            placeholder="Voller Name"
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
-          />
-          <input
-            type="text"
-            value={neuUsername}
-            onChange={(e) => setNeuUsername(e.target.value)}
-            placeholder="Benutzername (optional)"
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
-          />
-          <input
-            type="email"
-            value={neuEmail}
-            onChange={(e) => setNeuEmail(e.target.value)}
-            placeholder="E-Mail-Adresse"
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
-          />
-          <input
-            type="password"
-            value={neuPasswort}
-            onChange={(e) => setNeuPasswort(e.target.value)}
-            placeholder="Initialpasswort (mind. 10 Zeichen)"
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
-          />
-          <select
-            value={neuTeamId}
-            onChange={(e) => setNeuTeamId(e.target.value)}
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
-          >
-            <option value="">Kein Team (nur Instanz)</option>
-            {teams.map((t) => (
-              <option key={t.id} value={t.id}>
-                Team: {t.name}
-              </option>
-            ))}
-          </select>
-          <select
-            disabled={!neuTeamId}
-            value={neuTeamRolle}
-            onChange={(e) => setNeuTeamRolle(e.target.value as TeamRolle)}
-            className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white disabled:opacity-40 focus:border-[#F59E0B] focus:outline-none"
-          >
-            <option value="TEAM_ADMIN">Rolle: Team Admin</option>
-            <option value="COACH">Rolle: Coach</option>
-            <option value="PLAYER">Rolle: Spieler</option>
-          </select>
-          <div className="flex items-center justify-between gap-2 sm:col-span-2 lg:col-span-3">
-            <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[#E6EDF3]">
-              <input
-                type="checkbox"
-                checked={neuIstSysadmin}
-                onChange={(e) => setNeuIstSysadmin(e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#F59E0B]"
-              />
-              <span>Sysadmin</span>
-            </label>
-            <button
-              type="button"
-              onClick={() => void handleBenutzerAnlegen()}
-              className="rounded bg-[#F59E0B] px-3 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
-            >
-              Anlegen
-            </button>
+      {benutzerDialogModus && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sysadmin-user-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+        >
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-[#232933] bg-[#13171D] p-5 shadow-2xl space-y-5">
+            <div className="flex items-start justify-between gap-3 border-b border-[#232933] pb-3">
+              <div>
+                <h3
+                  id="sysadmin-user-dialog-title"
+                  className="text-sm font-semibold text-white"
+                >
+                  {benutzerDialogModus.typ === 'neu'
+                    ? 'Neuen Benutzer & Rechte anlegen'
+                    : `Benutzer & Rechte bearbeiten`}
+                </h3>
+                <p className="text-[11px] text-[#8B949E]">
+                  {benutzerDialogModus.typ === 'neu'
+                    ? 'Konto mit Stammdaten, optionalem Sysadmin-Zugriff und Team-Mitgliedschaften erstellen.'
+                    : 'Stammdaten, Passwort, Sysadmin-Status sowie Rechte und Rollen je Team anpassen.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={dialogSpeichert}
+                onClick={() => setBenutzerDialogModus(null)}
+                aria-label="Dialog schließen"
+                className="rounded p-1 text-[#8B949E] hover:bg-[#232933] hover:text-white"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>Voller Name *</span>
+                <input
+                  type="text"
+                  value={dialogName}
+                  onChange={(e) => setDialogName(e.target.value)}
+                  placeholder="Max Mustermann"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>Benutzername *</span>
+                <input
+                  type="text"
+                  value={dialogUsername}
+                  onChange={(e) => setDialogUsername(e.target.value)}
+                  placeholder="max.mustermann"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>E-Mail-Adresse *</span>
+                <input
+                  type="email"
+                  value={dialogEmail}
+                  onChange={(e) => setDialogEmail(e.target.value)}
+                  placeholder="max@verein.de"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>
+                  {benutzerDialogModus.typ === 'neu'
+                    ? 'Initialpasswort (mind. 10 Zeichen) *'
+                    : 'Neues Passwort (optional)'}
+                </span>
+                <input
+                  type="password"
+                  value={dialogPasswort}
+                  onChange={(e) => setDialogPasswort(e.target.value)}
+                  placeholder={
+                    benutzerDialogModus.typ === 'neu'
+                      ? 'Mindestens 10 Zeichen'
+                      : 'Leer lassen, um Passwort zu behalten'
+                  }
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>Telefon</span>
+                <input
+                  type="text"
+                  value={dialogTelefon}
+                  onChange={(e) => setDialogTelefon(e.target.value)}
+                  placeholder="+49 ..."
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="space-y-1 text-xs text-[#8B949E]">
+                  <span>Trikot #</span>
+                  <input
+                    type="text"
+                    value={dialogTrikot}
+                    onChange={(e) => setDialogTrikot(e.target.value)}
+                    placeholder="12"
+                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-[#8B949E]">
+                  <span>Position</span>
+                  <input
+                    type="text"
+                    value={dialogPosition}
+                    onChange={(e) => setDialogPosition(e.target.value)}
+                    placeholder="QB"
+                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-[#8B949E]">
+                  <span>Sprache</span>
+                  <select
+                    value={dialogSprache}
+                    onChange={(e) => setDialogSprache(e.target.value as UnterstuetzteSprache)}
+                    className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                  >
+                    <option value="de">Deutsch</option>
+                    <option value="en">English</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-[#232933] bg-[#0B0E11] px-3.5 py-2.5">
+              <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-[#E6EDF3]">
+                <input
+                  type="checkbox"
+                  checked={dialogIstSysadmin}
+                  onChange={(e) => setDialogIstSysadmin(e.target.checked)}
+                  className="h-3.5 w-3.5 accent-[#F59E0B]"
+                />
+                <span className="font-medium">Sysadmin</span>
+                <span className="text-[11px] text-[#8B949E]">
+                  (Instanzweiter Vollzugriff auf Teams, Benutzer, Plugins &amp; Infrastruktur)
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-2.5 rounded-md border border-[#232933] bg-[#0B0E11] p-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold text-white">
+                    Team-Mitgliedschaften &amp; Rechte ({dialogMitgliedschaften.length})
+                  </div>
+                  <p className="text-[11px] text-[#8B949E]">
+                    Rolle, Status und Units je Team zuweisen oder komplette Team-Rechte entfernen.
+                  </p>
+                </div>
+              </div>
+
+              {dialogMitgliedschaften.length === 0 ? (
+                <div className="rounded border border-dashed border-[#232933] px-3 py-2.5 text-xs text-[#6E7681]">
+                  Keine Team-Mitgliedschaft zugewiesen (Konto hat nur Instanz-Ebene).
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {dialogMitgliedschaften.map((m) => {
+                    const teamObj = teams.find((team) => team.id === m.teamId);
+                    return (
+                      <div
+                        key={m.teamId}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded border border-[#232933] bg-[#13171D] px-3 py-2 text-xs"
+                      >
+                        <div className="min-w-[140px]">
+                          <div className="font-medium text-white">
+                            {teamObj?.name ?? m.teamId}
+                          </div>
+                          <div className="font-mono text-[10px] text-[#6E7681]">
+                            {teamObj?.kurzname ?? m.teamId}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            aria-label={`Rolle für ${teamObj?.name ?? m.teamId}`}
+                            value={m.rolle}
+                            onChange={(e) => {
+                              const neueRolle = e.target.value as TeamRolle;
+                              setDialogMitgliedschaften((alt) =>
+                                alt.map((item) =>
+                                  item.teamId === m.teamId ? { ...item, rolle: neueRolle } : item
+                                )
+                              );
+                            }}
+                            className="rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                          >
+                            <option value="TEAM_ADMIN">Team Admin</option>
+                            <option value="COACH">Coach</option>
+                            <option value="PLAYER">Spieler</option>
+                          </select>
+
+                          <select
+                            aria-label={`Status für ${teamObj?.name ?? m.teamId}`}
+                            value={m.status}
+                            onChange={(e) => {
+                              const neuerStatus = e.target.value as
+                                | 'AKTIV'
+                                | 'WARTET_AUF_FREIGABE';
+                              setDialogMitgliedschaften((alt) =>
+                                alt.map((item) =>
+                                  item.teamId === m.teamId ? { ...item, status: neuerStatus } : item
+                                )
+                              );
+                            }}
+                            className="rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                          >
+                            <option value="AKTIV">Aktiv</option>
+                            <option value="WARTET_AUF_FREIGABE">Wartet auf Freigabe</option>
+                          </select>
+
+                          <div className="flex items-center gap-1">
+                            {(
+                              [
+                                { unit: 'OFFENSE', label: 'OFF' },
+                                { unit: 'DEFENSE', label: 'DEF' },
+                                { unit: 'SPECIAL_TEAMS', label: 'ST' },
+                              ] as const
+                            ).map(({ unit, label }) => {
+                              const aktiv = m.units.includes(unit);
+                              return (
+                                <button
+                                  key={unit}
+                                  type="button"
+                                  onClick={() => handleDialogUnitToggle(m.teamId, unit)}
+                                  className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${
+                                    aktiv
+                                      ? 'border-[#F59E0B]/60 bg-[#F59E0B]/15 text-[#FDE68A]'
+                                      : 'border-[#232933] bg-[#0B0E11] text-[#6E7681]'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDialogMitgliedschaften((alt) =>
+                                alt.filter((item) => item.teamId !== m.teamId)
+                              )
+                            }
+                            aria-label={`Team-Rechte für ${teamObj?.name ?? m.teamId} entfernen`}
+                            className="rounded border border-[#232933] bg-[#0B0E11] p-1 text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {teams.some((t) => !dialogMitgliedschaften.some((m) => m.teamId === t.id)) && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <select
+                    aria-label="Team auswählen"
+                    value={neuesTeamZuweisungId}
+                    onChange={(e) => setNeuesTeamZuweisungId(e.target.value)}
+                    className="min-w-[180px] flex-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                  >
+                    <option value="">Team zum Hinzufügen wählen...</option>
+                    {teams
+                      .filter((t) => !dialogMitgliedschaften.some((m) => m.teamId === t.id))
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name}
+                        </option>
+                      ))}
+                  </select>
+                  <select
+                    aria-label="Rolle für neues Team"
+                    value={neuesTeamZuweisungRolle}
+                    onChange={(e) => setNeuesTeamZuweisungRolle(e.target.value as TeamRolle)}
+                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                  >
+                    <option value="TEAM_ADMIN">Team Admin</option>
+                    <option value="COACH">Coach</option>
+                    <option value="PLAYER">Spieler</option>
+                  </select>
+                  <button
+                    type="button"
+                    disabled={!neuesTeamZuweisungId}
+                    onClick={handleDialogTeamHinzufuegen}
+                    className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#1E2530] px-3 py-1.5 text-xs font-medium text-white hover:border-[#F59E0B] disabled:opacity-40"
+                  >
+                    <Plus className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+                    Team hinzufügen
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {dialogFehler && (
+              <div className="rounded border border-[#DC2626]/50 bg-[#DC2626]/10 px-3 py-2 text-xs text-[#FCA5A5]">
+                {dialogFehler}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#232933] pt-3">
+              <button
+                type="button"
+                disabled={dialogSpeichert}
+                onClick={() => setBenutzerDialogModus(null)}
+                className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E] hover:text-white disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                disabled={dialogSpeichert}
+                onClick={() => void handleBenutzerDialogSpeichern()}
+                className="rounded bg-[#F59E0B] px-3.5 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24] disabled:opacity-50"
+              >
+                {dialogSpeichert
+                  ? 'Speichert...'
+                  : benutzerDialogModus.typ === 'neu'
+                    ? 'Benutzer anlegen'
+                    : 'Änderungen speichern'}
+              </button>
+            </div>
           </div>
         </div>
-      </section>
+      )}
 
       {/* 5. S3 Object Storage */}
       <section

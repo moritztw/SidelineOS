@@ -19,6 +19,7 @@ import {
   type RuntimePluginClientDTO,
   type S3CleanupStatistikDTO,
   type SysadminCapabilitiesDTO,
+  type SysadminMitgliedschaftEingabeDTO,
   type SysadminPluginStatusDTO,
   type UpdatePruefErgebnisDTO,
 } from './core/apiClient.ts';
@@ -839,18 +840,61 @@ function SidelineCoreShell({
       email: string;
       passwort: string;
       istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
     },
-    teamZuweisung?: { teamId: string; rolle: TeamRolle }
+    teamZuweisung?: { teamId: string; rolle: TeamRolle },
+    mitgliedschaftenNeu?: SysadminMitgliedschaftEingabeDTO[]
   ): Promise<ApiAktionErgebnis> => {
     try {
-      const res = await coreApi.erstelleBenutzer({ ...payload, teamZuweisung });
+      const res = await coreApi.erstelleBenutzer({
+        ...payload,
+        ...(mitgliedschaftenNeu !== undefined
+          ? { mitgliedschaften: mitgliedschaftenNeu }
+          : { teamZuweisung }),
+      });
       setBenutzerListe((alt) => [...alt, res.user]);
-      if (res.membership) {
-        setMitgliedschaften((alt) => [...alt, res.membership!]);
+      const hinzugefuegte =
+        res.memberships ?? (res.membership ? [res.membership] : []);
+      if (hinzugefuegte.length > 0) {
+        setMitgliedschaften((alt) => [...alt, ...hinzugefuegte]);
       }
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Benutzerkonto konnte nicht angelegt werden.');
+    }
+  };
+
+  const handleBenutzerAktualisieren = async (
+    userUuid: string,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
+      neuesPasswort?: string;
+      mitgliedschaften: SysadminMitgliedschaftEingabeDTO[];
+    }
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereBenutzer(userUuid, payload);
+      setBenutzerListe((alt) => alt.map((b) => (b.uuid === userUuid ? res.user : b)));
+      setMitgliedschaften((alt) => [
+        ...alt.filter((m) => m.userUuid !== userUuid),
+        ...res.memberships,
+      ]);
+      if (aktuellerBenutzer?.uuid === userUuid) {
+        setAktuellerBenutzer(res.user);
+      }
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Benutzerkonto konnte nicht gespeichert werden.');
     }
   };
 
@@ -1279,6 +1323,7 @@ function SidelineCoreShell({
             onTeamErstellen={handleTeamErstellen}
             onTeamLoeschen={handleTeamLoeschen}
             onBenutzerErstellen={handleBenutzerErstellen}
+            onBenutzerAktualisieren={handleBenutzerAktualisieren}
             onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
             onBenutzerLoeschen={handleBenutzerLoeschen}
             onS3Speichern={handleS3Speichern}
@@ -1322,6 +1367,7 @@ function SidelineCoreShell({
               onTeamErstellen={handleTeamErstellen}
               onTeamLoeschen={handleTeamLoeschen}
               onBenutzerErstellen={handleBenutzerErstellen}
+              onBenutzerAktualisieren={handleBenutzerAktualisieren}
               onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
               onBenutzerLoeschen={handleBenutzerLoeschen}
               onS3Speichern={handleS3Speichern}

@@ -446,6 +446,57 @@ export class CoreRepository {
     await this.db.query(`DELETE FROM core.memberships WHERE id = $1`, [mitgliedschaftId]);
   }
 
+  async setzeBenutzerMitgliedschaften(
+    userUuid: string,
+    gewuenschte: Array<{
+      teamId: string;
+      rolle: TeamRolle;
+      units: SpielerUnit[];
+      status: 'AKTIV' | 'WARTET_AUF_FREIGABE';
+    }>
+  ): Promise<TeamMitgliedschaft[]> {
+    const heute = new Date().toISOString().slice(0, 10);
+    await this.db.transaction(async (tx) => {
+      const bestehendRes = await tx.query<{
+        id: string;
+        team_id: string;
+        joined_at: unknown;
+      }>(`SELECT id, team_id, joined_at FROM core.memberships WHERE user_uuid = $1`, [userUuid]);
+      const bestehendNachTeam = new Map(bestehendRes.rows.map((r) => [r.team_id, r]));
+      const zielTeamIds = new Set(gewuenschte.map((g) => g.teamId));
+
+      for (const alt of bestehendRes.rows) {
+        if (!zielTeamIds.has(alt.team_id)) {
+          await tx.query(`DELETE FROM core.memberships WHERE id = $1`, [alt.id]);
+        }
+      }
+
+      for (const eintrag of gewuenschte) {
+        const alt = bestehendNachTeam.get(eintrag.teamId);
+        const id = alt?.id ?? `mem-${crypto.randomUUID()}`;
+        const joinedAt = alt ? toIsoDate(alt.joined_at) : heute;
+        await tx.query(
+          `INSERT INTO core.memberships (id, user_uuid, team_id, role, units, status, joined_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+           ON CONFLICT (user_uuid, team_id) DO UPDATE
+           SET role = EXCLUDED.role, units = EXCLUDED.units, status = EXCLUDED.status`,
+          [
+            id,
+            userUuid,
+            eintrag.teamId,
+            eintrag.rolle,
+            JSON.stringify(eintrag.units),
+            eintrag.status,
+            joinedAt,
+          ]
+        );
+      }
+    });
+
+    const alle = await this.listeMitgliedschaften();
+    return alle.filter((m) => m.userUuid === userUuid);
+  }
+
   // --- Einladungen ---
 
   async listeEinladungen(teamId?: string): Promise<TeamEinladung[]> {
