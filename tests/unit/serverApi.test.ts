@@ -539,4 +539,71 @@ describe('SidelineOS-Core API & Plugin-Gateway (Teilpaket 1B)', () => {
     );
     assert.equal(lastTeamAdminRes.status, 409);
   });
+
+  it('Sysadmin kann existierende Teams ohne Team-Admin-Rolle bearbeiten', async () => {
+    const adminLogin = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kennung: 'm.brenner',
+        passwort: DEMO_STANDARD_PASSWORT,
+      }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const adminData = (await adminLogin.json()) as { token: string };
+
+    // m.brenner ist nicht zwingend TEAM_ADMIN von team-stallions-u19, darf als Sysadmin aber bearbeiten
+    const patchRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-stallions-u19`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({
+        name: 'Munich Stallions U19 Elite',
+        kurzname: 'MS U19',
+        aktiveSaison: '2027',
+        primaerFarbe: '#10B981',
+      }),
+    });
+    assert.equal(patchRes.status, 200);
+    const patched = (await patchRes.json()) as {
+      team: {
+        id: string;
+        name: string;
+        kurzname: string;
+        aktiveSaison: string;
+        saisons: string[];
+        primaerFarbe: string;
+      };
+    };
+    assert.equal(patched.team.id, 'team-stallions-u19');
+    assert.equal(patched.team.name, 'Munich Stallions U19 Elite');
+    assert.equal(patched.team.kurzname, 'MS U19');
+    assert.equal(patched.team.aktiveSaison, '2027');
+    assert.equal(patched.team.primaerFarbe, '#10B981');
+    assert.ok(patched.team.saisons.includes('2027'));
+
+    // Leerer Teamname -> 400
+    const emptyNameRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-stallions-u19`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({ name: '   ' }),
+    });
+    assert.equal(emptyNameRes.status, 400);
+
+    // Unbekanntes Team -> 404
+    const notFoundRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-unbekannt`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({ name: 'Test' }),
+    });
+    assert.equal(notFoundRes.status, 404);
+  });
 });

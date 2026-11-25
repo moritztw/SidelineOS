@@ -112,6 +112,12 @@ interface SysadminPageProps {
     aktivierteModule?: PluginId[];
     customProfilFelder?: TeamKontext['customProfilFelder'];
   }) => Promise<ApiAktionErgebnis>;
+  onTeamAktualisieren?: (
+    teamId: string,
+    daten: Partial<
+      Pick<TeamKontext, 'name' | 'kurzname' | 'aktiveSaison' | 'primaerFarbe' | 'customProfilFelder'>
+    >
+  ) => Promise<ApiAktionErgebnis>;
   onTeamLoeschen: (teamId: string) => Promise<ApiAktionErgebnis>;
   onBenutzerErstellen: (
     payload: {
@@ -183,6 +189,7 @@ export function SysadminPage({
   onGlobalModulToggle,
   onTeamModulToggle,
   onTeamErstellen,
+  onTeamAktualisieren,
   onTeamLoeschen,
   onBenutzerErstellen,
   onBenutzerAktualisieren,
@@ -209,11 +216,18 @@ export function SysadminPage({
   const [cleanupStatus, setCleanupStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [cleanupBeschaeftigt, setCleanupBeschaeftigt] = useState(false);
 
-  // Neues Team
+  // Teams (Neu + Bearbeiten-Overlay)
   const [neuesTeamName, setNeuesTeamName] = useState('');
   const [neuesTeamSaison, setNeuesTeamSaison] = useState('2026');
   const [neuesTeamKurz, setNeuesTeamKurz] = useState('');
   const [loeschTeamBestaetigungId, setLoeschTeamBestaetigungId] = useState<string | null>(null);
+  const [teamDialogZiel, setTeamDialogZiel] = useState<TeamKontext | null>(null);
+  const [teamDialogName, setTeamDialogName] = useState('');
+  const [teamDialogKurzname, setTeamDialogKurzname] = useState('');
+  const [teamDialogSaison, setTeamDialogSaison] = useState('');
+  const [teamDialogFarbe, setTeamDialogFarbe] = useState('#F59E0B');
+  const [teamDialogFehler, setTeamDialogFehler] = useState<string | null>(null);
+  const [teamDialogSpeichert, setTeamDialogSpeichert] = useState(false);
 
   // Benutzer- & Rechteverwaltung (Liste + verbundenes Create/Edit-Overlay)
   const [benutzerSuche, setBenutzerSuche] = useState('');
@@ -456,6 +470,50 @@ export function SysadminPage({
         setNeuesTeamKurz('');
       }
     );
+  };
+
+  const oeffneTeamBearbeitenDialog = (team: TeamKontext) => {
+    setTeamDialogFehler(null);
+    setTeamDialogZiel(team);
+    setTeamDialogName(team.name);
+    setTeamDialogKurzname(team.kurzname);
+    setTeamDialogSaison(team.aktiveSaison);
+    setTeamDialogFarbe(team.primaerFarbe ?? '#F59E0B');
+  };
+
+  const handleTeamDialogSpeichern = async () => {
+    if (!teamDialogZiel) return;
+    const name = teamDialogName.trim();
+    const kurzname = teamDialogKurzname.trim();
+    const aktiveSaison = teamDialogSaison.trim();
+    const primaerFarbe = teamDialogFarbe.trim() || '#F59E0B';
+
+    if (!name || !kurzname || !aktiveSaison) {
+      setTeamDialogFehler('Bitte Teamname, Kurzname und aktive Saison angeben.');
+      return;
+    }
+    if (!onTeamAktualisieren) {
+      setTeamDialogFehler('Team-Bearbeitungsfunktion ist nicht verfügbar.');
+      return;
+    }
+
+    setTeamDialogFehler(null);
+    setTeamDialogSpeichert(true);
+    try {
+      const res = await onTeamAktualisieren(teamDialogZiel.id, {
+        name,
+        kurzname,
+        aktiveSaison,
+        primaerFarbe,
+      });
+      if (!res.ok) {
+        setTeamDialogFehler(res.fehler ?? 'Team konnte nicht gespeichert werden.');
+        return;
+      }
+      setTeamDialogZiel(null);
+    } finally {
+      setTeamDialogSpeichert(false);
+    }
   };
 
   const oeffneNeuerBenutzerDialog = () => {
@@ -1284,8 +1342,18 @@ export function SysadminPage({
                 className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs"
               >
                 <div>
-                  <div className="font-medium text-white">
-                    {team.name}{' '}
+                  <div className="flex flex-wrap items-center gap-2 font-medium text-white">
+                    <svg
+                      className="h-2.5 w-2.5 shrink-0"
+                      viewBox="0 0 10 10"
+                      aria-hidden="true"
+                    >
+                      <circle cx="5" cy="5" r="5" fill={team.primaerFarbe ?? '#F59E0B'} />
+                    </svg>
+                    <span>{team.name}</span>
+                    <span className="rounded border border-[#232933] bg-[#13171D] px-1.5 py-0.5 font-mono text-[10px] text-[#8B949E]">
+                      {team.kurzname}
+                    </span>
                     <span className="font-mono text-[#F59E0B]">· Saison {team.aktiveSaison}</span>
                   </div>
                   <div className="mt-0.5 text-[11px] text-[#8B949E]">
@@ -1295,6 +1363,14 @@ export function SysadminPage({
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => oeffneTeamBearbeitenDialog(team)}
+                    className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
+                  >
+                    <Pencil className="h-3 w-3 text-[#F59E0B]" aria-hidden="true" />
+                    Bearbeiten
+                  </button>
                   {teams.length > 1 &&
                     (fragtLoeschung ? (
                       <div className="flex items-center gap-1">
@@ -1334,13 +1410,20 @@ export function SysadminPage({
           })}
         </div>
 
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
           <input
             type="text"
             value={neuesTeamName}
             onChange={(e) => setNeuesTeamName(e.target.value)}
             placeholder="Neuer Teamname (z. B. Munich Stallions Ladies)"
             className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none sm:col-span-2"
+          />
+          <input
+            type="text"
+            value={neuesTeamKurz}
+            onChange={(e) => setNeuesTeamKurz(e.target.value)}
+            placeholder="Kurzname (optional)"
+            className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
           />
           <input
             type="text"
@@ -1359,6 +1442,149 @@ export function SysadminPage({
           </button>
         </div>
       </section>
+
+      {teamDialogZiel && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="sysadmin-team-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+        >
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-[#232933] bg-[#13171D] p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-[#232933] pb-3">
+              <div>
+                <h3
+                  id="sysadmin-team-dialog-title"
+                  className="text-sm font-semibold text-white"
+                >
+                  Team bearbeiten
+                </h3>
+                <p className="text-[11px] text-[#8B949E]">
+                  Stammdaten, aktive Saison und Primärfarbe für{' '}
+                  <span className="font-mono text-[#E6EDF3]">{teamDialogZiel.id}</span> anpassen.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={teamDialogSpeichert}
+                onClick={() => setTeamDialogZiel(null)}
+                aria-label="Team-Dialog schließen"
+                className="rounded p-1 text-[#8B949E] hover:bg-[#232933] hover:text-white"
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="space-y-1 text-xs text-[#8B949E] sm:col-span-2">
+                <span>Teamname *</span>
+                <input
+                  type="text"
+                  value={teamDialogName}
+                  onChange={(e) => setTeamDialogName(e.target.value)}
+                  placeholder="Munich Stallions U19"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>Kurzname *</span>
+                <input
+                  type="text"
+                  value={teamDialogKurzname}
+                  onChange={(e) => setTeamDialogKurzname(e.target.value)}
+                  placeholder="U19"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+
+              <label className="space-y-1 text-xs text-[#8B949E]">
+                <span>Aktive Saison *</span>
+                <input
+                  type="text"
+                  value={teamDialogSaison}
+                  onChange={(e) => setTeamDialogSaison(e.target.value)}
+                  placeholder="2026"
+                  className="w-full rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+                />
+              </label>
+            </div>
+
+            {teamDialogZiel.saisons.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[11px] text-[#8B949E]">
+                  Vorhandene Saisons (Klick übernimmt als aktive Saison, neuer Wert legt Saison an):
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {teamDialogZiel.saisons.map((s) => {
+                    const ausgewaehlt = teamDialogSaison.trim() === s;
+                    return (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setTeamDialogSaison(s)}
+                        className={`rounded border px-2 py-0.5 font-mono text-[11px] ${
+                          ausgewaehlt
+                            ? 'border-[#F59E0B] bg-[#F59E0B]/15 text-[#FDE68A]'
+                            : 'border-[#232933] bg-[#0B0E11] text-[#8B949E] hover:text-white'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1 text-xs text-[#8B949E]">
+              <span>Primäre Teamfarbe</span>
+              <div className="flex items-center gap-2.5">
+                <input
+                  type="color"
+                  aria-label="Primäre Teamfarbe wählen"
+                  value={/^#[0-9a-fA-F]{6}$/.test(teamDialogFarbe) ? teamDialogFarbe : '#F59E0B'}
+                  onChange={(e) => setTeamDialogFarbe(e.target.value)}
+                  className="h-8 w-11 cursor-pointer rounded border border-[#232933] bg-[#0B0E11]"
+                />
+                <input
+                  type="text"
+                  aria-label="Primäre Teamfarbe Hex-Wert"
+                  value={teamDialogFarbe}
+                  onChange={(e) => setTeamDialogFarbe(e.target.value)}
+                  placeholder="#F59E0B"
+                  className="w-32 rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1.5 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {teamDialogFehler && (
+              <div className="rounded border border-[#DC2626]/50 bg-[#DC2626]/10 px-3 py-2 text-xs text-[#FCA5A5]">
+                {teamDialogFehler}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[#232933] pt-3">
+              <button
+                type="button"
+                disabled={teamDialogSpeichert}
+                onClick={() => setTeamDialogZiel(null)}
+                className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#8B949E] hover:text-white disabled:opacity-50"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                disabled={teamDialogSpeichert}
+                onClick={() => void handleTeamDialogSpeichern()}
+                className="rounded bg-[#F59E0B] px-3.5 py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24] disabled:opacity-50"
+              >
+                {teamDialogSpeichert ? 'Speichert...' : 'Änderungen speichern'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4. Globale Benutzer & Rechteverwaltung */}
       <section

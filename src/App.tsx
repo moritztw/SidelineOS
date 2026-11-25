@@ -814,6 +814,24 @@ function SidelineCoreShell({
     }
   };
 
+  const handleSysadminTeamAktualisieren = async (
+    teamId: string,
+    daten: Partial<
+      Pick<TeamKontext, 'name' | 'kurzname' | 'aktiveSaison' | 'primaerFarbe' | 'customProfilFelder'>
+    >
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereSysadminTeam(teamId, daten);
+      setTeams((alt) => alt.map((t) => (t.id === teamId ? res.team : t)));
+      if (teamId === aktivesTeamId && daten.aktiveSaison) {
+        setGewaehlteSaison(res.team.aktiveSaison);
+      }
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Team konnte nicht aktualisiert werden.');
+    }
+  };
+
   const handleTeamLoeschen = async (teamId: string): Promise<ApiAktionErgebnis> => {
     try {
       await coreApi.loescheTeam(teamId);
@@ -1321,6 +1339,7 @@ function SidelineCoreShell({
             onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
+            onTeamAktualisieren={handleSysadminTeamAktualisieren}
             onTeamLoeschen={handleTeamLoeschen}
             onBenutzerErstellen={handleBenutzerErstellen}
             onBenutzerAktualisieren={handleBenutzerAktualisieren}
@@ -1365,6 +1384,7 @@ function SidelineCoreShell({
               onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
               onTeamModulToggle={handleTeamModulToggle}
               onTeamErstellen={handleTeamErstellen}
+              onTeamAktualisieren={handleSysadminTeamAktualisieren}
               onTeamLoeschen={handleTeamLoeschen}
               onBenutzerErstellen={handleBenutzerErstellen}
               onBenutzerAktualisieren={handleBenutzerAktualisieren}

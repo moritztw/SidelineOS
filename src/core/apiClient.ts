@@ -395,6 +395,18 @@ export const coreApi = {
     });
   },
 
+  aktualisiereSysadminTeam(
+    teamId: string,
+    daten: Partial<
+      Pick<TeamKontext, 'name' | 'kurzname' | 'aktiveSaison' | 'primaerFarbe' | 'customProfilFelder'>
+    >
+  ): Promise<{ team: TeamKontext }> {
+    return apiRequest(`/api/v1/sysadmin/teams/${encodeURIComponent(teamId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(daten),
+    });
+  },
+
   loescheTeam(teamId: string): Promise<{ ok: boolean }> {
     return apiRequest(`/api/v1/sysadmin/teams/${encodeURIComponent(teamId)}`, {
       method: 'DELETE',

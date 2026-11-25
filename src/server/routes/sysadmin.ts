@@ -190,6 +190,70 @@ export function erstelleSysadminRouter(
     }
   });
 
+  router.patch('/teams/:teamId', async (req, res, next) => {
+    try {
+      const teamId = String(req.params.teamId);
+      const team = await repo.findeTeamNachId(teamId);
+      if (!team) {
+        res.status(404).json({ fehler: 'Team nicht gefunden.' });
+        return;
+      }
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+
+      let name = team.name;
+      if ('name' in body) {
+        if (typeof body.name !== 'string' || !body.name.trim()) {
+          res.status(400).json({ fehler: 'Teamname darf nicht leer sein.' });
+          return;
+        }
+        name = body.name.trim();
+      }
+
+      let kurzname = team.kurzname;
+      if ('kurzname' in body) {
+        if (typeof body.kurzname !== 'string' || !body.kurzname.trim()) {
+          res.status(400).json({ fehler: 'Kurzname darf nicht leer sein.' });
+          return;
+        }
+        kurzname = body.kurzname.trim();
+      }
+
+      let aktiveSaison = team.aktiveSaison;
+      if ('aktiveSaison' in body) {
+        if (typeof body.aktiveSaison !== 'string' || !body.aktiveSaison.trim()) {
+          res.status(400).json({ fehler: 'Aktive Saison darf nicht leer sein.' });
+          return;
+        }
+        aktiveSaison = body.aktiveSaison.trim();
+      }
+
+      let primaerFarbe = team.primaerFarbe;
+      if ('primaerFarbe' in body) {
+        if (typeof body.primaerFarbe !== 'string' || !body.primaerFarbe.trim()) {
+          res.status(400).json({ fehler: 'Primärfarbe darf nicht leer sein.' });
+          return;
+        }
+        primaerFarbe = body.primaerFarbe.trim();
+      }
+
+      const aktualisiert = await repo.aktualisiereTeam({
+        ...team,
+        name,
+        kurzname,
+        aktiveSaison,
+        primaerFarbe,
+        customProfilFelder: Array.isArray(body.customProfilFelder)
+          ? (body.customProfilFelder as typeof team.customProfilFelder)
+          : team.customProfilFelder,
+      });
+
+      res.status(200).json({ team: aktualisiert });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.delete('/teams/:teamId', async (req, res, next) => {
     try {
       const teamId = String(req.params.teamId);
