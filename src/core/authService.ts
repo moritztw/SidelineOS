@@ -3,6 +3,7 @@ import type {
   BenutzerKonto,
   BenutzerProfil,
   TeamEinladung,
+  TeamKontext,
   TeamMitgliedschaft,
 } from '../shared/types.ts';
 
@@ -111,6 +112,23 @@ export function authentifiziereBenutzer(
 }
 
 /**
+ * Filtert die bekannten Teams strikt auf Mandanten, in denen das Konto eine aktive Mitgliedschaft besitzt.
+ */
+export function ermittleEigeneTeams(
+  benutzer: BenutzerKonto | null,
+  alleTeams: readonly TeamKontext[],
+  mitgliedschaften: readonly TeamMitgliedschaft[]
+): TeamKontext[] {
+  if (!benutzer) return [];
+  const aktiveTeamIds = new Set(
+    mitgliedschaften
+      .filter((m) => m.userUuid === benutzer.uuid && m.status === 'AKTIV')
+      .map((m) => m.teamId)
+  );
+  return alleTeams.filter((t) => aktiveTeamIds.has(t.id));
+}
+
+/**
  * Leitet aus einem Benutzerkonto und dessen aktiver Team-Mitgliedschaft ein BenutzerProfil ab.
  */
 export function ermittleProfilAusKonto(
@@ -118,12 +136,11 @@ export function ermittleProfilAusKonto(
   aktivesTeamId: string,
   mitgliedschaften: readonly TeamMitgliedschaft[]
 ): BenutzerProfil {
-  const aktiveMitgliedschaft =
-    mitgliedschaften.find(
-      (m) => m.userUuid === benutzer.uuid && m.teamId === aktivesTeamId && m.status === 'AKTIV'
-    ) ??
-    mitgliedschaften.find((m) => m.userUuid === benutzer.uuid && m.status === 'AKTIV') ??
-    null;
+  const aktiveMitgliedschaft = aktivesTeamId
+    ? (mitgliedschaften.find(
+        (m) => m.userUuid === benutzer.uuid && m.teamId === aktivesTeamId && m.status === 'AKTIV'
+      ) ?? null)
+    : null;
 
   return {
     id: `auth-${benutzer.uuid}`,

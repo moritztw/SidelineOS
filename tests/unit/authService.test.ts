@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   DEMO_STANDARD_PASSWORT,
   authentifiziereBenutzer,
+  ermittleEigeneTeams,
   ermittleProfilAusKonto,
   parseAppRouteAusPfad,
   pruefeEinladungsToken,
@@ -10,6 +11,7 @@ import {
 import type {
   BenutzerKonto,
   TeamEinladung,
+  TeamKontext,
   TeamMitgliedschaft,
 } from '../../src/shared/types.ts';
 
@@ -176,4 +178,73 @@ test('ermittleProfilAusKonto liefert aktive Team-Rolle und ignoriert wartende Fr
   );
   assert.equal(wartenderSpieler.teamRolle, null);
   assert.equal(wartenderSpieler.istSysadmin, false);
+
+  const fremdesTeam = ermittleProfilAusKonto(
+    TEST_BENUTZER[0],
+    'team-fremd',
+    TEST_MITGLIEDSCHAFTEN
+  );
+  assert.equal(fremdesTeam.teamRolle, null);
+});
+
+test('ermittleEigeneTeams filtert strikt auf aktive Mitgliedschaften und blendet fremde Teams für Sysadmins aus', () => {
+  const alleTeams: TeamKontext[] = [
+    {
+      id: 'team-seniors',
+      name: 'Munich Stallions',
+      kurzname: 'Seniors',
+      aktiveSaison: '2026',
+      saisons: ['2026'],
+      aktivierteModule: [],
+      customProfilFelder: [],
+    },
+    {
+      id: 'team-u19',
+      name: 'Munich Stallions U19',
+      kurzname: 'U19',
+      aktiveSaison: '2026',
+      saisons: ['2026'],
+      aktivierteModule: [],
+      customProfilFelder: [],
+    },
+    {
+      id: 'team-fremd',
+      name: 'Fremdes Team',
+      kurzname: 'Fremd',
+      aktiveSaison: '2026',
+      saisons: ['2026'],
+      aktivierteModule: [],
+      customProfilFelder: [],
+    },
+  ];
+
+  // Sysadmin mit nur 1 aktiver Mitgliedschaft sieht keine fremden Teams (kein Umschalter)
+  const sysadminEigene = ermittleEigeneTeams(TEST_BENUTZER[0], alleTeams, TEST_MITGLIEDSCHAFTEN);
+  assert.deepEqual(
+    sysadminEigene.map((t) => t.id),
+    ['team-seniors']
+  );
+
+  // Wartende Mitgliedschaft zählt nicht als eigenes Team
+  const wartendEigene = ermittleEigeneTeams(TEST_BENUTZER[1], alleTeams, TEST_MITGLIEDSCHAFTEN);
+  assert.deepEqual(wartendEigene, []);
+
+  // Erst ab >= 2 aktiven Mitgliedschaften stehen mehrere Teams zur Auswahl
+  const mehrfacheMitgliedschaften: TeamMitgliedschaft[] = [
+    ...TEST_MITGLIEDSCHAFTEN,
+    {
+      id: 'mem-3',
+      userUuid: 'usr-coach-1',
+      teamId: 'team-u19',
+      rolle: 'COACH',
+      units: ['OFFENSE'],
+      status: 'AKTIV',
+      beigetretenAm: '2026-01-12',
+    },
+  ];
+  const multiEigene = ermittleEigeneTeams(TEST_BENUTZER[0], alleTeams, mehrfacheMitgliedschaften);
+  assert.deepEqual(
+    multiEigene.map((t) => t.id),
+    ['team-seniors', 'team-u19']
+  );
 });

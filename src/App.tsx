@@ -24,6 +24,7 @@ import {
   type UpdatePruefErgebnisDTO,
 } from './core/apiClient.ts';
 import {
+  ermittleEigeneTeams,
   ermittleProfilAusKonto,
   parseAppRouteAusPfad,
 } from './core/authService.ts';
@@ -313,7 +314,13 @@ function SidelineCoreShell({
     };
   }, [routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
 
-  const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0] ?? null;
+  const eigeneTeams = useMemo(
+    () => ermittleEigeneTeams(aktuellerBenutzer, teams, mitgliedschaften),
+    [aktuellerBenutzer, teams, mitgliedschaften]
+  );
+
+  const aktivesTeam =
+    eigeneTeams.find((t) => t.id === aktivesTeamId) ?? eigeneTeams[0] ?? null;
 
   // Team-Mitglieder und Einladungen beim Teamwechsel nachladen
   useEffect(() => {
@@ -586,13 +593,12 @@ function SidelineCoreShell({
   };
 
   const handleTeamWechseln = (neueTeamId: string) => {
-    setAktivesTeamId(neueTeamId);
-    const ziel = teams.find((t) => t.id === neueTeamId);
-    if (ziel) {
-      setGewaehlteSaison(ziel.aktiveSaison);
-    }
+    const ziel = eigeneTeams.find((t) => t.id === neueTeamId);
+    if (!ziel) return;
+    setAktivesTeamId(ziel.id);
+    setGewaehlteSaison(ziel.aktiveSaison);
     if (aktuellerBenutzer) {
-      const neuesProfil = ermittleProfilAusKonto(aktuellerBenutzer, neueTeamId, mitgliedschaften);
+      const neuesProfil = ermittleProfilAusKonto(aktuellerBenutzer, ziel.id, mitgliedschaften);
       setAktiveTeamAnsicht(neuesProfil.teamRolle);
     }
   };
@@ -835,16 +841,31 @@ function SidelineCoreShell({
   const handleTeamLoeschen = async (teamId: string): Promise<ApiAktionErgebnis> => {
     try {
       await coreApi.loescheTeam(teamId);
-      setTeams((alt) => {
-        const rest = alt.filter((t) => t.id !== teamId);
-        if (rest.length > 0 && aktivesTeamId === teamId) {
-          setAktivesTeamId(rest[0].id);
-          setGewaehlteSaison(rest[0].aktiveSaison);
-        }
-        return rest;
-      });
-      setMitgliedschaften((alt) => alt.filter((m) => m.teamId !== teamId));
+      const verbleibendeTeams = teams.filter((t) => t.id !== teamId);
+      const verbleibendeMitgliedschaften = mitgliedschaften.filter((m) => m.teamId !== teamId);
+      setTeams(verbleibendeTeams);
+      setMitgliedschaften(verbleibendeMitgliedschaften);
       setEinladungen((alt) => alt.filter((e) => e.teamId !== teamId));
+      if (aktivesTeamId === teamId) {
+        const naechsteEigene = ermittleEigeneTeams(
+          aktuellerBenutzer,
+          verbleibendeTeams,
+          verbleibendeMitgliedschaften
+        );
+        const naechstesTeam = naechsteEigene[0] ?? null;
+        setAktivesTeamId(naechstesTeam?.id ?? '');
+        if (naechstesTeam) {
+          setGewaehlteSaison(naechstesTeam.aktiveSaison);
+        }
+        if (aktuellerBenutzer) {
+          const neuesProfil = ermittleProfilAusKonto(
+            aktuellerBenutzer,
+            naechstesTeam?.id ?? '',
+            verbleibendeMitgliedschaften
+          );
+          setAktiveTeamAnsicht(neuesProfil.teamRolle);
+        }
+      }
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Team konnte nicht gelöscht werden.');
@@ -903,12 +924,23 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.aktualisiereBenutzer(userUuid, payload);
       setBenutzerListe((alt) => alt.map((b) => (b.uuid === userUuid ? res.user : b)));
-      setMitgliedschaften((alt) => [
-        ...alt.filter((m) => m.userUuid !== userUuid),
+      const aktualisierteMitgliedschaften = [
+        ...mitgliedschaften.filter((m) => m.userUuid !== userUuid),
         ...res.memberships,
-      ]);
+      ];
+      setMitgliedschaften(aktualisierteMitgliedschaften);
       if (aktuellerBenutzer?.uuid === userUuid) {
         setAktuellerBenutzer(res.user);
+        const neueEigene = ermittleEigeneTeams(res.user, teams, aktualisierteMitgliedschaften);
+        const zielTeam =
+          neueEigene.find((t) => t.id === aktivesTeamId) ?? neueEigene[0] ?? null;
+        setAktivesTeamId(zielTeam?.id ?? '');
+        const neuesProfil = ermittleProfilAusKonto(
+          res.user,
+          zielTeam?.id ?? '',
+          aktualisierteMitgliedschaften
+        );
+        setAktiveTeamAnsicht(neuesProfil.teamRolle);
       }
       return { ok: true };
     } catch (err) {
@@ -1200,20 +1232,27 @@ function SidelineCoreShell({
               </span>
             ) : (
               <>
-                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                  <span>{t('app.context.team')}</span>
-                  <select
-                    value={aktivesTeam.id}
-                    onChange={(e) => handleTeamWechseln(e.target.value)}
-                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
-                  >
-                    {teams.map((team) => (
-                      <option key={team.id} value={team.id} className="bg-[#13171D]">
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {eigeneTeams.length > 1 ? (
+                  <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                    <span>{t('app.context.team')}</span>
+                    <select
+                      value={aktivesTeam.id}
+                      onChange={(e) => handleTeamWechseln(e.target.value)}
+                      className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                    >
+                      {eigeneTeams.map((team) => (
+                        <option key={team.id} value={team.id} className="bg-[#13171D]">
+                          {team.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-[#8B949E]">
+                    <span>{t('app.context.team')}</span>
+                    <span className="font-medium text-white">{aktivesTeam.name}</span>
+                  </div>
+                )}
 
                 <label className="flex items-center gap-2 text-xs text-[#8B949E]">
                   <span>{t('app.context.season')}</span>
