@@ -44,14 +44,14 @@ export function SettingsHubView({
             <button
               type="button"
               onClick={() => onBereichOeffnen('hub')}
-              className="mb-1 inline-flex items-center gap-1.5 text-xs font-medium text-[#8B949E] transition-colors hover:text-[#F59E0B]"
+              className="mb-1 inline-flex items-center gap-1.5 text-xs font-medium text-sl-muted transition-colors hover:text-sl-accent"
             >
               <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
               {t('settingsHub.backHome')}
             </button>
           )}
-          <h1 className="text-xl font-bold tracking-tight text-white">{t('settingsHub.title')}</h1>
-          <p className="text-xs text-[#8B949E]">
+          <h1 className="text-xl font-bold tracking-tight text-sl-heading">{t('settingsHub.title')}</h1>
+          <p className="text-xs text-sl-muted">
             {benutzer ? benutzer.vollerName : konto.label}
             {hatTeamZugriff && (
               <>
@@ -68,23 +68,23 @@ export function SettingsHubView({
           <button
             type="button"
             onClick={() => onBereichOeffnen('settings')}
-            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-[#232933] bg-[#13171D] p-6 text-left transition-colors hover:border-[#F59E0B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
+            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-sl-border bg-sl-surface p-6 text-left transition-colors hover:border-sl-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sl-accent"
           >
             <div>
-              <div className="inline-flex rounded-md border border-[#232933] bg-[#0B0E11] p-2.5 text-[#F59E0B]">
+              <div className="inline-flex rounded-md border border-sl-border bg-sl-canvas p-2.5 text-sl-accent">
                 <Sliders className="h-5 w-5" aria-hidden="true" />
               </div>
-              <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
+              <h2 className="mt-4 text-base font-semibold text-sl-heading group-hover:text-sl-accent">
                 {t('settingsHub.userTitle')}
               </h2>
-              <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
+              <p className="mt-1.5 text-xs leading-relaxed text-sl-muted">
                 {t('settingsHub.userDesc')}
               </p>
             </div>
-            <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
+            <div className="mt-5 flex items-center justify-between border-t border-sl-border pt-3 text-xs font-medium text-sl-primary">
               <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
-                className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
+                className="h-4 w-4 text-sl-muted transition-transform group-hover:translate-x-0.5 group-hover:text-sl-accent"
                 aria-hidden="true"
               />
             </div>
@@ -95,30 +95,30 @@ export function SettingsHubView({
           <button
             type="button"
             onClick={() => onBereichOeffnen('team-settings')}
-            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-[#232933] bg-[#13171D] p-6 text-left transition-colors hover:border-[#F59E0B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
+            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-sl-border bg-sl-surface p-6 text-left transition-colors hover:border-sl-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sl-accent"
           >
             <div>
               <div className="flex items-center justify-between gap-2">
-                <div className="inline-flex rounded-md border border-[#232933] bg-[#0B0E11] p-2.5 text-[#F59E0B]">
+                <div className="inline-flex rounded-md border border-sl-border bg-sl-canvas p-2.5 text-sl-accent">
                   <Users className="h-5 w-5" aria-hidden="true" />
                 </div>
                 {ausstehendeAnfragenAnzahl > 0 && (
-                  <span className="font-mono text-xs font-semibold text-[#F59E0B] tabular-nums">
+                  <span className="font-mono text-xs font-semibold text-sl-accent tabular-nums">
                     {t('hub.openCount', { count: ausstehendeAnfragenAnzahl })}
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
+              <h2 className="mt-4 text-base font-semibold text-sl-heading group-hover:text-sl-accent">
                 {t('settingsHub.teamTitle')}
               </h2>
-              <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
+              <p className="mt-1.5 text-xs leading-relaxed text-sl-muted">
                 {t('settingsHub.teamDesc')}
               </p>
             </div>
-            <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
+            <div className="mt-5 flex items-center justify-between border-t border-sl-border pt-3 text-xs font-medium text-sl-primary">
               <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
-                className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
+                className="h-4 w-4 text-sl-muted transition-transform group-hover:translate-x-0.5 group-hover:text-sl-accent"
                 aria-hidden="true"
               />
             </div>
@@ -129,15 +129,15 @@ export function SettingsHubView({
           <button
             type="button"
             onClick={() => onBereichOeffnen('sysadmin')}
-            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-[#232933] bg-[#13171D] p-6 text-left transition-colors hover:border-[#F59E0B] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]"
+            className="group flex min-h-[188px] flex-col justify-between rounded-lg border border-sl-border bg-sl-surface p-6 text-left transition-colors hover:border-sl-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sl-accent"
           >
             <div>
               <div className="flex items-center justify-between gap-2">
-                <div className="inline-flex rounded-md border border-[#232933] bg-[#0B0E11] p-2.5 text-[#F59E0B]">
+                <div className="inline-flex rounded-md border border-sl-border bg-sl-canvas p-2.5 text-sl-accent">
                   <Server className="h-5 w-5" aria-hidden="true" />
                 </div>
                 {ausstehendeUpdatesAnzahl > 0 && (
-                  <span className="font-mono text-xs font-semibold text-[#F59E0B] tabular-nums">
+                  <span className="font-mono text-xs font-semibold text-sl-accent tabular-nums">
                     {ausstehendeUpdatesAnzahl}{' '}
                     {ausstehendeUpdatesAnzahl === 1
                       ? t('settingsHub.updateSingular')
@@ -145,17 +145,17 @@ export function SettingsHubView({
                   </span>
                 )}
               </div>
-              <h2 className="mt-4 text-base font-semibold text-white group-hover:text-[#F59E0B]">
+              <h2 className="mt-4 text-base font-semibold text-sl-heading group-hover:text-sl-accent">
                 {t('settingsHub.sysadminTitle')}
               </h2>
-              <p className="mt-1.5 text-xs leading-relaxed text-[#8B949E]">
+              <p className="mt-1.5 text-xs leading-relaxed text-sl-muted">
                 {t('settingsHub.sysadminDesc')}
               </p>
             </div>
-            <div className="mt-5 flex items-center justify-between border-t border-[#232933] pt-3 text-xs font-medium text-[#E6EDF3]">
+            <div className="mt-5 flex items-center justify-between border-t border-sl-border pt-3 text-xs font-medium text-sl-primary">
               <span>{t('settingsHub.openAction')}</span>
               <ArrowRight
-                className="h-4 w-4 text-[#8B949E] transition-transform group-hover:translate-x-0.5 group-hover:text-[#F59E0B]"
+                className="h-4 w-4 text-sl-muted transition-transform group-hover:translate-x-0.5 group-hover:text-sl-accent"
                 aria-hidden="true"
               />
             </div>

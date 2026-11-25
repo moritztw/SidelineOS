@@ -25,6 +25,20 @@ export type {
 export type { BrandKonfiguration } from '../shared/brand.ts';
 export { holeAktuelleBrandKonfig, teileWortmarke } from '../shared/brand.ts';
 export { createPluginTranslator, uebersetzeSchluessel } from '../shared/i18n.ts';
+export type {
+  SidelineCssToken,
+  SidelineCssTokenDefinition,
+  TeamAkzentTokens,
+} from '../shared/theme.ts';
+export {
+  SIDELINE_CSS_TOKENS,
+  SIDELINE_STANDARD_THEME_TOKENS,
+  berechneRelativeLuminanz,
+  ermittleHoverAkzentFarbe,
+  ermittleKontrastTextFarbe,
+  ermittleTeamAkzentTokens,
+  normalisiereHexFarbe,
+} from '../shared/theme.ts';
 
 /**
  * Granulare Berechtigungen, die ein externes Plugin in seinem `plugin.manifest.json`

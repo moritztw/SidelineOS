@@ -220,7 +220,7 @@ function MainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
   // ctx.team, ctx.aktiveTeamAnsicht, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-white">
+      <h2 className="text-base font-semibold text-sl-heading">
         {t(ctx.locale, 'tabOverview')} · {ctx.team.name} ({ctx.gewaehlteSaison})
       </h2>
     </div>
@@ -293,6 +293,27 @@ Möchte ein Plugin öffentliche Empfänger-Links unterstützen (`"share:public-l
 
 ### Einstellungs-Panels einhängen
 `settingsPanels` (`{ user?, team?, sysadmin? }`) wird automatisch auf der jeweiligen Core-Einstellungsseite gerendert. Die dort gerenderten `<section id="...">`-Elemente müssen den `id`s aus `manifest.settingsAnker` entsprechen, damit das sticky Seitenmenü direkt dorthin scrollt.
+
+### Design-Tokens & Theme-Kompatibilität (`--sl-*` / Tailwind)
+Der Core stellt auf `:root` semantische `--sl-*` CSS Custom Properties bereit (sowie Tailwind-Utilities `bg-sl-*`, `text-sl-*`, `border-sl-*`, `placeholder-sl-*`, `accent-sl-accent`). Plugins sollten auf hartkodierte Hex-Farben verzichten und stattdessen diese Tokens nutzen, damit sie automatisch auf Team-Akzentfarben und Theme-Anpassungen reagieren:
+
+| CSS-Variable | Tailwind-Farbe | Standard (Dark) | Verwendung |
+| :--- | :--- | :--- | :--- |
+| `--sl-color-scheme` | — | `dark` | Natives `color-scheme` (`dark` / `light`) |
+| `--sl-bg-canvas` | `sl-canvas` | `#0B0E11` | Seitenhintergrund & Eingabeflächen |
+| `--sl-bg-topbar` | `sl-topbar` | `#0F1318` | Sub-Navigationsleiste |
+| `--sl-bg-surface` | `sl-surface` | `#13171D` | Karten, Modals, Sidebars |
+| `--sl-bg-elevated` | `sl-elevated` | `#1E2530` | Sekundäre Buttons & Hervorhebungen |
+| `--sl-border` / `--sl-border-strong` | `sl-border` / `sl-border-strong` | `#232933` / `#36404F` | Rahmen, Trenner & aktive Segmente |
+| `--sl-text-heading` / `--sl-text-primary` | `sl-heading` / `sl-primary` | `#FFFFFF` / `#E6EDF3` | Überschriften & Fließtext |
+| `--sl-text-muted` / `--sl-text-subtle` | `sl-muted` / `sl-subtle` | `#8B949E` / `#6E7681` | Meta-Texte, Inaktiv-Labels & Platzhalter |
+| `--sl-accent` / `--sl-accent-hover` / `--sl-accent-contrast` | `sl-accent` / `sl-accent-hover` / `sl-accent-contrast` | `#F59E0B` / `#FBBF24` / `#0B0E11` | Primäre Akzente & Kontrasttext auf Buttons |
+| `--sl-danger` / `--sl-danger-text` | `sl-danger` / `sl-danger-text` | `#DC2626` / `#FCA5A5` | Fehler & Löschaktionen |
+| `--sl-success` / `--sl-success-text` / `--sl-warning-text` | `sl-success` / `sl-success-text` / `sl-warning-text` | `#16A34A` / `#86EFAC` / `#FDE68A` | Status- und Warnhinweise |
+
+* **Team-Primärfarbe automatisch aktiv:** Im aktiven Team-Kontext setzt der Core `--sl-accent`, `--sl-accent-hover` und WCAG-kontrastierendes `--sl-accent-contrast` dynamisch aus `aktivesTeam.primaerFarbe` (außerhalb des Team-Kontexts fallen die Werte auf die Standard-Defaults zurück).
+* **Theme-Override-Schutz:** Setzt ein externes Theme-Plugin `document.documentElement.dataset.slThemeAccentOverride = 'true'`, überschreibt der Core `--sl-accent*` nicht mehr durch die Teamfarbe.
+* **SDK-Typen & Helfer:** `SIDELINE_CSS_TOKENS`, `SIDELINE_STANDARD_THEME_TOKENS`, `normalisiereHexFarbe`, `ermittleKontrastTextFarbe`, `ermittleHoverAkzentFarbe` und `ermittleTeamAkzentTokens` stehen direkt über `@sidelineos/plugin-sdk` bereit.
 
 ---
 

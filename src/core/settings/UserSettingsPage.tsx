@@ -238,17 +238,17 @@ export function UserSettingsPage({
       {/* Sektion 1: Spieler- & Nutzerprofil */}
       <section
         id="profil"
-        className="scroll-mt-20 space-y-4 rounded-lg border border-[#232933] bg-[#13171D] p-5"
+        className="scroll-mt-20 space-y-4 rounded-lg border border-sl-border bg-sl-surface p-5"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sl-border pb-3">
           <div className="flex items-center gap-2">
-            <User className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-white">{t('userSettings.profileHeading')}</h2>
+            <User className="h-4 w-4 text-sl-accent" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-sl-heading">{t('userSettings.profileHeading')}</h2>
           </div>
           {mitgliedschaft && (
-            <span className="font-mono text-[11px] text-[#8B949E]">
+            <span className="font-mono text-[11px] text-sl-muted">
               {t('userSettings.unitsPrefix')}{' '}
-              <span className="text-[#E6EDF3]">
+              <span className="text-sl-primary">
                 {mitgliedschaft.units.length > 0
                   ? mitgliedschaft.units.map((u) => holeUnitLabel(u, locale)).join(' · ')
                   : t('userSettings.noUnit')}
@@ -258,61 +258,61 @@ export function UserSettingsPage({
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.fullName')}</span>
             <input
               type="text"
               value={vollerName}
               onChange={(e) => setVollerName(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.phone')}</span>
             <input
               type="tel"
               value={telefon}
               onChange={(e) => setTelefon(e.target.value)}
               placeholder="+49 170 ..."
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.jersey')}</span>
             <input
               type="text"
               value={trikotNummer}
               onChange={(e) => setTrikotNummer(e.target.value)}
               placeholder="14"
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 font-mono text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 font-mono text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.position')}</span>
             <input
               type="text"
               value={position}
               onChange={(e) => setPosition(e.target.value)}
               placeholder="WR / CB / LB"
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
           </label>
         </div>
 
         {team.customProfilFelder.length > 0 && (
-          <div className="space-y-3 border-t border-[#232933] pt-4">
-            <div className="text-xs font-medium text-[#E6EDF3]">
+          <div className="space-y-3 border-t border-sl-border pt-4">
+            <div className="text-xs font-medium text-sl-primary">
               {t('userSettings.customFieldsTitle', { team: team.name })}
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {team.customProfilFelder.map((feld) => (
-                <label key={feld.key} className="space-y-1 text-xs text-[#8B949E]">
+                <label key={feld.key} className="space-y-1 text-xs text-sl-muted">
                   <span>
                     {feld.label}
-                    {feld.pflicht && <span className="ml-1 text-[#F59E0B]">*</span>}
+                    {feld.pflicht && <span className="ml-1 text-sl-accent">*</span>}
                   </span>
                   {feld.typ === 'select' ? (
                     <select
@@ -320,7 +320,7 @@ export function UserSettingsPage({
                       onChange={(e) =>
                         setCustomWerte((alt) => ({ ...alt, [feld.key]: e.target.value }))
                       }
-                      className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                      className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
                     >
                       <option value="">{t('userSettings.pleaseSelect')}</option>
                       {(feld.optionen ?? []).map((opt) => (
@@ -336,7 +336,7 @@ export function UserSettingsPage({
                       onChange={(e) =>
                         setCustomWerte((alt) => ({ ...alt, [feld.key]: e.target.value }))
                       }
-                      className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                      className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
                     />
                   )}
                 </label>
@@ -345,15 +345,15 @@ export function UserSettingsPage({
           </div>
         )}
 
-        {profilFehler && <p className="text-xs text-[#FCA5A5]">{profilFehler}</p>}
+        {profilFehler && <p className="text-xs text-sl-danger-text">{profilFehler}</p>}
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <span className="text-xs text-[#86EFAC]">{profilHinweis ?? ''}</span>
+          <span className="text-xs text-sl-success-text">{profilHinweis ?? ''}</span>
           <button
             type="button"
             disabled={speichertProfil}
             onClick={() => void handleProfilSpeichern()}
-            className="inline-flex items-center gap-1.5 rounded-md bg-[#F59E0B] px-3.5 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md bg-sl-accent px-3.5 py-2 text-xs font-semibold text-sl-accent-contrast transition-colors hover:bg-sl-accent-hover disabled:opacity-60"
           >
             <Save className="h-3.5 w-3.5" aria-hidden="true" />
             {speichertProfil ? t('userSettings.saving') : t('userSettings.saveProfile')}
@@ -364,38 +364,38 @@ export function UserSettingsPage({
       {/* Sektion 2: Zugang, Sprache, E-Mail & Passwort */}
       <section
         id="konto"
-        className="scroll-mt-20 space-y-4 rounded-lg border border-[#232933] bg-[#13171D] p-5"
+        className="scroll-mt-20 space-y-4 rounded-lg border border-sl-border bg-sl-surface p-5"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232933] pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-sl-border pb-3">
           <div className="flex items-center gap-2">
-            <Lock className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
-            <h2 className="text-sm font-semibold text-white">{t('userSettings.accountHeading')}</h2>
+            <Lock className="h-4 w-4 text-sl-accent" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-sl-heading">{t('userSettings.accountHeading')}</h2>
           </div>
-          <span className="font-mono text-[11px] text-[#6E7681]">ID: {benutzer.uuid}</span>
+          <span className="font-mono text-[11px] text-sl-subtle">ID: {benutzer.uuid}</span>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.username')}</span>
             <input
               type="text"
               value={benutzername}
               onChange={(e) => setBenutzername(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 font-mono text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.email')}</span>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.languageLabel')}</span>
             <select
               aria-label={t('nav.languageAria')}
@@ -403,10 +403,10 @@ export function UserSettingsPage({
               onChange={(e) =>
                 void handleSpracheSofortWechseln(e.target.value as UnterstuetzteSprache)
               }
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             >
               {UNTERSTUETZTE_SPRACHEN.map((lang) => (
-                <option key={lang.code} value={lang.code} className="bg-[#13171D]">
+                <option key={lang.code} value={lang.code} className="bg-sl-surface">
                   {lang.eigenname} ({lang.code.toUpperCase()})
                 </option>
               ))}
@@ -414,55 +414,55 @@ export function UserSettingsPage({
           </label>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 border-t border-[#232933] pt-4 sm:grid-cols-3">
-          <label className="space-y-1 text-xs text-[#8B949E]">
+        <div className="grid grid-cols-1 gap-4 border-t border-sl-border pt-4 sm:grid-cols-3">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.currentPassword')}</span>
             <input
               type="password"
               value={passwortAktuell}
               onChange={(e) => setPasswortAktuell(e.target.value)}
               placeholder={t('userSettings.currentPasswordPlaceholder')}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white placeholder-[#484F58] focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.newPassword')}</span>
             <input
               type="password"
               value={passwortNeu}
               onChange={(e) => setPasswortNeu(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
 
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>{t('userSettings.confirmPassword')}</span>
             <input
               type="password"
               value={passwortWiederholung}
               onChange={(e) => setPasswortWiederholung(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
         </div>
 
-        {kontoFehler && <p className="text-xs text-[#FCA5A5]">{kontoFehler}</p>}
+        {kontoFehler && <p className="text-xs text-sl-danger-text">{kontoFehler}</p>}
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          <span className="text-xs text-[#86EFAC]">{kontoHinweis ?? ''}</span>
+          <span className="text-xs text-sl-success-text">{kontoHinweis ?? ''}</span>
           <button
             type="button"
             disabled={speichertKonto}
             onClick={() => void handleKontoSpeichern()}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3.5 py-2 text-xs font-medium text-white transition-colors hover:border-[#F59E0B] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-elevated px-3.5 py-2 text-xs font-medium text-sl-heading transition-colors hover:border-sl-accent disabled:opacity-60"
           >
             {speichertKonto ? t('userSettings.saving') : t('userSettings.updateAccount')}
           </button>
         </div>
 
-        <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-3 text-xs text-[#8B949E]">
-          <strong className="font-medium text-[#E6EDF3]">
+        <div className="rounded-md border border-sl-border bg-sl-canvas p-3 text-xs text-sl-muted">
+          <strong className="font-medium text-sl-primary">
             {t('userSettings.portabilityTitle')}
           </strong>{' '}
           {t('userSettings.portabilityBody')}

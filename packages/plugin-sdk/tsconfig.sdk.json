@@ -16,6 +16,7 @@
     "../../src/sdk/plugin.ts",
     "../../src/shared/types.ts",
     "../../src/shared/brand.ts",
-    "../../src/shared/i18n.ts"
+    "../../src/shared/i18n.ts",
+    "../../src/shared/theme.ts"
   ]
 }

@@ -70,6 +70,7 @@ import type {
 } from './shared/types.ts';
 import type { UnterstuetzteSprache } from './shared/i18n.ts';
 import { normalisiereSprache } from './shared/i18n.ts';
+import { ermittleTeamAkzentTokens } from './shared/theme.ts';
 import { holeRollenLabel } from './shared/types.ts';
 import { I18nProvider, useI18n } from './core/i18n/I18nContext.tsx';
 
@@ -441,6 +442,45 @@ function SidelineCoreShell({
         (m) => m.teamId === aktivesTeam.id && m.status === 'WARTET_AUF_FREIGABE'
       ).length
     : 0;
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    if (root.dataset.slThemeAccentOverride === 'true') {
+      return;
+    }
+
+    const imTeamKontext =
+      routeModus.art === 'app' &&
+      Boolean(konto) &&
+      Boolean(aktuellerBenutzer) &&
+      bereich !== 'sysadmin' &&
+      aktiveTeamAnsicht !== null &&
+      aktivesTeam !== null;
+
+    const akzentTokens = imTeamKontext
+      ? ermittleTeamAkzentTokens(aktivesTeam?.primaerFarbe)
+      : null;
+
+    if (!akzentTokens) {
+      root.style.removeProperty('--sl-accent');
+      root.style.removeProperty('--sl-accent-hover');
+      root.style.removeProperty('--sl-accent-contrast');
+      return;
+    }
+
+    root.style.setProperty('--sl-accent', akzentTokens['--sl-accent']);
+    root.style.setProperty('--sl-accent-hover', akzentTokens['--sl-accent-hover']);
+    root.style.setProperty('--sl-accent-contrast', akzentTokens['--sl-accent-contrast']);
+  }, [
+    routeModus.art,
+    konto,
+    aktuellerBenutzer,
+    bereich,
+    aktiveTeamAnsicht,
+    aktivesTeam,
+    aktivesTeam?.primaerFarbe,
+  ]);
 
   // --- Auth & Einladungs-Handler ---
   const handleAnmelden = async (
@@ -1127,7 +1167,7 @@ function SidelineCoreShell({
   if (routeModus.art === 'share') {
     if (sessionWirdGeprueft) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
+        <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
           {t('app.checkingSession')}
         </div>
       );
@@ -1143,14 +1183,14 @@ function SidelineCoreShell({
       });
     }
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
-        <div className="w-full max-w-md space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
-          <h1 className="text-base font-semibold text-white">{t('app.noVideoPluginTitle')}</h1>
-          <p className="text-xs text-[#8B949E]">{t('app.noVideoPluginBody')}</p>
+      <div className="flex min-h-screen items-center justify-center bg-sl-canvas px-4 py-10 text-sl-primary">
+        <div className="w-full max-w-md space-y-4 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
+          <h1 className="text-base font-semibold text-sl-heading">{t('app.noVideoPluginTitle')}</h1>
+          <p className="text-xs text-sl-muted">{t('app.noVideoPluginBody')}</p>
           <button
             type="button"
             onClick={() => navigiereZuRoute({ art: 'app' })}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
+            className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-canvas px-4 py-2 text-xs font-medium text-sl-heading hover:border-sl-accent"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
             {t('app.backToBrand')}
@@ -1172,7 +1212,7 @@ function SidelineCoreShell({
 
   if (sessionWirdGeprueft) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
+      <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
         {t('app.checkingSession')}
       </div>
     );
@@ -1207,7 +1247,7 @@ function SidelineCoreShell({
       : [];
 
   return (
-    <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
+    <div className="min-h-screen bg-sl-canvas text-sl-primary">
       <CoreTopBar
         bereich={bereich}
         aktivesPlugin={aktivesPlugin}
@@ -1223,54 +1263,54 @@ function SidelineCoreShell({
       />
 
       {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter, Demo-Konto & Abmelden */}
-      <div className="border-b border-[#232933] bg-[#0F1318]">
+      <div className="border-b border-sl-border bg-sl-topbar">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex flex-wrap items-center gap-3">
             {aktiveTeamAnsicht === null || bereich === 'sysadmin' || !aktivesTeam ? (
-              <span className="text-xs font-medium text-[#8B949E]">
+              <span className="text-xs font-medium text-sl-muted">
                 {t('app.context.sysadminScope')}
               </span>
             ) : (
               <>
                 {eigeneTeams.length > 1 ? (
-                  <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                  <label className="flex items-center gap-2 text-xs text-sl-muted">
                     <span>{t('app.context.team')}</span>
                     <select
                       value={aktivesTeam.id}
                       onChange={(e) => handleTeamWechseln(e.target.value)}
-                      className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                      className="rounded border border-sl-border bg-sl-surface px-2.5 py-1 text-xs font-medium text-sl-heading focus:border-sl-accent focus:outline-none"
                     >
                       {eigeneTeams.map((team) => (
-                        <option key={team.id} value={team.id} className="bg-[#13171D]">
+                        <option key={team.id} value={team.id} className="bg-sl-surface">
                           {team.name}
                         </option>
                       ))}
                     </select>
                   </label>
                 ) : (
-                  <div className="flex items-center gap-2 text-xs text-[#8B949E]">
+                  <div className="flex items-center gap-2 text-xs text-sl-muted">
                     <span>{t('app.context.team')}</span>
-                    <span className="font-medium text-white">{aktivesTeam.name}</span>
+                    <span className="font-medium text-sl-heading">{aktivesTeam.name}</span>
                   </div>
                 )}
 
-                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                <label className="flex items-center gap-2 text-xs text-sl-muted">
                   <span>{t('app.context.season')}</span>
                   <select
                     aria-label={t('app.context.seasonSelectAria')}
                     value={aktiveSaisonAuswahl}
                     onChange={(e) => setGewaehlteSaison(e.target.value)}
-                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 font-mono text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                    className="rounded border border-sl-border bg-sl-surface px-2.5 py-1 font-mono text-xs font-medium text-sl-heading focus:border-sl-accent focus:outline-none"
                   >
                     {aktivesTeam.saisons.map((s) => (
-                      <option key={s} value={s} className="bg-[#13171D]">
+                      <option key={s} value={s} className="bg-sl-surface">
                         {s}{' '}
                         {s === aktivesTeam.aktiveSaison
                           ? t('app.context.seasonCurrent')
                           : t('app.context.seasonArchive')}
                       </option>
                     ))}
-                    <option value="ALL" className="bg-[#13171D]">
+                    <option value="ALL" className="bg-sl-surface">
                       {t('app.context.allSeasons')}
                     </option>
                   </select>
@@ -1282,14 +1322,14 @@ function SidelineCoreShell({
           <div className="flex flex-wrap items-center gap-3">
             {kannAnsichtWechseln && (
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
-                  <Eye className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+                <span className="inline-flex items-center gap-1 text-xs text-sl-muted">
+                  <Eye className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
                   {t('app.context.view')}
                 </span>
                 <div
                   role="group"
                   aria-label={t('app.context.roleSwitchAria')}
-                  className="flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
+                  className="flex items-center gap-0.5 rounded-md border border-sl-border bg-sl-surface p-0.5"
                 >
                   {waehlbareAnsichten.map((rolle) => {
                     const aktiv = aktiveTeamAnsicht === rolle;
@@ -1300,8 +1340,8 @@ function SidelineCoreShell({
                         onClick={() => handleTeamAnsichtWechseln(rolle)}
                         className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
                           aktiv
-                            ? 'bg-[#232933] text-white'
-                            : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                            ? 'bg-sl-border text-sl-heading'
+                            : 'text-sl-muted hover:text-sl-primary'
                         }`}
                       >
                         {holeRollenLabel(rolle, locale)}
@@ -1316,7 +1356,7 @@ function SidelineCoreShell({
               type="button"
               onClick={() => void handleAbmelden()}
               title={t('app.context.logout')}
-              className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs text-[#8B949E] transition-colors hover:border-[#F59E0B] hover:text-white"
+              className="inline-flex items-center gap-1 rounded border border-sl-border bg-sl-surface px-2.5 py-1 text-xs text-sl-muted transition-colors hover:border-sl-accent hover:text-sl-heading"
             >
               <LogOut className="h-3 w-3" aria-hidden="true" />
               {t('app.context.logout')}
@@ -1327,11 +1367,11 @@ function SidelineCoreShell({
 
       {/* Hinweis-Banner bei aktiver Vorschau einer untergeordneten Rolle */}
       {istVorschauModus && konto.teamRolle && aktiveTeamAnsicht && (
-        <div className="border-b border-[#F59E0B]/30 bg-[#F59E0B]/10">
-          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-[#FDE68A]">
+        <div className="border-b border-sl-accent/30 bg-sl-accent/10">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-sl-warning-text">
             <span>
               {t('app.previewBanner.prefix')}{' '}
-              <strong className="font-semibold text-white">
+              <strong className="font-semibold text-sl-heading">
                 {holeRollenLabel(aktiveTeamAnsicht, locale)}
               </strong>{' '}
               ({t('app.previewBanner.actualRole')}: {holeRollenLabel(konto.teamRolle, locale)}).
@@ -1339,7 +1379,7 @@ function SidelineCoreShell({
             <button
               type="button"
               onClick={() => handleTeamAnsichtWechseln(konto.teamRolle!)}
-              className="inline-flex items-center gap-1.5 rounded border border-[#F59E0B]/50 bg-[#0B0E11] px-2.5 py-1 text-xs font-medium text-[#F59E0B] hover:bg-[#13171D]"
+              className="inline-flex items-center gap-1.5 rounded border border-sl-accent/50 bg-sl-canvas px-2.5 py-1 text-xs font-medium text-sl-accent hover:bg-sl-surface"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
               {t('app.previewBanner.backTo')} {holeRollenLabel(konto.teamRolle, locale)}
@@ -1435,9 +1475,9 @@ function SidelineCoreShell({
               onSmtpTesten={handleSmtpTesten}
             />
           ) : (
-            <div className="mx-auto max-w-md space-y-3 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
-              <h1 className="text-base font-semibold text-white">{t('app.noTeamTitle')}</h1>
-              <p className="text-xs text-[#8B949E]">{t('app.noTeamBody')}</p>
+            <div className="mx-auto max-w-md space-y-3 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
+              <h1 className="text-base font-semibold text-sl-heading">{t('app.noTeamTitle')}</h1>
+              <p className="text-xs text-sl-muted">{t('app.noTeamBody')}</p>
             </div>
           )
         ) : bereich === 'hub' ? (
