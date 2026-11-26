@@ -29,19 +29,33 @@ export type {
 export type { BrandKonfiguration } from '../shared/brand.ts';
 export { holeAktuelleBrandKonfig, teileWortmarke } from '../shared/brand.ts';
 export { createPluginTranslator, uebersetzeSchluessel } from '../shared/i18n.ts';
+import type { PluginThemePreset } from '../shared/theme.ts';
 export type {
+  AufgeloestesThemeErgebnis,
+  GeparsteThemeRef,
+  PluginThemePreset,
   SidelineCssToken,
   SidelineCssTokenDefinition,
   TeamAkzentTokens,
+  VerfuegbaresThemeEintrag,
 } from '../shared/theme.ts';
 export {
+  CORE_STANDARD_THEME_PRESET,
   SIDELINE_CSS_TOKENS,
   SIDELINE_STANDARD_THEME_TOKENS,
+  STANDARD_THEME_REF,
+  bauePluginThemeRef,
   berechneRelativeLuminanz,
+  bereinigePluginThemePresets,
   ermittleHoverAkzentFarbe,
   ermittleKontrastTextFarbe,
   ermittleTeamAkzentTokens,
+  loeseAktivesThemeAuf,
   normalisiereHexFarbe,
+  parseThemeRef,
+  sammleVerfuegbareThemes,
+  validiereThemeSlug,
+  validiereThemeTokenWert,
 } from '../shared/theme.ts';
 
 /**
@@ -100,6 +114,8 @@ export interface PluginManifest {
     team?: PluginSettingsAnker[];
     sysadmin?: PluginSettingsAnker[];
   };
+  /** Optionale Theme-Presets, die dieses Plugin im Core-Theme-Auswahlmenü bereitstellt */
+  themes?: PluginThemePreset[];
 }
 
 export interface PluginTab {
@@ -398,6 +414,8 @@ export interface SidelinePlugin {
     team?: ComponentType<{ ctx: PluginSettingsKontext }>;
     sysadmin?: ComponentType<{ ctx: PluginSettingsKontext }>;
   };
+  /** Optionale Theme-Presets (ergänzt oder überschreibt `manifest.themes` zur Laufzeit) */
+  themes?: readonly PluginThemePreset[];
 }
 
 /**

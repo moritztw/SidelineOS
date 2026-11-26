@@ -13,6 +13,10 @@ import type {
 } from '../../shared/types.ts';
 import { holeRollenLabel, holeUnitLabel } from '../../shared/types.ts';
 import type { PluginSettingsKontext, SidelinePlugin } from '../../sdk/plugin.ts';
+import {
+  STANDARD_THEME_REF,
+  type VerfuegbaresThemeEintrag,
+} from '../../shared/theme.ts';
 import { useI18n } from '../i18n/I18nContext.tsx';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
 
@@ -28,6 +32,8 @@ interface UserSettingsPageProps {
   aktiveTeamAnsicht: TeamRolle;
   s3Konfig: S3Konfiguration;
   aktivePlugins: SidelinePlugin[];
+  verfuegbareThemes?: VerfuegbaresThemeEintrag[];
+  instanceDefaultTheme?: string;
   onProfilSpeichern: (daten: {
     vollerName: string;
     telefon: string;
@@ -43,6 +49,7 @@ interface UserSettingsPageProps {
     neuesPasswort?: string;
   }) => Promise<ApiAktionErgebnis>;
   onSpracheSpeichern: (sprache: UnterstuetzteSprache) => Promise<ApiAktionErgebnis>;
+  onThemeSpeichern?: (themeRef: string | null) => Promise<ApiAktionErgebnis>;
   onZurueck?: () => void;
 }
 
@@ -53,9 +60,12 @@ export function UserSettingsPage({
   aktiveTeamAnsicht,
   s3Konfig,
   aktivePlugins,
+  verfuegbareThemes = [],
+  instanceDefaultTheme = STANDARD_THEME_REF,
   onProfilSpeichern,
   onZugangSpeichern,
   onSpracheSpeichern,
+  onThemeSpeichern,
   onZurueck,
 }: UserSettingsPageProps) {
   const { locale, setLocale, t } = useI18n();
@@ -134,6 +144,19 @@ export function UserSettingsPage({
     if (!res.ok) {
       setKontoFehler(res.fehler ?? t('userSettings.accountSaveError'));
     }
+  };
+
+  const handleThemeSofortWechseln = async (zielWert: string) => {
+    if (!onThemeSpeichern) return;
+    setKontoFehler(null);
+    setKontoHinweis(null);
+    const res = await onThemeSpeichern(zielWert ? zielWert : null);
+    if (!res.ok) {
+      setKontoFehler(res.fehler ?? t('userSettings.themeSaveError'));
+      return;
+    }
+    setKontoHinweis(t('userSettings.themeSaved'));
+    setTimeout(() => setKontoHinweis(null), 2400);
   };
 
   const handleKontoSpeichern = async () => {
@@ -413,6 +436,61 @@ export function UserSettingsPage({
             </select>
           </label>
         </div>
+
+        {onThemeSpeichern && (
+          <div className="space-y-1.5 border-t border-sl-border pt-4">
+            <label className="block space-y-1 text-xs text-sl-muted sm:max-w-md">
+              <span>{t('userSettings.themeLabel')}</span>
+              <select
+                aria-label={t('userSettings.themeLabel')}
+                value={
+                  benutzer.preferredTheme &&
+                  (benutzer.preferredTheme === STANDARD_THEME_REF ||
+                    verfuegbareThemes.some((th) => th.themeRef === benutzer.preferredTheme))
+                    ? benutzer.preferredTheme
+                    : ''
+                }
+                onChange={(e) => void handleThemeSofortWechseln(e.target.value)}
+                className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
+              >
+                <option value="" className="bg-sl-surface">
+                  {t('userSettings.themeInstanceDefault', {
+                    theme:
+                      verfuegbareThemes.find((th) => th.themeRef === instanceDefaultTheme)?.preset
+                        .name ?? t('userSettings.themeCoreDefault'),
+                  })}
+                </option>
+                <option value={STANDARD_THEME_REF} className="bg-sl-surface">
+                  {t('userSettings.themeCoreDefault')}
+                </option>
+                {Array.from(
+                  verfuegbareThemes.reduce<Map<string, VerfuegbaresThemeEintrag[]>>((map, eintrag) => {
+                    const gruppe = eintrag.pluginName ?? eintrag.pluginId ?? 'Plugin';
+                    const liste = map.get(gruppe) ?? [];
+                    liste.push(eintrag);
+                    map.set(gruppe, liste);
+                    return map;
+                  }, new Map())
+                ).map(([gruppe, eintraege]) => (
+                  <optgroup key={gruppe} label={gruppe} className="bg-sl-surface">
+                    {eintraege.map((eintrag) => (
+                      <option
+                        key={eintrag.themeRef}
+                        value={eintrag.themeRef}
+                        className="bg-sl-surface"
+                      >
+                        {eintrag.preset.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            {verfuegbareThemes.length === 0 && (
+              <p className="text-[11px] text-sl-subtle">{t('userSettings.themeNoPluginsHint')}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-4 border-t border-sl-border pt-4 sm:grid-cols-3">
           <label className="space-y-1 text-xs text-sl-muted">

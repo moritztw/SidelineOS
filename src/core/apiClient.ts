@@ -12,6 +12,7 @@ import type {
   TeamRolle,
 } from '../shared/types.ts';
 import type { PluginManifest } from '../sdk/plugin.ts';
+import type { PluginThemePreset } from '../shared/theme.ts';
 
 export class CoreApiError extends Error {
   constructor(
@@ -28,6 +29,7 @@ export interface AuthSessionResponse {
   user: BenutzerKonto;
   memberships: TeamMitgliedschaft[];
   teams: TeamKontext[];
+  instanceDefaultTheme?: string;
   token?: string;
 }
 
@@ -93,6 +95,7 @@ export interface SysadminCapabilitiesDTO {
   supportedSdkVersion: string;
   brandName?: string;
   defaultLocale?: UnterstuetzteSprache;
+  defaultTheme?: string;
 }
 
 export interface SysadminMitgliedschaftEingabeDTO {
@@ -169,6 +172,17 @@ export interface RuntimeManifestResponse {
   installedPluginIds: PluginId[];
   enabledPluginIds: PluginId[];
   bundles: RuntimePluginClientDTO[];
+}
+
+export interface PublicThemePluginDTO {
+  pluginId: PluginId;
+  pluginName: string;
+  themes: PluginThemePreset[];
+}
+
+export interface PublicThemesResponse {
+  instanceDefaultTheme: string;
+  plugins: PublicThemePluginDTO[];
 }
 
 /**
@@ -250,6 +264,7 @@ export const coreApi = {
     trikotNummer?: string;
     position?: string;
     preferredLocale?: UnterstuetzteSprache;
+    preferredTheme?: string | null;
     customProfilWerte?: Record<string, string>;
     altesPasswort?: string;
     neuesPasswort?: string;
@@ -624,5 +639,16 @@ export const coreApi = {
     return apiRequest<{ bundles: RuntimePluginClientDTO[] }>(
       '/api/v1/plugins/runtime/public-manifest'
     );
+  },
+
+  holePublicThemes(): Promise<PublicThemesResponse> {
+    return apiRequest<PublicThemesResponse>('/api/v1/plugins/runtime/themes');
+  },
+
+  speichereStandardTheme(themeRef: string): Promise<{ ok: boolean; defaultTheme: string }> {
+    return apiRequest<{ ok: boolean; defaultTheme: string }>('/api/v1/sysadmin/theme', {
+      method: 'PUT',
+      body: JSON.stringify({ themeRef }),
+    });
   },
 };

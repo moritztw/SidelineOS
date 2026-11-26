@@ -55,6 +55,7 @@ export interface BenutzerKonto {
   istSysadmin: boolean;
   erstelltAm: string;
   preferredLocale?: UnterstuetzteSprache;
+  preferredTheme?: string;
   customProfilWerte: Record<string, string>;
 }
 

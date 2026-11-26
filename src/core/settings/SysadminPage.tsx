@@ -9,6 +9,7 @@ import {
   GitBranch,
   HardDrive,
   Mail,
+  Palette,
   Pencil,
   Plus,
   RefreshCw,
@@ -45,7 +46,9 @@ import {
   type PluginSettingsKontext,
   type PluginStoreEintrag,
   type SidelinePlugin,
+  type VerfuegbaresThemeEintrag,
 } from '../../sdk/plugin.ts';
+import { STANDARD_THEME_REF } from '../../shared/theme.ts';
 import { useI18n } from '../i18n/I18nContext.tsx';
 import { parseGitHubPluginQuelle } from '../pluginRegistry.ts';
 import { SettingsShell, type SettingsKategorie } from '../layout/SettingsShell.tsx';
@@ -87,6 +90,9 @@ interface SysadminPageProps {
   mitgliedschaften: TeamMitgliedschaft[];
   s3Konfig: S3Konfiguration;
   smtpKonfig: SmtpKonfiguration;
+  defaultTheme?: string;
+  verfuegbareThemes?: VerfuegbaresThemeEintrag[];
+  onDefaultThemeSpeichern?: (themeRef: string) => Promise<ApiAktionErgebnis>;
   onPluginInstallieren: (pluginId: PluginId) => void;
   onPluginDeinstallieren: (pluginId: PluginId) => void;
   onCustomGitHubPluginHinzufuegen: (repoUrl: string, slug: string) => void;
@@ -176,6 +182,9 @@ export function SysadminPage({
   mitgliedschaften,
   s3Konfig,
   smtpKonfig,
+  defaultTheme = STANDARD_THEME_REF,
+  verfuegbareThemes = [],
+  onDefaultThemeSpeichern,
   onPluginInstallieren,
   onPluginDeinstallieren,
   onCustomGitHubPluginHinzufuegen,
@@ -269,6 +278,14 @@ export function SysadminPage({
   const [smtpStatus, setSmtpStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [smtpBeschaeftigt, setSmtpBeschaeftigt] = useState(false);
 
+  const [themeAuswahl, setThemeAuswahl] = useState(defaultTheme);
+  const [themeStatus, setThemeStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [themeBeschaeftigt, setThemeBeschaeftigt] = useState(false);
+
+  useEffect(() => {
+    setThemeAuswahl(defaultTheme);
+  }, [defaultTheme]);
+
   useEffect(() => {
     setS3Form(s3Konfig);
   }, [s3Konfig]);
@@ -312,6 +329,7 @@ export function SysadminPage({
     { id: 'sys-module', label: 'Team-Freigabe-Matrix', gruppe: 'Erweiterungen' },
     { id: 'sys-teams', label: 'Teams / Mandanten', gruppe: 'Instanz-Verwaltung' },
     { id: 'sys-benutzer', label: 'Globale Benutzer & Rollen', gruppe: 'Instanz-Verwaltung' },
+    { id: 'sys-theme', label: 'Erscheinungsbild & Theme', gruppe: 'Instanz-Verwaltung' },
     { id: 'sys-storage', label: 'S3 Object Storage', gruppe: 'Infrastruktur' },
     { id: 'sys-smtp', label: 'E-Mail / SMTP', gruppe: 'Infrastruktur' },
   ];
@@ -2081,6 +2099,106 @@ export function SysadminPage({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Instanz-Standard-Theme */}
+      {onDefaultThemeSpeichern && (
+        <section
+          id="sys-theme"
+          className="scroll-mt-20 rounded-lg border border-sl-border bg-sl-surface p-5 space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sl-border pb-3">
+            <div className="flex items-center gap-2">
+              <Palette className="h-4 w-4 text-sl-accent" aria-hidden="true" />
+              <div>
+                <h2 className="text-sm font-semibold text-sl-heading">
+                  Erscheinungsbild &amp; Instanz-Standard-Theme
+                </h2>
+                <p className="text-[11px] text-sl-muted">
+                  Legt das Standard-Theme für Anmeldung, Einladungen und Konten ohne eigene
+                  Theme-Auswahl fest. Zusätzliche Themes stammen aus global aktivierten Plugins.
+                </p>
+              </div>
+            </div>
+            <span className="font-mono text-[11px] text-sl-muted">{themeAuswahl}</span>
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="min-w-[240px] flex-1 space-y-1 text-xs text-sl-muted sm:max-w-md">
+              <span>Standard-Theme der Instanz</span>
+              <select
+                aria-label="Standard-Theme der Instanz"
+                value={
+                  themeAuswahl === STANDARD_THEME_REF ||
+                  verfuegbareThemes.some((th) => th.themeRef === themeAuswahl)
+                    ? themeAuswahl
+                    : STANDARD_THEME_REF
+                }
+                onChange={(e) => setThemeAuswahl(e.target.value)}
+                className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
+              >
+                <option value={STANDARD_THEME_REF} className="bg-sl-surface">
+                  SidelineOS Standard (Dark)
+                </option>
+                {Array.from(
+                  verfuegbareThemes.reduce<Map<string, VerfuegbaresThemeEintrag[]>>((map, eintrag) => {
+                    const gruppe = eintrag.pluginName ?? eintrag.pluginId ?? 'Plugin';
+                    const liste = map.get(gruppe) ?? [];
+                    liste.push(eintrag);
+                    map.set(gruppe, liste);
+                    return map;
+                  }, new Map())
+                ).map(([gruppe, eintraege]) => (
+                  <optgroup key={gruppe} label={gruppe} className="bg-sl-surface">
+                    {eintraege.map((eintrag) => (
+                      <option
+                        key={eintrag.themeRef}
+                        value={eintrag.themeRef}
+                        className="bg-sl-surface"
+                      >
+                        {eintrag.preset.name} ({eintrag.preset.colorScheme})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="button"
+              disabled={themeBeschaeftigt}
+              onClick={() => {
+                void (async () => {
+                  setThemeBeschaeftigt(true);
+                  setThemeStatus(null);
+                  const res = await onDefaultThemeSpeichern(themeAuswahl);
+                  setThemeStatus({
+                    ok: res.ok,
+                    text: res.ok
+                      ? 'Instanz-Standard-Theme gespeichert.'
+                      : res.fehler ?? 'Standard-Theme konnte nicht gespeichert werden.',
+                  });
+                  setThemeBeschaeftigt(false);
+                })();
+              }}
+              className="rounded bg-sl-accent px-3.5 py-2 text-xs font-semibold text-sl-accent-contrast hover:bg-sl-accent-hover disabled:opacity-50"
+            >
+              {themeBeschaeftigt ? 'Speichert...' : 'Standard-Theme speichern'}
+            </button>
+          </div>
+
+          {verfuegbareThemes.length === 0 && (
+            <p className="text-[11px] text-sl-subtle">
+              Aktuell ist kein global aktives Plugin mit Theme-Presets installiert. Es gilt das
+              integrierte SidelineOS-Standard-Theme.
+            </p>
+          )}
+          {themeStatus && (
+            <p className={`text-xs ${themeStatus.ok ? 'text-sl-success-text' : 'text-sl-danger-text'}`}>
+              {themeStatus.text}
+            </p>
+          )}
+        </section>
       )}
 
       {/* 5. S3 Object Storage */}

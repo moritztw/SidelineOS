@@ -14,6 +14,7 @@ import type { S3BrokerService } from '../services/s3Broker.ts';
 import type { S3CleanupService } from '../services/s3CleanupService.ts';
 import type { SmtpService } from '../services/smtpService.ts';
 import type { PluginRuntimeLoader } from '../plugins/runtimeLoader.ts';
+import { validiereThemeAuswahlFuerInstanz } from '../services/themeService.ts';
 
 const MIN_PASSWORT_LAENGE = 10;
 const GUELTIGE_ROLLEN = new Set<TeamRolle>(['TEAM_ADMIN', 'COACH', 'PLAYER']);
@@ -92,16 +93,25 @@ export function erstelleSysadminRouter(
 
   router.get('/overview', async (_req, res, next) => {
     try {
-      const [teams, users, memberships, plugins, s3Config, smtpConfig, cleanupStats] =
-        await Promise.all([
-          repo.listeTeams(),
-          repo.listeBenutzer(),
-          repo.listeMitgliedschaften(),
-          repo.listeInstalliertePlugins(),
-          services?.s3Broker?.holeMaskierteKonfig(),
-          services?.smtpService?.holeMaskierteKonfig(),
-          services?.s3Cleanup?.holeAnonymisierteStatistik(),
-        ]);
+      const [
+        teams,
+        users,
+        memberships,
+        plugins,
+        defaultTheme,
+        s3Config,
+        smtpConfig,
+        cleanupStats,
+      ] = await Promise.all([
+        repo.listeTeams(),
+        repo.listeBenutzer(),
+        repo.listeMitgliedschaften(),
+        repo.listeInstalliertePlugins(),
+        repo.holeStandardThemeRef(),
+        services?.s3Broker?.holeMaskierteKonfig(),
+        services?.smtpService?.holeMaskierteKonfig(),
+        services?.s3Cleanup?.holeAnonymisierteStatistik(),
+      ]);
       res.status(200).json({
         teams,
         users,
@@ -114,11 +124,30 @@ export function erstelleSysadminRouter(
           supportedSdkVersion: config.supportedSdkVersion,
           brandName: config.brandName,
           defaultLocale: config.defaultLocale,
+          defaultTheme,
         },
         ...(s3Config ? { s3Config } : {}),
         ...(smtpConfig ? { smtpConfig } : {}),
         ...(cleanupStats ? { cleanupStats } : {}),
       });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put('/theme', async (req, res, next) => {
+    try {
+      const pruefung = await validiereThemeAuswahlFuerInstanz(repo, req.body?.themeRef, {
+        erlaubeLeer: false,
+      });
+      if (!pruefung.ok) {
+        res.status(pruefung.status).json({ fehler: pruefung.fehler });
+        return;
+      }
+      const gespeichert = await repo.speichereStandardThemeRef(
+        pruefung.themeRef ?? 'core:default'
+      );
+      res.status(200).json({ ok: true, defaultTheme: gespeichert });
     } catch (err) {
       next(err);
     }

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { parseGitHubPluginQuelle } from '../../core/pluginRegistry.ts';
+import { bereinigePluginThemePresets } from '../../shared/theme.ts';
 import type { PluginManifest, PluginPermission } from '../../sdk/plugin.ts';
 import { PACKAGE_CORE_VERSION, type CoreServerConfig } from '../config.ts';
 import { fuehrePluginMigrationAus, type CoreDatabaseClient } from '../db/client.ts';
@@ -359,6 +360,9 @@ export function validierePluginManifest(
     permissions.push(p as PluginPermission);
   }
 
+  const bereinigteThemes =
+    m.themes !== undefined ? bereinigePluginThemePresets(m.themes) : [];
+
   return {
     id,
     name,
@@ -390,6 +394,7 @@ export function validierePluginManifest(
       m.settingsAnker && typeof m.settingsAnker === 'object'
         ? (m.settingsAnker as PluginManifest['settingsAnker'])
         : {},
+    ...(bereinigteThemes.length > 0 ? { themes: bereinigteThemes } : {}),
   };
 }
 

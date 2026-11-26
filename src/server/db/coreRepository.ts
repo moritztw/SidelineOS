@@ -10,6 +10,11 @@ import type {
   TeamRolle,
 } from '../../shared/types.ts';
 import { normalisiereSprache } from '../../shared/i18n.ts';
+import {
+  STANDARD_THEME_REF,
+  SYSTEM_THEME_SETTING_KEY,
+  parseThemeRef,
+} from '../../shared/theme.ts';
 import type { PluginManifest, PluginStoreEintrag } from '../../sdk/plugin.ts';
 import type { CoreDatabaseClient } from './client.ts';
 
@@ -54,11 +59,16 @@ interface UserRow {
   position: string;
   is_sysadmin: boolean;
   preferred_locale?: string;
+  preferred_theme?: string;
   custom_profile_values: unknown;
   created_at: unknown;
 }
 
 function mapUserRow(row: UserRow): DbBenutzerMitHash {
+  const cleanTheme =
+    typeof row.preferred_theme === 'string' && row.preferred_theme.trim()
+      ? row.preferred_theme.trim()
+      : undefined;
   return {
     passwordHash: row.password_hash,
     konto: {
@@ -72,6 +82,7 @@ function mapUserRow(row: UserRow): DbBenutzerMitHash {
       istSysadmin: Boolean(row.is_sysadmin),
       erstelltAm: toIsoDate(row.created_at),
       preferredLocale: normalisiereSprache(row.preferred_locale, 'de'),
+      ...(cleanTheme ? { preferredTheme: cleanTheme } : {}),
       customProfilWerte: parseJsonWert<Record<string, string>>(row.custom_profile_values, {}),
     },
   };
@@ -92,7 +103,7 @@ export class CoreRepository {
   async listeBenutzer(): Promise<BenutzerKonto[]> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        ORDER BY created_at ASC, full_name ASC`
     );
@@ -104,7 +115,7 @@ export class CoreRepository {
     if (!norm) return null;
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        WHERE LOWER(email) = $1 OR LOWER(username) = $1
        LIMIT 1`,
@@ -116,7 +127,7 @@ export class CoreRepository {
   async findeBenutzerNachUuid(uuid: string): Promise<DbBenutzerMitHash | null> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        WHERE uuid = $1
        LIMIT 1`,
@@ -144,10 +155,10 @@ export class CoreRepository {
     const res = await this.db.query<UserRow>(
       `INSERT INTO core.users (
          uuid, username, full_name, email, password_hash,
-         phone, jersey_number, position, is_sysadmin, preferred_locale, custom_profile_values, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+         phone, jersey_number, position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -159,6 +170,7 @@ export class CoreRepository {
         konto.position ?? '',
         konto.istSysadmin,
         normalisiereSprache(konto.preferredLocale, 'de'),
+        konto.preferredTheme?.trim() ?? '',
         JSON.stringify(konto.customProfilWerte ?? {}),
         konto.erstelltAm || new Date().toISOString().slice(0, 10),
       ]
@@ -177,11 +189,12 @@ export class CoreRepository {
            position = $7,
            is_sysadmin = $8,
            preferred_locale = $9,
-           custom_profile_values = $10::jsonb,
+           preferred_theme = $10,
+           custom_profile_values = $11::jsonb,
            updated_at = NOW()
        WHERE uuid = $1
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -192,6 +205,7 @@ export class CoreRepository {
         konto.position ?? '',
         konto.istSysadmin,
         normalisiereSprache(konto.preferredLocale, 'de'),
+        konto.preferredTheme?.trim() ?? '',
         JSON.stringify(konto.customProfilWerte ?? {}),
       ]
     );
@@ -821,6 +835,26 @@ export class CoreRepository {
        SET value_json = EXCLUDED.value_json, updated_at = NOW()`,
       [key, JSON.stringify(value)]
     );
+  }
+
+  async holeStandardThemeRef(): Promise<string> {
+    const gespeicherte = await this.holeSystemSetting<{ themeRef?: unknown }>(
+      SYSTEM_THEME_SETTING_KEY
+    );
+    const parsed = parseThemeRef(gespeicherte?.themeRef);
+    if (!parsed) return STANDARD_THEME_REF;
+    return parsed.typ === 'core'
+      ? STANDARD_THEME_REF
+      : `${parsed.pluginId}:${parsed.themeId}`;
+  }
+
+  async speichereStandardThemeRef(themeRef: string): Promise<string> {
+    const parsed = parseThemeRef(themeRef);
+    const normalisiert = !parsed || parsed.typ === 'core'
+      ? STANDARD_THEME_REF
+      : `${parsed.pluginId}:${parsed.themeId}`;
+    await this.speichereSystemSetting(SYSTEM_THEME_SETTING_KEY, { themeRef: normalisiert });
+    return normalisiert;
   }
 
   // --- Benachrichtigungen (In-App-Standardkanal) ---

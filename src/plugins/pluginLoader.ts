@@ -1,5 +1,6 @@
 import type { RuntimePluginClientDTO } from '../core/apiClient.ts';
 import type { PluginId } from '../shared/types.ts';
+import { bereinigePluginThemePresets } from '../shared/theme.ts';
 import type { PluginStoreEintrag, SidelinePlugin } from '../sdk/plugin.ts';
 
 const geladenePluginCache = new Map<string, SidelinePlugin>();
@@ -31,6 +32,7 @@ export function istGueltigesFrontendPlugin(kandidat: unknown): kandidat is Sidel
     return false;
   }
   if (obj.defaultTab !== undefined && typeof obj.defaultTab !== 'string') return false;
+  if (obj.themes !== undefined && !Array.isArray(obj.themes)) return false;
 
   const panels = obj.settingsPanels;
   if (panels !== undefined && (!panels || typeof panels !== 'object')) return false;
@@ -47,8 +49,10 @@ export function istGueltigesFrontendPlugin(kandidat: unknown): kandidat is Sidel
         istReactKomponente(panels.team) ||
         istReactKomponente(panels.sysadmin))
   );
+  const hatThemes =
+    bereinigePluginThemePresets(obj.themes ?? obj.manifest.themes).length > 0;
 
-  return hatHauptansicht || hatProvider || hatPublicShare || hatSettingsPanel;
+  return hatHauptansicht || hatProvider || hatPublicShare || hatSettingsPanel || hatThemes;
 }
 
 function synchronisierePluginStylesheets(eintraege: readonly RuntimePluginClientDTO[]): void {

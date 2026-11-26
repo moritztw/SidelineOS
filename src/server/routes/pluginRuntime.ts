@@ -5,6 +5,7 @@ import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import type { PluginRuntimeLoader } from '../plugins/runtimeLoader.ts';
+import { listeOeffentlichePluginThemes } from '../services/themeService.ts';
 
 type SharedModuleKey =
   | 'react'
@@ -174,6 +175,18 @@ export function erstellePluginRuntimeRouter(
     try {
       const daten = await runtimeLoader.listeFrontendRuntimeEintraege({ nurPublicShare: true });
       res.status(200).json({ bundles: daten.bundles });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/themes', async (_req, res, next) => {
+    try {
+      const [instanceDefaultTheme, plugins] = await Promise.all([
+        repo.holeStandardThemeRef(),
+        listeOeffentlichePluginThemes(repo),
+      ]);
+      res.status(200).json({ instanceDefaultTheme, plugins });
     } catch (err) {
       next(err);
     }

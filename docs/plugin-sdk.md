@@ -90,6 +90,7 @@ Der Plugin-Installer liest zuerst `plugin.manifest.json`, bevor Code entpackt od
 | `permissions` | Ja | Liste erlaubter Least-Privilege-Scopes (siehe Abschnitt 6) |
 | `settingsAnker` | Ja | Objekt `{ user?, team?, sysadmin? }` mit `<section id="...">`-Ankern |
 | `hideHubTile` | Nein | `true` blendet die Modul-Kachel auf der Hub-Startseite aus (ideal für Headless- oder Theme-Plugins ohne eigene Hauptansicht) |
+| `themes` | Nein | Optionale Theme-Presets (`PluginThemePreset[]`) für das Core-Theme-Auswahlmenü (`#sys-theme` & Konto-Einstellungen) |
 
 ### Wann prüft der Core die Kompatibilität?
 1. **`sdkVersion` (Major.Minor):**
@@ -286,6 +287,53 @@ const themePlugin: SidelinePlugin = {
 
 export default themePlugin;
 ```
+
+### Deklarative Theme-Presets (`manifest.themes` / `SidelinePlugin.themes`)
+Für klassische Farb- oder Light-/High-Contrast-Themes ist kein eigener `Provider` nötig: Ein Plugin kann ein oder mehrere `PluginThemePreset`-Einträge direkt in `plugin.manifest.json` (und/oder auf `SidelinePlugin.themes`) deklarieren. Der Core prüft und bereinigt alle Token-Werte automatisch gegen eine strikte `--sl-*`-Allowlist, stellt die Presets in der Sysadmin-Konfiguration (`#sys-theme`) sowie im persönlichen Konto (`#konto`) zur Auswahl bereit und wendet die Auflösung `Benutzer-Präferenz → Instanz-Standard → core:default` bereits beim Booten (inkl. `/login`, `/invite`, `/share`) an.
+
+```json
+{
+  "id": "daylight-theme",
+  "name": "SidelineOS Daylight",
+  "kurzbeschreibung": "Helles Erscheinungsbild für Outdoor- und Tageslicht-Nutzung.",
+  "version": "1.0.0",
+  "sdkVersion": "1.0",
+  "autor": "Dein Verein",
+  "repositoryUrl": "https://github.com/dein-verein/SidelineOS-daylight-theme",
+  "icon": "layers",
+  "status": "AKTIV",
+  "standardAktiviert": true,
+  "hideHubTile": true,
+  "permissions": [],
+  "dbPrefix": "mod_daylight_theme_",
+  "settingsAnker": {},
+  "themes": [
+    {
+      "id": "daylight",
+      "name": "Daylight (Hell)",
+      "beschreibung": "Hoher Kontrast bei direktem Sonnenlicht",
+      "colorScheme": "light",
+      "overrideTeamAccent": false,
+      "tokens": {
+        "--sl-bg-canvas": "#F8FAFC",
+        "--sl-bg-topbar": "#F1F5F9",
+        "--sl-bg-surface": "#FFFFFF",
+        "--sl-bg-elevated": "#E2E8F0",
+        "--sl-border": "#CBD5E1",
+        "--sl-border-strong": "#94A3B8",
+        "--sl-text-heading": "#0F172A",
+        "--sl-text-primary": "#1E293B",
+        "--sl-text-muted": "#475569",
+        "--sl-text-subtle": "#64748B"
+      }
+    }
+  ]
+}
+```
+
+* `tokens` akzeptiert ausschließlich gültige Hex-Farben (`#RGB`, `#RRGGBB`, `#RRGGBBAA`) sowie `'dark' | 'light'` für `--sl-color-scheme`.
+* Mit `overrideTeamAccent: false` (Standard) bleibt die dynamische Team-Primärfarbe im Team-Kontext erhalten; `overrideTeamAccent: true` erzwingt die im Preset definierte `--sl-accent*`-Farbe.
+* Reine deklarative Theme-Plugins benötigen weder `renderMainView` noch zwingend einen `Provider` – sofern `themes` in `plugin.manifest.json` hinterlegt sind.
 
 ### Frontend → Core/Backend-API aufrufen (wichtig: Routing & CSRF)
 Alle geschützten Backend-Aufrufe eines Plugins laufen über das Core-Gateway:

@@ -247,3 +247,251 @@ export function ermittleTeamAkzentTokens(primaerFarbe?: string): TeamAkzentToken
     '--sl-accent-contrast': ermittleKontrastTextFarbe(norm),
   };
 }
+
+export const STANDARD_THEME_REF = 'core:default';
+export const SYSTEM_THEME_SETTING_KEY = 'default_theme';
+
+export interface PluginThemePreset {
+  /** Eindeutige Theme-ID innerhalb des Plugins (z. B. "daylight", "high-contrast") */
+  id: string;
+  /** Anzeigename im Core-Theme-Auswahlmenü */
+  name: string;
+  /** Optionale kurze Beschreibung */
+  beschreibung?: string;
+  /** Basis-Farbschema für Browser-UI ("dark" oder "light") */
+  colorScheme: 'dark' | 'light';
+  /** Semantische `--sl-*` CSS Custom Properties */
+  tokens: Partial<Record<SidelineCssToken, string>>;
+  /** Optional: überschreibt auch die Team-Primärfarbe (`--sl-accent`), wenn true */
+  overrideTeamAccent?: boolean;
+}
+
+export interface VerfuegbaresThemeEintrag {
+  themeRef: string;
+  pluginId: string | null;
+  pluginName: string | null;
+  preset: PluginThemePreset;
+}
+
+export const CORE_STANDARD_THEME_PRESET: PluginThemePreset = {
+  id: 'default',
+  name: 'SidelineOS Standard (Dark)',
+  colorScheme: 'dark',
+  tokens: { ...SIDELINE_STANDARD_THEME_TOKENS },
+};
+
+const ERLAUBTE_THEME_TOKENS = new Set<string>(Object.keys(SIDELINE_STANDARD_THEME_TOKENS));
+const VERBOTENE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const THEME_SLUG_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
+
+export function validiereThemeSlug(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const norm = raw.trim().toLowerCase();
+  if (!THEME_SLUG_REGEX.test(norm)) return null;
+  return norm;
+}
+
+export function bauePluginThemeRef(pluginId: string, themeId: string): string {
+  const p = validiereThemeSlug(pluginId);
+  const t = validiereThemeSlug(themeId);
+  if (!p || !t) {
+    throw new Error(`Ungültige Theme-Referenz: "${pluginId}:${themeId}"`);
+  }
+  return `${p}:${t}`;
+}
+
+export type GeparsteThemeRef =
+  | { typ: 'core' }
+  | { typ: 'plugin'; pluginId: string; themeId: string };
+
+export function parseThemeRef(raw: unknown): GeparsteThemeRef | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (!trimmed) return null;
+  if (trimmed === STANDARD_THEME_REF) {
+    return { typ: 'core' };
+  }
+  const teile = trimmed.split(':');
+  if (teile.length !== 2) return null;
+  const pluginId = validiereThemeSlug(teile[0]);
+  const themeId = validiereThemeSlug(teile[1]);
+  if (!pluginId || !themeId || pluginId === 'core') return null;
+  return { typ: 'plugin', pluginId, themeId };
+}
+
+/**
+ * Validiert einen CSS-Token-Wert gegen die strikte `--sl-*` Allowlist,
+ * sodass niemals beliebige CSS-Strings oder Injection-Payloads angewendet werden können.
+ */
+export function validiereThemeTokenWert(token: string, rawWert: unknown): string | null {
+  if (!ERLAUBTE_THEME_TOKENS.has(token) || typeof rawWert !== 'string') return null;
+  const trimmed = rawWert.trim();
+  if (token === '--sl-color-scheme') {
+    const lower = trimmed.toLowerCase();
+    return lower === 'dark' || lower === 'light' ? lower : null;
+  }
+  const hex6 = normalisiereHexFarbe(trimmed);
+  if (hex6) return hex6;
+  if (/^#[0-9a-fA-F]{8}$/.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+  return null;
+}
+
+/**
+ * Bereinigt ein Array roher `PluginThemePreset`-Objekte (aus Manifest oder Bundle).
+ * Ungültige Presets oder ungültige CSS-Tokens werden verworfen.
+ */
+export function bereinigePluginThemePresets(raw: unknown): PluginThemePreset[] {
+  if (!Array.isArray(raw)) return [];
+  const gesehen = new Set<string>();
+  const ergebnis: PluginThemePreset[] = [];
+
+  for (const eintrag of raw) {
+    if (!eintrag || typeof eintrag !== 'object') continue;
+    const rec = eintrag as Record<string, unknown>;
+    const id = validiereThemeSlug(rec.id);
+    const name = typeof rec.name === 'string' ? rec.name.trim() : '';
+    if (!id || !name || gesehen.has(id)) continue;
+
+    const colorScheme: 'dark' | 'light' = rec.colorScheme === 'light' ? 'light' : 'dark';
+    const beschreibung =
+      typeof rec.beschreibung === 'string' && rec.beschreibung.trim()
+        ? rec.beschreibung.trim()
+        : undefined;
+
+    const tokens: Partial<Record<SidelineCssToken, string>> = {};
+    if (rec.tokens && typeof rec.tokens === 'object' && !Array.isArray(rec.tokens)) {
+      for (const [key, val] of Object.entries(rec.tokens as Record<string, unknown>)) {
+        if (VERBOTENE_OBJECT_KEYS.has(key)) continue;
+        const bereinigt = validiereThemeTokenWert(key, val);
+        if (bereinigt) {
+          tokens[key as SidelineCssToken] = bereinigt;
+        }
+      }
+    }
+    if (!tokens['--sl-color-scheme']) {
+      tokens['--sl-color-scheme'] = colorScheme;
+    }
+
+    gesehen.add(id);
+    ergebnis.push({
+      id,
+      name,
+      ...(beschreibung ? { beschreibung } : {}),
+      colorScheme,
+      tokens,
+      ...(rec.overrideTeamAccent === true ? { overrideTeamAccent: true } : {}),
+    });
+
+    if (ergebnis.length >= 20) break;
+  }
+
+  return ergebnis;
+}
+
+export function sammleVerfuegbareThemes(
+  quellen: ReadonlyArray<{
+    pluginId: string;
+    pluginName: string;
+    themes?: readonly PluginThemePreset[];
+  }>
+): VerfuegbaresThemeEintrag[] {
+  const ergebnis: VerfuegbaresThemeEintrag[] = [];
+  const geseheneRefs = new Set<string>();
+
+  for (const quelle of quellen) {
+    const pluginId = validiereThemeSlug(quelle.pluginId);
+    if (!pluginId || pluginId === 'core') continue;
+    const bereinigt = bereinigePluginThemePresets(quelle.themes);
+    for (const preset of bereinigt) {
+      const themeRef = `${pluginId}:${preset.id}`;
+      if (geseheneRefs.has(themeRef)) continue;
+      geseheneRefs.add(themeRef);
+      ergebnis.push({
+        themeRef,
+        pluginId,
+        pluginName: quelle.pluginName,
+        preset,
+      });
+    }
+  }
+
+  return ergebnis;
+}
+
+export interface AufgeloestesThemeErgebnis {
+  themeRef: string;
+  quelle: 'user' | 'instance' | 'core';
+  pluginId: string | null;
+  pluginName: string | null;
+  preset: PluginThemePreset;
+}
+
+/**
+ * Löst das effektiv anzuwendende Theme entlang der Hierarchie auf:
+ * Benutzer-Präferenz (`preferredTheme`) -> Instanz-Standard (`instanceDefaultTheme`) -> Core-Standard (`core:default`).
+ * Referenzen auf deaktivierte oder deinstallierte Plugins fallen automatisch sicher zurück.
+ */
+export function loeseAktivesThemeAuf(optionen: {
+  userPreferredTheme?: string | null;
+  instanceDefaultTheme?: string | null;
+  verfuegbareThemes: readonly VerfuegbaresThemeEintrag[];
+}): AufgeloestesThemeErgebnis {
+  const findePluginTheme = (ref: string) =>
+    optionen.verfuegbareThemes.find((t) => t.themeRef === ref) ?? null;
+
+  const userParsed = parseThemeRef(optionen.userPreferredTheme);
+  if (userParsed) {
+    if (userParsed.typ === 'core') {
+      return {
+        themeRef: STANDARD_THEME_REF,
+        quelle: 'user',
+        pluginId: null,
+        pluginName: null,
+        preset: CORE_STANDARD_THEME_PRESET,
+      };
+    }
+    const treffer = findePluginTheme(`${userParsed.pluginId}:${userParsed.themeId}`);
+    if (treffer) {
+      return {
+        themeRef: treffer.themeRef,
+        quelle: 'user',
+        pluginId: treffer.pluginId,
+        pluginName: treffer.pluginName,
+        preset: treffer.preset,
+      };
+    }
+  }
+
+  const instanzParsed = parseThemeRef(optionen.instanceDefaultTheme);
+  if (instanzParsed) {
+    if (instanzParsed.typ === 'core') {
+      return {
+        themeRef: STANDARD_THEME_REF,
+        quelle: 'instance',
+        pluginId: null,
+        pluginName: null,
+        preset: CORE_STANDARD_THEME_PRESET,
+      };
+    }
+    const treffer = findePluginTheme(`${instanzParsed.pluginId}:${instanzParsed.themeId}`);
+    if (treffer) {
+      return {
+        themeRef: treffer.themeRef,
+        quelle: 'instance',
+        pluginId: treffer.pluginId,
+        pluginName: treffer.pluginName,
+        preset: treffer.preset,
+      };
+    }
+  }
+
+  return {
+    themeRef: STANDARD_THEME_REF,
+    quelle: 'core',
+    pluginId: null,
+    pluginName: null,
+    preset: CORE_STANDARD_THEME_PRESET,
+  };
+}

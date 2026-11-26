@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Eye, LogOut, RotateCcw } from 'lucide-react';
 import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
 import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
@@ -16,6 +16,7 @@ import {
   coreApi,
   type AuthSessionResponse,
   type InviteAcceptResponse,
+  type PublicThemePluginDTO,
   type RuntimePluginClientDTO,
   type S3CleanupStatistikDTO,
   type SysadminCapabilitiesDTO,
@@ -72,7 +73,13 @@ import type {
 } from './shared/types.ts';
 import type { UnterstuetzteSprache } from './shared/i18n.ts';
 import { normalisiereSprache } from './shared/i18n.ts';
-import { ermittleTeamAkzentTokens } from './shared/theme.ts';
+import {
+  STANDARD_THEME_REF,
+  ermittleTeamAkzentTokens,
+  loeseAktivesThemeAuf,
+  sammleVerfuegbareThemes,
+  type PluginThemePreset,
+} from './shared/theme.ts';
 import { holeRollenLabel } from './shared/types.ts';
 import { I18nProvider, useI18n } from './core/i18n/I18nContext.tsx';
 
@@ -167,6 +174,9 @@ function SidelineCoreShell({
   );
   const [updateStatus, setUpdateStatus] = useState<UpdatePruefErgebnisDTO | null>(null);
   const [cleanupStats, setCleanupStats] = useState<S3CleanupStatistikDTO | null>(null);
+  const [instanceDefaultTheme, setInstanceDefaultTheme] = useState<string>(STANDARD_THEME_REF);
+  const [publicThemePlugins, setPublicThemePlugins] = useState<PublicThemePluginDTO[]>([]);
+  const angewandteThemeTokensRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const onPopState = () => {
@@ -207,6 +217,9 @@ function SidelineCoreShell({
         setSysCapabilities(ov.capabilities);
         if (ov.capabilities.brandName) {
           setBrandName(ov.capabilities.brandName);
+        }
+        if (ov.capabilities.defaultTheme) {
+          setInstanceDefaultTheme(ov.capabilities.defaultTheme);
         }
       }
       if (ov.s3Config) setS3Konfig(ov.s3Config);
@@ -254,11 +267,26 @@ function SidelineCoreShell({
     ]
   );
 
+  const aktualisierePublicThemes = useCallback(async () => {
+    try {
+      const pub = await coreApi.holePublicThemes();
+      if (pub.instanceDefaultTheme) {
+        setInstanceDefaultTheme(pub.instanceDefaultTheme);
+      }
+      setPublicThemePlugins(Array.isArray(pub.plugins) ? pub.plugins : []);
+    } catch {
+      // Ignorieren falls Backend noch nicht bereit ist
+    }
+  }, []);
+
   const uebernehmeSitzung = useCallback(
     async (sitzung: AuthSessionResponse) => {
       setAktuellerBenutzer(sitzung.user);
       if (sitzung.user.preferredLocale) {
         setLocale(normalisiereSprache(sitzung.user.preferredLocale, 'de'));
+      }
+      if (sitzung.instanceDefaultTheme) {
+        setInstanceDefaultTheme(sitzung.instanceDefaultTheme);
       }
       setTeams(sitzung.teams);
       setMitgliedschaften(sitzung.memberships);
@@ -286,9 +314,11 @@ function SidelineCoreShell({
     [ladeSysadminUebersicht, setLocale, synchronisiereRuntimePlugins]
   );
 
-  // Initialer Session-Check beim App-Start
+  // Initialer Session- & Public-Theme-Check beim App-Start
   useEffect(() => {
     let aktiv = true;
+    void aktualisierePublicThemes();
+
     if (routeModus.art === 'share') {
       void synchronisiereRuntimePlugins(true).finally(() => {
         if (aktiv) setSessionWirdGeprueft(false);
@@ -319,7 +349,7 @@ function SidelineCoreShell({
     return () => {
       aktiv = false;
     };
-  }, [routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
+  }, [aktualisierePublicThemes, routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
 
   const eigeneTeams = useMemo(
     () => ermittleEigeneTeams(aktuellerBenutzer, teams, mitgliedschaften),
@@ -484,9 +514,100 @@ function SidelineCoreShell({
     ]
   );
 
+  const verfuegbareThemes = useMemo(() => {
+    const quellen = new Map<
+      string,
+      { pluginId: string; pluginName: string; themes?: readonly PluginThemePreset[] }
+    >();
+
+    for (const plugin of globalAktivePlugins) {
+      quellen.set(plugin.manifest.id, {
+        pluginId: plugin.manifest.id,
+        pluginName: plugin.manifest.name,
+        themes: plugin.themes ?? plugin.manifest.themes,
+      });
+    }
+
+    const istOeffentlicheAnsicht =
+      !aktuellerBenutzer ||
+      routeModus.art === 'login' ||
+      routeModus.art === 'invite' ||
+      routeModus.art === 'share';
+
+    for (const pub of publicThemePlugins) {
+      if (!istOeffentlicheAnsicht && !globalAktivierteModule.includes(pub.pluginId)) {
+        continue;
+      }
+      const vorhanden = quellen.get(pub.pluginId);
+      if (!vorhanden || !vorhanden.themes || vorhanden.themes.length === 0) {
+        quellen.set(pub.pluginId, {
+          pluginId: pub.pluginId,
+          pluginName: pub.pluginName,
+          themes: pub.themes,
+        });
+      }
+    }
+
+    return sammleVerfuegbareThemes(Array.from(quellen.values()));
+  }, [
+    aktuellerBenutzer,
+    globalAktivierteModule,
+    globalAktivePlugins,
+    publicThemePlugins,
+    routeModus.art,
+  ]);
+
+  const aufgeloestesTheme = useMemo(
+    () =>
+      loeseAktivesThemeAuf({
+        userPreferredTheme: aktuellerBenutzer?.preferredTheme,
+        instanceDefaultTheme,
+        verfuegbareThemes,
+      }),
+    [aktuellerBenutzer?.preferredTheme, instanceDefaultTheme, verfuegbareThemes]
+  );
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
+    const vorherige = angewandteThemeTokensRef.current;
+    const neuAngewandt = new Set<string>();
+
+    const akzentKeys = new Set(['--sl-accent', '--sl-accent-hover', '--sl-accent-contrast']);
+    const istPresetAktiv = aufgeloestesTheme.themeRef !== STANDARD_THEME_REF;
+    const presetTokens = istPresetAktiv ? aufgeloestesTheme.preset.tokens : {};
+
+    // Basis-Tokens aus aktivem Preset anwenden (außer Akzentfarben, die separat koordiniert werden)
+    for (const [token, wert] of Object.entries(presetTokens)) {
+      if (akzentKeys.has(token) || typeof wert !== 'string') continue;
+      root.style.setProperty(token, wert);
+      neuAngewandt.add(token);
+    }
+
+    // Zuvor gesetzte Theme-Tokens entfernen, wenn sie im neuen Theme fehlen
+    for (const alterToken of vorherige) {
+      if (akzentKeys.has(alterToken)) continue;
+      if (!neuAngewandt.has(alterToken)) {
+        root.style.removeProperty(alterToken);
+      }
+    }
+    angewandteThemeTokensRef.current = neuAngewandt;
+
+    // Akzentfarben koordinieren: Preset-Override -> PR2-Provider-Override -> Team-Primärfarbe -> Preset-Akzent -> Core-Default
+    if (istPresetAktiv && aufgeloestesTheme.preset.overrideTeamAccent === true && presetTokens['--sl-accent']) {
+      const abgeleitet = ermittleTeamAkzentTokens(presetTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent', presetTokens['--sl-accent']);
+      root.style.setProperty(
+        '--sl-accent-hover',
+        presetTokens['--sl-accent-hover'] ?? abgeleitet?.['--sl-accent-hover'] ?? '#FBBF24'
+      );
+      root.style.setProperty(
+        '--sl-accent-contrast',
+        presetTokens['--sl-accent-contrast'] ?? abgeleitet?.['--sl-accent-contrast'] ?? '#0B0E11'
+      );
+      return;
+    }
+
     if (root.dataset.slThemeAccentOverride === 'true') {
       return;
     }
@@ -503,17 +624,32 @@ function SidelineCoreShell({
       ? ermittleTeamAkzentTokens(aktivesTeam?.primaerFarbe)
       : null;
 
-    if (!akzentTokens) {
-      root.style.removeProperty('--sl-accent');
-      root.style.removeProperty('--sl-accent-hover');
-      root.style.removeProperty('--sl-accent-contrast');
+    if (akzentTokens) {
+      root.style.setProperty('--sl-accent', akzentTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent-hover', akzentTokens['--sl-accent-hover']);
+      root.style.setProperty('--sl-accent-contrast', akzentTokens['--sl-accent-contrast']);
       return;
     }
 
-    root.style.setProperty('--sl-accent', akzentTokens['--sl-accent']);
-    root.style.setProperty('--sl-accent-hover', akzentTokens['--sl-accent-hover']);
-    root.style.setProperty('--sl-accent-contrast', akzentTokens['--sl-accent-contrast']);
+    if (istPresetAktiv && presetTokens['--sl-accent']) {
+      const abgeleitet = ermittleTeamAkzentTokens(presetTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent', presetTokens['--sl-accent']);
+      root.style.setProperty(
+        '--sl-accent-hover',
+        presetTokens['--sl-accent-hover'] ?? abgeleitet?.['--sl-accent-hover'] ?? '#FBBF24'
+      );
+      root.style.setProperty(
+        '--sl-accent-contrast',
+        presetTokens['--sl-accent-contrast'] ?? abgeleitet?.['--sl-accent-contrast'] ?? '#0B0E11'
+      );
+      return;
+    }
+
+    root.style.removeProperty('--sl-accent');
+    root.style.removeProperty('--sl-accent-hover');
+    root.style.removeProperty('--sl-accent-contrast');
   }, [
+    aufgeloestesTheme,
     routeModus.art,
     konto,
     aktuellerBenutzer,
@@ -627,6 +763,32 @@ function SidelineCoreShell({
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Spracheinstellung konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleThemeSpeichern = async (
+    themeRef: string | null
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereEigenesProfil({ preferredTheme: themeRef });
+      setAktuellerBenutzer(res.user);
+      setBenutzerListe((alt) => alt.map((b) => (b.uuid === res.user.uuid ? res.user : b)));
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Theme-Einstellung konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleDefaultThemeSpeichern = async (
+    themeRef: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.speichereStandardTheme(themeRef);
+      setInstanceDefaultTheme(res.defaultTheme);
+      setSysCapabilities((alt) => (alt ? { ...alt, defaultTheme: res.defaultTheme } : alt));
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Instanz-Standard-Theme konnte nicht gespeichert werden.');
     }
   };
 
@@ -851,7 +1013,7 @@ function SidelineCoreShell({
         setBereich('hub');
       }
       onGlobalModulToggle(pluginId);
-      await synchronisiereRuntimePlugins(false);
+      await Promise.all([synchronisiereRuntimePlugins(false), aktualisierePublicThemes()]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Globaler Plugin-Status konnte nicht gespeichert werden.');
@@ -1131,7 +1293,11 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginRelease(repoUrl, tag);
       onBackendPluginRegistrieren(res.manifest, res.releaseTag);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Release-Installation fehlgeschlagen.');
@@ -1145,7 +1311,11 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginUpload(contentBase64, expectedSha256);
       onBackendPluginRegistrieren(res.manifest, `v${res.manifest.version}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Offline-Paket konnte nicht installiert werden.');
@@ -1159,7 +1329,11 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginDevGit(repoUrl, branch);
       onBackendPluginRegistrieren(res.manifest, `dev:${res.branch}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Dev-Git-Installation fehlgeschlagen.');
@@ -1170,7 +1344,11 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.rollbackPlugin(pluginId);
       onBackendPluginRegistrieren(res.manifest, `v${res.version}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Rollback fehlgeschlagen.');
@@ -1186,7 +1364,11 @@ function SidelineCoreShell({
         setAktivesPluginId(null);
         setBereich('sysadmin');
       }
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Plugin konnte nicht deinstalliert werden.');
@@ -1451,6 +1633,9 @@ function SidelineCoreShell({
             mitgliedschaften={mitgliedschaften}
             s3Konfig={s3Konfig}
             smtpKonfig={smtpKonfig}
+            defaultTheme={instanceDefaultTheme}
+            verfuegbareThemes={verfuegbareThemes}
+            onDefaultThemeSpeichern={handleDefaultThemeSpeichern}
             onPluginInstallieren={onPluginInstallieren}
             onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
             onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
@@ -1496,6 +1681,9 @@ function SidelineCoreShell({
               mitgliedschaften={mitgliedschaften}
               s3Konfig={s3Konfig}
               smtpKonfig={smtpKonfig}
+              defaultTheme={instanceDefaultTheme}
+              verfuegbareThemes={verfuegbareThemes}
+              onDefaultThemeSpeichern={handleDefaultThemeSpeichern}
               onPluginInstallieren={onPluginInstallieren}
               onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
               onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
@@ -1552,9 +1740,12 @@ function SidelineCoreShell({
             aktiveTeamAnsicht={aktiveTeamAnsicht}
             s3Konfig={s3Konfig}
             aktivePlugins={aktiveTeamPlugins}
+            verfuegbareThemes={verfuegbareThemes}
+            instanceDefaultTheme={instanceDefaultTheme}
             onProfilSpeichern={handleProfilSpeichern}
             onZugangSpeichern={handleZugangSpeichern}
             onSpracheSpeichern={handleSpracheSpeichern}
+            onThemeSpeichern={handleThemeSpeichern}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
