@@ -86,6 +86,8 @@ export interface SysadminPluginStatusDTO {
   installMode?: string;
   packageSha256?: string | null;
   devBranch?: string | null;
+  installedAt?: string;
+  lastError?: string | null;
 }
 
 export interface SysadminCapabilitiesDTO {
@@ -166,6 +168,7 @@ export interface RuntimePluginClientDTO {
   manifest: PluginManifest;
   clientUrl: string;
   cssUrl?: string;
+  cacheBuster?: string;
 }
 
 export interface RuntimeManifestResponse {
@@ -632,17 +635,22 @@ export const coreApi = {
   },
 
   holeRuntimePlugins(): Promise<RuntimeManifestResponse> {
-    return apiRequest<RuntimeManifestResponse>('/api/v1/plugins/runtime/manifest');
+    return apiRequest<RuntimeManifestResponse>('/api/v1/plugins/runtime/manifest', {
+      cache: 'no-store',
+    });
   },
 
   holePublicRuntimePlugins(): Promise<{ bundles: RuntimePluginClientDTO[] }> {
     return apiRequest<{ bundles: RuntimePluginClientDTO[] }>(
-      '/api/v1/plugins/runtime/public-manifest'
+      '/api/v1/plugins/runtime/public-manifest',
+      { cache: 'no-store' }
     );
   },
 
   holePublicThemes(): Promise<PublicThemesResponse> {
-    return apiRequest<PublicThemesResponse>('/api/v1/plugins/runtime/themes');
+    return apiRequest<PublicThemesResponse>('/api/v1/plugins/runtime/themes', {
+      cache: 'no-store',
+    });
   },
 
   speichereStandardTheme(themeRef: string): Promise<{ ok: boolean; defaultTheme: string }> {

@@ -928,6 +928,12 @@ export function SysadminPage({
                     </div>
                   )}
 
+                  {backendMeta?.lastError && (
+                    <div className="rounded border border-sl-danger/40 bg-sl-danger/10 px-2.5 py-1.5 text-[11px] text-sl-danger-text">
+                      Backend-Fehler: {backendMeta.lastError}
+                    </div>
+                  )}
+
                   <p className="text-xs leading-relaxed text-sl-muted">
                     {manifest.kurzbeschreibung}
                   </p>
@@ -2566,7 +2572,12 @@ export function SysadminPage({
       {settingsKontext &&
         pluginsMitSysadminPanel.map((plugin) => {
           const SysadminPanel = plugin.settingsPanels!.sysadmin!;
-          return <SysadminPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+          return (
+            <SysadminPanel
+              key={`${plugin.manifest.id}@${plugin.manifest.version}`}
+              ctx={settingsKontext}
+            />
+          );
         })}
     </SettingsShell>
   );

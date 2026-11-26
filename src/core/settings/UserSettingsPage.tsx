@@ -550,7 +550,12 @@ export function UserSettingsPage({
       {/* Dynamische Einstellungs-Panels aller fürs Team aktiven Plugins */}
       {pluginsMitPanel.map((plugin) => {
         const UserPanel = plugin.settingsPanels!.user!;
-        return <UserPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+        return (
+          <UserPanel
+            key={`${plugin.manifest.id}@${plugin.manifest.version}`}
+            ctx={settingsKontext}
+          />
+        );
       })}
     </SettingsShell>
   );

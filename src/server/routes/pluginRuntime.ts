@@ -165,6 +165,7 @@ export function erstellePluginRuntimeRouter(
   router.get('/manifest', auth, async (_req, res, next) => {
     try {
       const daten = await runtimeLoader.listeFrontendRuntimeEintraege({ nurPublicShare: false });
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.status(200).json(daten);
     } catch (err) {
       next(err);
@@ -174,6 +175,7 @@ export function erstellePluginRuntimeRouter(
   router.get('/public-manifest', async (_req, res, next) => {
     try {
       const daten = await runtimeLoader.listeFrontendRuntimeEintraege({ nurPublicShare: true });
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.status(200).json({ bundles: daten.bundles });
     } catch (err) {
       next(err);
@@ -186,6 +188,7 @@ export function erstellePluginRuntimeRouter(
         repo.holeStandardThemeRef(),
         listeOeffentlichePluginThemes(repo),
       ]);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.status(200).json({ instanceDefaultTheme, plugins });
     } catch (err) {
       next(err);
@@ -239,7 +242,7 @@ export function erstellePluginRuntimeRouter(
       const ext = path.extname(vollPfad).toLowerCase();
       res.setHeader('Content-Type', MIME_TYPEN[ext] ?? 'application/octet-stream');
       res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Cache-Control', 'private, no-cache, must-revalidate');
       res.status(200).send(inhalt);
     } catch (err) {
       next(err);

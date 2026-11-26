@@ -929,7 +929,12 @@ export function TeamSettingsPage({
       {/* 5. Dynamische Team-Einstellungs-Panels aller aktiven Plugins */}
       {pluginsMitTeamPanel.map((plugin) => {
         const TeamPanel = plugin.settingsPanels!.team!;
-        return <TeamPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+        return (
+          <TeamPanel
+            key={`${plugin.manifest.id}@${plugin.manifest.version}`}
+            ctx={settingsKontext}
+          />
+        );
       })}
     </SettingsShell>
   );

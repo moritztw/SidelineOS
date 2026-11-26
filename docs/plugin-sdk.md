@@ -219,7 +219,7 @@ const t = createPluginTranslator({
 });
 
 function MainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
-  // ctx.team, ctx.aktiveTeamAnsicht, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
+  // ctx.team, ctx.aktiveTeamAnsicht, ctx.userUnits, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
   return (
     <div className="space-y-4">
       <h2 className="text-base font-semibold text-sl-heading">
@@ -372,7 +372,11 @@ async function pluginApi<T>(
 ### Öffentliche `/share/<token>`-Ansicht
 Möchte ein Plugin öffentliche Empfänger-Links unterstützen (`"share:public-links"`):
 1. Im Frontend `renderPublicShareView({ token, locale, onSchliessen })` implementieren.
-2. Im Backend `handlePublicRequest(req, db)` bereitstellen → erreichbar unter `/api/v1/public/plugins/<pluginId>/<subPfad>` (ohne Login, nur aktiv wenn das Plugin global aktiviert ist).
+2. Im Backend `handlePublicRequest(req, db, publicCtx)` bereitstellen → erreichbar unter `/api/v1/public/plugins/<pluginId>/<subPfad>` (ohne Login, nur aktiv wenn das Plugin global aktiviert ist).
+3. Besitzt das Plugin zusätzlich `"s3:team-rw"`, stellt der Core im optionalen 3. Parameter `publicCtx` schreibgeschützte S3-Signierhelfer (`publicCtx.createTeamS3ReadScope(teamId)` sowie `publicCtx.getSignedDownloadUrlForTeam(...)`) bereit, um nach erfolgreicher Token-Prüfung jederzeit frische, kurzlebige Download-/Stream-URLs für das zugehörige Team zu erzeugen.
+
+### Benutzer-Units (`userUnits`) im Frontend & Backend
+Sowohl `PluginLaufzeitKontext` (`ctx.userUnits`) als auch `PluginBackendKontext` (`ctx.userUnits`) enthalten die dem eingeloggten Benutzer in der aktiven Team-Mitgliedschaft zugewiesenen `SpielerUnit[]` (`'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS'`). Damit können Plugins Inhalte (z. B. Playbooks, Anmerkungen oder Einladungen) direkt ohne zusätzliche Roster-Abfrage nach Unit filtern.
 
 ### Einstellungs-Panels einhängen
 `settingsPanels` (`{ user?, team?, sysadmin? }`) wird automatisch auf der jeweiligen Core-Einstellungsseite gerendert. Die dort gerenderten `<section id="...">`-Elemente müssen den `id`s aus `manifest.settingsAnker` entsprechen, damit das sticky Seitenmenü direkt dorthin scrollt.

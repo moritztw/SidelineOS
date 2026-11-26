@@ -6,6 +6,7 @@ import type {
   CoreBereich,
   PluginId,
   S3Konfiguration,
+  SpielerUnit,
   TeamKontext,
   TeamRolle,
 } from '../shared/types.ts';
@@ -16,6 +17,7 @@ export type {
   CoreBereich,
   PluginId,
   S3Konfiguration,
+  SpielerUnit,
   TeamKontext,
   TeamRolle,
 } from '../shared/types.ts';
@@ -129,6 +131,8 @@ export interface PluginTab {
 export interface PluginLaufzeitKontext {
   team: TeamKontext;
   aktiveTeamAnsicht: TeamRolle;
+  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers im aktiven Team */
+  userUnits?: SpielerUnit[];
   gewaehlteSaison: string;
   benutzer: BenutzerKonto;
   locale: string;
@@ -328,6 +332,45 @@ export interface PluginNotificationScope {
   listChannels(): Promise<PluginNotificationChannelInfo[]>;
 }
 
+export interface PluginPublicS3ReadScope {
+  readonly prefix: string;
+  getSignedDownloadUrl(params: {
+    objectPath: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+}
+
+export interface PluginPublicSignedDownloadParams {
+  teamId: string;
+  objectPath: string;
+  expiresInSeconds?: number;
+}
+
+export type PluginPublicSignedDownloadFn = {
+  (params: PluginPublicSignedDownloadParams): Promise<{
+    url: string;
+    key: string;
+    expiresIn: number;
+  }>;
+  (
+    teamId: string,
+    objectPath: string,
+    expiresInSeconds?: number
+  ): Promise<{ url: string; key: string; expiresIn: number }>;
+};
+
+/**
+ * Optionaler Kontext für unauthentifizierte `handlePublicRequest`-Aufrufe (`/share/<token>`).
+ * Read-Only S3-Signierhelfer werden nur injiziert, wenn das Plugin sowohl `share:public-links`
+ * als auch `s3:team-rw` besitzt und der Ziel-Team-Scope aktiv ist.
+ */
+export interface PluginPublicKontext {
+  readonly pluginId: PluginId;
+  readonly manifest: PluginManifest;
+  readonly createTeamS3ReadScope?: (teamId: string) => PluginPublicS3ReadScope;
+  readonly getSignedDownloadUrlForTeam?: PluginPublicSignedDownloadFn;
+}
+
 /**
  * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
  */
@@ -342,6 +385,8 @@ export interface PluginBackendKontext {
   readonly locale: string;
   readonly team: TeamKontext;
   readonly teamRolle: TeamRolle;
+  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers in diesem Team */
+  readonly userUnits?: SpielerUnit[];
   hasPermission(permission: PluginPermission): boolean;
 }
 
@@ -373,7 +418,8 @@ export interface SidelineBackendPlugin {
       query: Record<string, unknown>;
       body: unknown;
     },
-    db: PluginDbScope
+    db: PluginDbScope,
+    publicCtx?: PluginPublicKontext
   ) => Promise<{ status: number; body: unknown }>;
   listExportableItems?: (
     ctx: PluginBackendKontext,

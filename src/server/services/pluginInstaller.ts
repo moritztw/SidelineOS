@@ -596,6 +596,7 @@ export class PluginInstallerService {
     dateien: Map<string, Buffer>
   ): Promise<string> {
     const zielBasis = path.resolve(this.config.pluginDataDir, pluginId, version);
+    await fs.rm(zielBasis, { recursive: true, force: true }).catch(() => undefined);
     await fs.mkdir(zielBasis, { recursive: true });
 
     for (const [relPfad, buf] of dateien.entries()) {
@@ -660,6 +661,7 @@ export class PluginInstallerService {
       manifest.version = normalisiereInstallVersion(params.effectiveVersion, manifest.version);
     }
 
+    await this.stelleSdkFuerPluginDataBereit();
     await this.schreibeDateienAufPlatte(manifest.id, manifest.version, dateien);
     const migrationenAusgefuehrt = await this.fuehreMigrationenAusDateienAus(
       manifest.id,
@@ -810,9 +812,8 @@ export class PluginInstallerService {
       const manifest = validierePluginManifest(manifestJson, {
         skipCompatibilityCheck: true,
       });
-      if (!manifest.repositoryUrl) {
-        manifest.repositoryUrl = quelle.repoUrl;
-      }
+      // Tatsächlich installierte Git-Quelle für künftige "Git Pull"-Läufe (inkl. Forks) beibehalten
+      manifest.repositoryUrl = quelle.repoUrl;
 
       const erkannteBranch = await this.commandRunner(
         'git',
@@ -875,6 +876,7 @@ export class PluginInstallerService {
         gesammelteDateien
       );
 
+      await this.stelleSdkFuerPluginDataBereit();
       await this.schreibeDateienAufPlatte(manifest.id, devVersion, gesammelteDateien);
       const migrationenAusgefuehrt = await this.fuehreMigrationenAusDateienAus(
         manifest.id,
@@ -913,7 +915,7 @@ export class PluginInstallerService {
     }
   }
 
-  private async stelleLokalesSdkBereit(stagingDir: string): Promise<void> {
+  private async stelleLokalesSdkBereit(basisDir: string): Promise<void> {
     const sdkPackageJson = path.join(CORE_PLUGIN_SDK_DIR, 'package.json');
     const sdkDistDir = path.join(CORE_PLUGIN_SDK_DIR, 'dist');
     try {
@@ -923,11 +925,15 @@ export class PluginInstallerService {
       return;
     }
 
-    const zielDir = path.join(stagingDir, 'node_modules', '@sidelineos', 'plugin-sdk');
+    const zielDir = path.join(basisDir, 'node_modules', '@sidelineos', 'plugin-sdk');
     await fs.rm(zielDir, { recursive: true, force: true }).catch(() => undefined);
     await fs.mkdir(zielDir, { recursive: true });
     await fs.cp(sdkPackageJson, path.join(zielDir, 'package.json'));
     await fs.cp(sdkDistDir, path.join(zielDir, 'dist'), { recursive: true });
+  }
+
+  private async stelleSdkFuerPluginDataBereit(): Promise<void> {
+    await this.stelleLokalesSdkBereit(path.resolve(this.config.pluginDataDir));
   }
 
   private async bereinigeAltePluginVersionen(

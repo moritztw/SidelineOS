@@ -91,6 +91,34 @@ export function erstelleSysadminRouter(
   const router = Router();
   router.use(requireAuth(repo, config), requireSysadmin());
 
+  async function ladeBackendLiveOderMeldeFehler(
+    pluginId: string,
+    version: string,
+    kontextHinweis: string
+  ): Promise<void> {
+    if (!services?.runtimeLoader) return;
+    const status = await repo.findePluginStatus(pluginId);
+    if (!status?.enabledGlobally) {
+      services.runtimeLoader.entladeBackendPlugin(pluginId);
+      return;
+    }
+    try {
+      await services.runtimeLoader.ladeBackendPlugin(pluginId, version);
+      await repo.speicherePluginFehler(pluginId, null);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await repo.speicherePluginFehler(pluginId, msg).catch(() => undefined);
+      console.warn(
+        `[SidelineOS-Core] Backend-Live-Reload (${kontextHinweis}) für "${pluginId}" fehlgeschlagen:`,
+        err
+      );
+      throw new PluginInstallerFehler(
+        422,
+        `Plugin wurde aktualisiert, aber der Backend-Live-Reload ist fehlgeschlagen: ${msg}`
+      );
+    }
+  }
+
   router.get('/overview', async (_req, res, next) => {
     try {
       const [
@@ -591,11 +619,7 @@ export function erstelleSysadminRouter(
         if (aktiv) {
           const status = await repo.findePluginStatus(pluginId);
           if (status) {
-            await services.runtimeLoader
-              .ladeBackendPlugin(pluginId, status.installedVersion)
-              .catch((err) => {
-                console.warn(`[SidelineOS-Core] Live-Load für "${pluginId}" fehlgeschlagen:`, err);
-              });
+            await ladeBackendLiveOderMeldeFehler(pluginId, status.installedVersion, 'Aktivierung');
           }
         } else {
           services.runtimeLoader.entladeBackendPlugin(pluginId);
@@ -603,6 +627,10 @@ export function erstelleSysadminRouter(
       }
       res.status(200).json({ pluginId, enabledGlobally: aktiv });
     } catch (err) {
+      if (err instanceof PluginInstallerFehler) {
+        res.status(err.status).json({ fehler: err.message });
+        return;
+      }
       next(err);
     }
   });
@@ -782,16 +810,11 @@ export function erstelleSysadminRouter(
         return;
       }
       const ergebnis = await services.pluginInstaller.installiereAusReleaseBundle({ repoUrl, tag });
-      if (services.runtimeLoader) {
-        const status = await repo.findePluginStatus(ergebnis.manifest.id);
-        if (status?.enabledGlobally) {
-          await services.runtimeLoader
-            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
-            .catch((err) => {
-              console.warn(`[SidelineOS-Core] Live-Load nach Release fehlgeschlagen:`, err);
-            });
-        }
-      }
+      await ladeBackendLiveOderMeldeFehler(
+        ergebnis.manifest.id,
+        ergebnis.manifest.version,
+        'Release-Installation'
+      );
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -824,16 +847,11 @@ export function erstelleSysadminRouter(
         expectedSha256,
         installMode: 'OFFLINE_UPLOAD',
       });
-      if (services.runtimeLoader) {
-        const status = await repo.findePluginStatus(ergebnis.manifest.id);
-        if (status?.enabledGlobally) {
-          await services.runtimeLoader
-            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
-            .catch((err) => {
-              console.warn(`[SidelineOS-Core] Live-Load nach Upload fehlgeschlagen:`, err);
-            });
-        }
-      }
+      await ladeBackendLiveOderMeldeFehler(
+        ergebnis.manifest.id,
+        ergebnis.manifest.version,
+        'Offline-Upload'
+      );
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -859,16 +877,11 @@ export function erstelleSysadminRouter(
         return;
       }
       const ergebnis = await services.pluginInstaller.installiereDevAusGit({ repoUrl, branch });
-      if (services.runtimeLoader) {
-        const status = await repo.findePluginStatus(ergebnis.manifest.id);
-        if (status?.enabledGlobally) {
-          await services.runtimeLoader
-            .ladeBackendPlugin(ergebnis.manifest.id, ergebnis.manifest.version)
-            .catch((err) => {
-              console.warn(`[SidelineOS-Core] Live-Load nach Dev-Git fehlgeschlagen:`, err);
-            });
-        }
-      }
+      await ladeBackendLiveOderMeldeFehler(
+        ergebnis.manifest.id,
+        ergebnis.manifest.version,
+        'Dev-Git'
+      );
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {
@@ -887,16 +900,7 @@ export function erstelleSysadminRouter(
       }
       const pluginId = String(req.params.pluginId);
       const ergebnis = await services.pluginInstaller.rollbackPlugin(pluginId);
-      if (services.runtimeLoader) {
-        const status = await repo.findePluginStatus(pluginId);
-        if (status?.enabledGlobally) {
-          await services.runtimeLoader
-            .ladeBackendPlugin(pluginId, ergebnis.version)
-            .catch((err) => {
-              console.warn(`[SidelineOS-Core] Live-Load nach Rollback fehlgeschlagen:`, err);
-            });
-        }
-      }
+      await ladeBackendLiveOderMeldeFehler(pluginId, ergebnis.version, 'Rollback');
       res.status(200).json({ ok: true, ...ergebnis });
     } catch (err) {
       if (err instanceof PluginInstallerFehler) {

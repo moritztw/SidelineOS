@@ -658,8 +658,8 @@ export class CoreRepository {
     await this.db.query(
       `INSERT INTO core.installed_plugins (
          plugin_id, manifest_json, source, release_tag, enabled_globally,
-         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error
-       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error, installed_at
+       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NOW())
        ON CONFLICT (plugin_id) DO UPDATE SET
          manifest_json = EXCLUDED.manifest_json,
          source = EXCLUDED.source,
@@ -669,7 +669,8 @@ export class CoreRepository {
          install_mode = EXCLUDED.install_mode,
          package_sha256 = EXCLUDED.package_sha256,
          dev_branch = EXCLUDED.dev_branch,
-         last_error = NULL`,
+         last_error = NULL,
+         installed_at = NOW()`,
       [
         params.manifest.id,
         JSON.stringify(params.manifest),
@@ -696,6 +697,8 @@ export class CoreRepository {
       installMode: string;
       packageSha256: string | null;
       devBranch: string | null;
+      installedAt: string;
+      lastError: string | null;
     }>
   > {
     const res = await this.db.query<{
@@ -708,9 +711,12 @@ export class CoreRepository {
       install_mode: string;
       package_sha256: string | null;
       dev_branch: string | null;
+      installed_at: unknown;
+      last_error: string | null;
     }>(
       `SELECT manifest_json, enabled_globally, source, release_tag,
-              installed_version, previous_version, install_mode, package_sha256, dev_branch
+              installed_version, previous_version, install_mode, package_sha256, dev_branch,
+              installed_at, last_error
        FROM core.installed_plugins
        ORDER BY installed_at ASC`
     );
@@ -726,6 +732,11 @@ export class CoreRepository {
         installMode: r.install_mode || 'CATALOG',
         packageSha256: r.package_sha256 ?? null,
         devBranch: r.dev_branch ?? null,
+        installedAt:
+          r.installed_at instanceof Date
+            ? r.installed_at.toISOString()
+            : String(r.installed_at ?? ''),
+        lastError: r.last_error ?? null,
       };
     });
   }
@@ -738,6 +749,8 @@ export class CoreRepository {
     installMode: string;
     source: string;
     releaseTag: string;
+    installedAt: string;
+    lastError: string | null;
   } | null> {
     const res = await this.db.query<{
       manifest_json: unknown;
@@ -747,8 +760,11 @@ export class CoreRepository {
       install_mode: string;
       source: string;
       release_tag: string;
+      installed_at: unknown;
+      last_error: string | null;
     }>(
-      `SELECT manifest_json, enabled_globally, installed_version, previous_version, install_mode, source, release_tag
+      `SELECT manifest_json, enabled_globally, installed_version, previous_version,
+              install_mode, source, release_tag, installed_at, last_error
        FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
       [pluginId]
     );
@@ -763,6 +779,11 @@ export class CoreRepository {
       installMode: r.install_mode || 'CATALOG',
       source: r.source,
       releaseTag: r.release_tag,
+      installedAt:
+        r.installed_at instanceof Date
+          ? r.installed_at.toISOString()
+          : String(r.installed_at ?? ''),
+      lastError: r.last_error ?? null,
     };
   }
 
@@ -777,9 +798,18 @@ export class CoreRepository {
        SET manifest_json = $2::jsonb,
            installed_version = $3,
            release_tag = $4,
-           previous_version = NULL
+           previous_version = NULL,
+           last_error = NULL,
+           installed_at = NOW()
        WHERE plugin_id = $1`,
       [pluginId, JSON.stringify(manifest), zielVersion, releaseTag]
+    );
+  }
+
+  async speicherePluginFehler(pluginId: string, fehler: string | null): Promise<void> {
+    await this.db.query(
+      `UPDATE core.installed_plugins SET last_error = $2 WHERE plugin_id = $1`,
+      [pluginId, fehler]
     );
   }
 

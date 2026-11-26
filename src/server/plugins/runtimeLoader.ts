@@ -13,6 +13,7 @@ export interface RuntimePluginClientEintrag {
   manifest: PluginManifest;
   clientUrl: string;
   cssUrl?: string;
+  cacheBuster?: string;
 }
 
 export interface BundleDateienInfo {
@@ -119,16 +120,38 @@ export class PluginRuntimeLoader {
   }
 
   async ladeBackendPlugin(pluginId: string, version: string): Promise<boolean> {
+    // Vor jedem Live-Reload zuerst den alten Backend-Handler entladen, damit bei Fehlern
+    // kein veralteter Stand still im Arbeitsspeicher verbleibt.
+    this.entladeBackendPlugin(pluginId);
+
     const info = await this.pruefeBundleDateien(pluginId, version);
     if (!info?.serverEntryPfad) {
       return false;
     }
 
+    const entryDateiname = path.basename(info.serverEntryPfad);
+    const istExpliziterServerEntry =
+      entryDateiname === 'server.js' || entryDateiname === 'server.mjs';
+
     const modulUrl = `${pathToFileURL(info.serverEntryPfad).href}?t=${Date.now()}`;
-    const geladen = (await import(modulUrl)) as Record<string, unknown>;
+    let geladen: Record<string, unknown>;
+    try {
+      geladen = (await import(modulUrl)) as Record<string, unknown>;
+    } catch (err) {
+      if (istExpliziterServerEntry) {
+        throw err;
+      }
+      return false;
+    }
+
     const kandidat = geladen.backendPlugin ?? geladen.default;
 
     if (!istGueltigesPluginBackendObjekt(kandidat, pluginId)) {
+      if (istExpliziterServerEntry) {
+        throw new Error(
+          `Backend-Bundle für "${pluginId}" exportiert kein gültiges SidelineBackendPlugin.`
+        );
+      }
       return false;
     }
 
@@ -156,9 +179,13 @@ export class PluginRuntimeLoader {
         if (ok) {
           geladen.push(pluginId);
         }
+        if (eintrag.lastError) {
+          await this.repo.speicherePluginFehler(pluginId, null).catch(() => undefined);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         fehler.push({ pluginId, fehler: msg });
+        await this.repo.speicherePluginFehler(pluginId, msg).catch(() => undefined);
         console.warn(
           `[SidelineOS-Core] Backend-Plugin "${pluginId}" konnte nicht dynamisch geladen werden: ${msg}`
         );
@@ -201,12 +228,23 @@ export class PluginRuntimeLoader {
         eintrag.manifest.id
       )}/${encodeURIComponent(eintrag.installedVersion)}`;
 
+      const clientStat = await fs
+        .stat(path.join(info.distDir, info.clientEntryRel))
+        .catch(() => null);
+      const installedMs = eintrag.installedAt ? Date.parse(eintrag.installedAt) : 0;
+      const busterTeile = [
+        Number.isFinite(installedMs) && installedMs > 0 ? String(installedMs) : '',
+        clientStat ? String(Math.trunc(clientStat.mtimeMs)) : '',
+      ].filter(Boolean);
+      const cacheBuster = busterTeile.length > 0 ? busterTeile.join('-') : String(Date.now());
+
       bundles.push({
         pluginId: eintrag.manifest.id,
         version: eintrag.installedVersion,
         manifest: eintrag.manifest,
         clientUrl: `${baseUrl}/${info.clientEntryRel}`,
         ...(info.cssRel ? { cssUrl: `${baseUrl}/${info.cssRel}` } : {}),
+        cacheBuster,
       });
     }
 

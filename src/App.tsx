@@ -27,8 +27,13 @@ import {
 import {
   ermittleEigeneTeams,
   ermittleProfilAusKonto,
-  parseAppRouteAusPfad,
 } from './core/authService.ts';
+import {
+  baueAppAnsichtPfad,
+  baueRoutePfad,
+  parseBrowserPfad,
+  type AppAnsichtZiel,
+} from './core/navigation.ts';
 import { INITIALE_S3_KONFIG, INITIALE_SMTP_KONFIG } from './core/demoOrgData.ts';
 import {
   OFFIZIELLER_PLUGIN_KATALOG,
@@ -107,7 +112,11 @@ function PluginProviderStack({
     const Provider = plugin.Provider;
     if (!Provider) return acc;
     const ctx = erzeugeKontext ? erzeugeKontext(plugin) : undefined;
-    return <Provider ctx={ctx}>{acc}</Provider>;
+    return (
+      <Provider key={`${plugin.manifest.id}@${plugin.manifest.version}`} ctx={ctx}>
+        {acc}
+      </Provider>
+    );
   }, children);
 }
 
@@ -141,13 +150,25 @@ function SidelineCoreShell({
   onRuntimeBundlesSynchronisieren,
 }: SidelineShellProps) {
   const { locale, setLocale, setBrandName, t } = useI18n();
-  const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
-    parseAppRouteAusPfad(typeof window !== 'undefined' ? window.location.pathname : '/')
+  const initialPfad = useMemo(
+    () => parseBrowserPfad(typeof window !== 'undefined' ? window.location.pathname : '/'),
+    []
   );
+  const [routeModus, setRouteModus] = useState<AppRouteModus>(() => initialPfad.routeModus);
 
-  const [bereich, setBereich] = useState<CoreBereich>('hub');
-  const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(null);
-  const [aktiverPluginTab, setAktiverPluginTab] = useState<string>('');
+  const [bereich, setBereich] = useState<CoreBereich>(() => initialPfad.ansicht.bereich);
+  const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(
+    () => initialPfad.ansicht.pluginId
+  );
+  const [aktiverPluginTab, setAktiverPluginTab] = useState<string>(
+    () => initialPfad.ansicht.pluginTab
+  );
+  const [runtimePluginsGeladen, setRuntimePluginsGeladen] = useState<boolean>(false);
+  const ausstehendeZielAnsichtRef = useRef<AppAnsichtZiel | null>(
+    initialPfad.routeModus.art === 'app' && initialPfad.istBekannterAppPfad
+      ? initialPfad.ansicht
+      : null
+  );
 
   const [sessionWirdGeprueft, setSessionWirdGeprueft] = useState<boolean>(true);
   const [aktuellerBenutzer, setAktuellerBenutzer] = useState<BenutzerKonto | null>(null);
@@ -180,31 +201,69 @@ function SidelineCoreShell({
 
   useEffect(() => {
     const onPopState = () => {
-      setRouteModus(parseAppRouteAusPfad(window.location.pathname));
+      const geparst = parseBrowserPfad(window.location.pathname);
+      setRouteModus(geparst.routeModus);
+      if (geparst.routeModus.art === 'app') {
+        setBereich(geparst.ansicht.bereich);
+        setAktivesPluginId(geparst.ansicht.pluginId);
+        setAktiverPluginTab(geparst.ansicht.pluginTab);
+      }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const navigiereZuRoute = useCallback((ziel: AppRouteModus) => {
-    setRouteModus(ziel);
-    if (typeof window === 'undefined') return;
-    const zielPfad =
-      ziel.art === 'app'
-        ? '/'
-        : ziel.art === 'login'
-          ? '/login'
-          : ziel.art === 'invite'
-            ? `/invite/${encodeURIComponent(ziel.token)}`
-            : `/share/${encodeURIComponent(ziel.token)}`;
-    try {
-      if (window.location.pathname !== zielPfad) {
-        window.history.pushState(null, '', zielPfad);
+  const navigiereZuAppAnsicht = useCallback(
+    (ziel: AppAnsichtZiel, optionen: { replace?: boolean } = {}) => {
+      const normalisiert: AppAnsichtZiel =
+        ziel.bereich === 'modul'
+          ? ziel
+          : { bereich: ziel.bereich, pluginId: null, pluginTab: '' };
+      setRouteModus({ art: 'app' });
+      setBereich(normalisiert.bereich);
+      setAktivesPluginId(normalisiert.pluginId);
+      setAktiverPluginTab(normalisiert.pluginTab);
+      if (typeof window === 'undefined') return;
+      const zielPfad = baueAppAnsichtPfad(normalisiert);
+      try {
+        if (window.location.pathname !== zielPfad) {
+          if (optionen.replace) {
+            window.history.replaceState(null, '', zielPfad);
+          } else {
+            window.history.pushState(null, '', zielPfad);
+          }
+        }
+      } catch {
+        // Ignorieren in restriktiven Sandbox-Umgebungen
       }
-    } catch {
-      // Ignorieren in restriktiven Sandbox-Umgebungen
-    }
-  }, []);
+    },
+    []
+  );
+
+  const navigiereZuRoute = useCallback(
+    (ziel: AppRouteModus, optionen: { replace?: boolean; appAnsicht?: AppAnsichtZiel } = {}) => {
+      setRouteModus(ziel);
+      if (ziel.art === 'app' && optionen.appAnsicht) {
+        setBereich(optionen.appAnsicht.bereich);
+        setAktivesPluginId(optionen.appAnsicht.pluginId);
+        setAktiverPluginTab(optionen.appAnsicht.pluginTab);
+      }
+      if (typeof window === 'undefined') return;
+      const zielPfad = baueRoutePfad(ziel, optionen.appAnsicht);
+      try {
+        if (window.location.pathname !== zielPfad) {
+          if (optionen.replace) {
+            window.history.replaceState(null, '', zielPfad);
+          } else {
+            window.history.pushState(null, '', zielPfad);
+          }
+        }
+      } catch {
+        // Ignorieren in restriktiven Sandbox-Umgebungen
+      }
+    },
+    []
+  );
 
   const ladeSysadminUebersicht = useCallback(async () => {
     try {
@@ -258,6 +317,10 @@ function SidelineCoreShell({
         await onRuntimeBundlesSynchronisieren(rt.bundles);
       } catch {
         // Stille Fehlerbehandlung, falls Backend offline oder Bundle noch nicht gebaut ist
+      } finally {
+        if (!nurPublicShare) {
+          setRuntimePluginsGeladen(true);
+        }
       }
     },
     [
@@ -280,7 +343,7 @@ function SidelineCoreShell({
   }, []);
 
   const uebernehmeSitzung = useCallback(
-    async (sitzung: AuthSessionResponse) => {
+    async (sitzung: AuthSessionResponse): Promise<AppAnsichtZiel> => {
       setAktuellerBenutzer(sitzung.user);
       if (sitzung.user.preferredLocale) {
         setLocale(normalisiereSprache(sitzung.user.preferredLocale, 'de'));
@@ -301,8 +364,27 @@ function SidelineCoreShell({
       const profil = ermittleProfilAusKonto(sitzung.user, zielTeamId, sitzung.memberships);
       setAktuellesProfil(profil);
       setAktiveTeamAnsicht(profil.teamRolle);
-      setAktivesPluginId(null);
-      setBereich(profil.teamRolle === null ? 'sysadmin' : 'hub');
+
+      const standardAnsicht: AppAnsichtZiel = {
+        bereich: profil.teamRolle === null ? 'sysadmin' : 'hub',
+        pluginId: null,
+        pluginTab: '',
+      };
+      const zielAusUrl =
+        ausstehendeZielAnsichtRef.current ??
+        (typeof window !== 'undefined'
+          ? (() => {
+              const p = parseBrowserPfad(window.location.pathname);
+              return p.routeModus.art === 'app' && p.istBekannterAppPfad ? p.ansicht : null;
+            })()
+          : null);
+      ausstehendeZielAnsichtRef.current = null;
+      const zielAnsicht = zielAusUrl ?? standardAnsicht;
+
+      setRouteModus({ art: 'app' });
+      setBereich(zielAnsicht.bereich);
+      setAktivesPluginId(zielAnsicht.pluginId);
+      setAktiverPluginTab(zielAnsicht.pluginTab);
 
       if (sitzung.user.istSysadmin) {
         await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
@@ -310,6 +392,7 @@ function SidelineCoreShell({
         setBenutzerListe([sitzung.user]);
         await synchronisiereRuntimePlugins(false);
       }
+      return zielAnsicht;
     },
     [ladeSysadminUebersicht, setLocale, synchronisiereRuntimePlugins]
   );
@@ -659,6 +742,106 @@ function SidelineCoreShell({
     aktivesTeam?.primaerFarbe,
   ]);
 
+  // --- URL-Validierung & Fallback nach Hydrierung (Deep-Links, Rollen-/Modul-Wechsel, unbekannte Pfade) ---
+  useEffect(() => {
+    if (sessionWirdGeprueft || routeModus.art !== 'app' || !aktuellerBenutzer || !konto) {
+      return;
+    }
+
+    if (aktiveTeamAnsicht === null || !aktivesTeam) {
+      if (konto.istSysadmin && bereich !== 'sysadmin') {
+        navigiereZuAppAnsicht(
+          { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+      }
+      return;
+    }
+
+    if (bereich === 'sysadmin' && !konto.istSysadmin) {
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
+      return;
+    }
+
+    if (bereich === 'team-settings' && aktiveTeamAnsicht !== 'TEAM_ADMIN') {
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
+      return;
+    }
+
+    if (bereich === 'modul') {
+      if (!aktivesPluginId) {
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+        return;
+      }
+      if (!runtimePluginsGeladen) {
+        return;
+      }
+      if (!aktivesPlugin || typeof aktivesPlugin.renderMainView !== 'function') {
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+        return;
+      }
+      const tabs = aktivesPlugin.getTabs?.({ teamRolle: aktiveTeamAnsicht, locale }) ?? [];
+      const standardTab =
+        (aktivesPlugin.defaultTab && tabs.some((tab) => tab.id === aktivesPlugin.defaultTab)
+          ? aktivesPlugin.defaultTab
+          : tabs[0]?.id) ??
+        aktivesPlugin.defaultTab ??
+        '';
+      const gueltigerTab =
+        tabs.length > 0
+          ? tabs.some((tab) => tab.id === aktiverPluginTab)
+            ? aktiverPluginTab
+            : standardTab
+          : aktiverPluginTab || standardTab;
+
+      const erwarteterPfad = baueAppAnsichtPfad({
+        bereich: 'modul',
+        pluginId: aktivesPlugin.manifest.id,
+        pluginTab: gueltigerTab,
+      });
+      if (
+        gueltigerTab !== aktiverPluginTab ||
+        (typeof window !== 'undefined' && window.location.pathname !== erwarteterPfad)
+      ) {
+        navigiereZuAppAnsicht(
+          { bereich: 'modul', pluginId: aktivesPlugin.manifest.id, pluginTab: gueltigerTab },
+          { replace: true }
+        );
+      }
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const geparst = parseBrowserPfad(window.location.pathname);
+      if (!geparst.istBekannterAppPfad) {
+        navigiereZuAppAnsicht(
+          { bereich, pluginId: aktivesPluginId, pluginTab: aktiverPluginTab },
+          { replace: true }
+        );
+      }
+    }
+  }, [
+    sessionWirdGeprueft,
+    routeModus.art,
+    aktuellerBenutzer,
+    konto,
+    aktiveTeamAnsicht,
+    aktivesTeam,
+    bereich,
+    aktivesPluginId,
+    aktiverPluginTab,
+    aktivesPlugin,
+    runtimePluginsGeladen,
+    locale,
+    navigiereZuAppAnsicht,
+  ]);
+
   // --- Auth & Einladungs-Handler ---
   const handleAnmelden = async (
     kennung: string,
@@ -666,8 +849,9 @@ function SidelineCoreShell({
   ): Promise<{ ok: boolean; fehler?: string }> => {
     try {
       const res = await coreApi.login(kennung, passwort);
-      await uebernehmeSitzung(res);
-      navigiereZuRoute({ art: 'app' });
+      const warLoginPfad = typeof window !== 'undefined' && window.location.pathname === '/login';
+      const zielAnsicht = await uebernehmeSitzung(res);
+      navigiereZuAppAnsicht(zielAnsicht, { replace: !warLoginPfad });
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Anmeldung fehlgeschlagen.');
@@ -687,9 +871,8 @@ function SidelineCoreShell({
     const profil = ermittleProfilAusKonto(ergebnis.user, ergebnis.team.id, [ergebnis.membership]);
     setAktuellesProfil(profil);
     setAktiveTeamAnsicht(profil.teamRolle);
-    setAktivesPluginId(null);
-    setBereich('hub');
-    navigiereZuRoute({ art: 'app' });
+    ausstehendeZielAnsichtRef.current = null;
+    navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' });
 
     try {
       const vollSitzung = await coreApi.holeAktuelleSitzung();
@@ -705,6 +888,9 @@ function SidelineCoreShell({
     setAktuellerBenutzer(null);
     setAktiveTeamAnsicht(null);
     setAktivesPluginId(null);
+    setAktiverPluginTab('');
+    setRuntimePluginsGeladen(false);
+    ausstehendeZielAnsichtRef.current = null;
     setTeams([]);
     setMitgliedschaften([]);
     setEinladungen([]);
@@ -794,24 +980,43 @@ function SidelineCoreShell({
 
   // --- Navigation ---
   const handleLogoKlick = () => {
-    setAktivesPluginId(null);
-    setBereich(aktiveTeamAnsicht === null ? 'sysadmin' : 'hub');
+    navigiereZuAppAnsicht({
+      bereich: aktiveTeamAnsicht === null ? 'sysadmin' : 'hub',
+      pluginId: null,
+      pluginTab: '',
+    });
   };
 
   const handleBereichWechseln = (ziel: CoreBereich) => {
-    if (ziel !== 'modul') {
-      setAktivesPluginId(null);
-    }
-    setBereich(ziel);
+    navigiereZuAppAnsicht({
+      bereich: ziel,
+      pluginId: ziel === 'modul' ? aktivesPluginId : null,
+      pluginTab: ziel === 'modul' ? aktiverPluginTab : '',
+    });
   };
 
   const handleModulOeffnen = (pluginId: PluginId) => {
     const ziel = findePlugin(aktiveTeamPlugins, pluginId);
     if (!ziel || typeof ziel.renderMainView !== 'function') return;
     const tabs = ziel.getTabs?.({ teamRolle: aktiveTeamAnsicht ?? 'PLAYER', locale }) ?? [];
-    setAktivesPluginId(pluginId);
-    setAktiverPluginTab(ziel.defaultTab ?? tabs[0]?.id ?? '');
-    setBereich('modul');
+    const zielTab = ziel.defaultTab ?? tabs[0]?.id ?? '';
+    navigiereZuAppAnsicht({
+      bereich: 'modul',
+      pluginId,
+      pluginTab: zielTab,
+    });
+  };
+
+  const handlePluginTabWechseln = (neuerTab: string) => {
+    if (!aktivesPluginId) {
+      setAktiverPluginTab(neuerTab);
+      return;
+    }
+    navigiereZuAppAnsicht({
+      bereich: 'modul',
+      pluginId: aktivesPluginId,
+      pluginTab: neuerTab,
+    });
   };
 
   const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
@@ -819,19 +1024,21 @@ function SidelineCoreShell({
     setAktiveTeamAnsicht(zielRolle);
 
     if (bereich === 'sysadmin') {
-      setAktivesPluginId(null);
-      setBereich('hub');
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
       return;
     }
     if (zielRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
-      setAktivesPluginId(null);
-      setBereich('hub');
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
       return;
     }
     if (aktivesPlugin && bereich === 'modul') {
       const erlaubteTabs = aktivesPlugin.getTabs?.({ teamRolle: zielRolle, locale }) ?? [];
       if (erlaubteTabs.length > 0 && !erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
-        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab ?? '');
+        const fallbackTab = erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab ?? '';
+        navigiereZuAppAnsicht(
+          { bereich: 'modul', pluginId: aktivesPlugin.manifest.id, pluginTab: fallbackTab },
+          { replace: true }
+        );
       }
     }
   };
@@ -1009,13 +1216,20 @@ function SidelineCoreShell({
     try {
       await coreApi.setzePluginGlobalAktiv(pluginId, zielAktiv);
       if (aktivesPluginId === pluginId && !zielAktiv) {
-        setAktivesPluginId(null);
-        setBereich('hub');
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
       }
       onGlobalModulToggle(pluginId);
       await Promise.all([synchronisiereRuntimePlugins(false), aktualisierePublicThemes()]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Globaler Plugin-Status konnte nicht gespeichert werden.');
     }
   };
@@ -1220,8 +1434,10 @@ function SidelineCoreShell({
 
   const handleDeinstallierenMitRuecksprung = (pluginId: PluginId) => {
     if (aktivesPluginId === pluginId) {
-      setAktivesPluginId(null);
-      setBereich('sysadmin');
+      navigiereZuAppAnsicht(
+        { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+        { replace: true }
+      );
     }
     onPluginDeinstallieren(pluginId);
   };
@@ -1300,6 +1516,11 @@ function SidelineCoreShell({
       ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Release-Installation fehlgeschlagen.');
     }
   };
@@ -1318,6 +1539,11 @@ function SidelineCoreShell({
       ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Offline-Paket konnte nicht installiert werden.');
     }
   };
@@ -1336,6 +1562,11 @@ function SidelineCoreShell({
       ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Dev-Git-Installation fehlgeschlagen.');
     }
   };
@@ -1351,6 +1582,11 @@ function SidelineCoreShell({
       ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Rollback fehlgeschlagen.');
     }
   };
@@ -1361,8 +1597,10 @@ function SidelineCoreShell({
     try {
       await coreApi.deinstallierePlugin(pluginId);
       if (aktivesPluginId === pluginId) {
-        setAktivesPluginId(null);
-        setBereich('sysadmin');
+        navigiereZuAppAnsicht(
+          { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
       }
       await Promise.all([
         ladeSysadminUebersicht(),
@@ -1454,13 +1692,16 @@ function SidelineCoreShell({
             aktiveTeamAnsicht,
             gewaehlteSaison: aktiveSaisonAuswahl,
             benutzer: aktuellerBenutzer,
+            userUnits: [...(aktuelleMitgliedschaft?.units ?? [])],
             locale,
             aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab || '',
-            onTabWechseln: setAktiverPluginTab,
-            onTeamSettingsOeffnen: () => {
-              setAktivesPluginId(null);
-              setBereich('team-settings');
-            },
+            onTabWechseln: handlePluginTabWechseln,
+            onTeamSettingsOeffnen: () =>
+              navigiereZuAppAnsicht({
+                bereich: 'team-settings',
+                pluginId: null,
+                pluginTab: '',
+              }),
             onZurueckZurStartseite: handleLogoKlick,
             onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
           }
@@ -1487,7 +1728,7 @@ function SidelineCoreShell({
         ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
         onLogoKlick={handleLogoKlick}
         onBereichWechseln={handleBereichWechseln}
-        onPluginTabWechseln={setAktiverPluginTab}
+        onPluginTabWechseln={handlePluginTabWechseln}
       />
 
       {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter, Demo-Konto & Abmelden */}
@@ -1776,7 +2017,9 @@ function SidelineCoreShell({
           aktivesPlugin &&
           typeof aktivesPlugin.renderMainView === 'function' &&
           pluginLaufzeitKontext ? (
-          aktivesPlugin.renderMainView(pluginLaufzeitKontext)
+          <div key={`${aktivesPlugin.manifest.id}@${aktivesPlugin.manifest.version}`}>
+            {aktivesPlugin.renderMainView(pluginLaufzeitKontext)}
+          </div>
         ) : (
           <SidelineHubView
             aktivePlugins={aktiveTeamPlugins}
