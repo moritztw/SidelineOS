@@ -4,14 +4,51 @@ import type { PluginStoreEintrag, SidelinePlugin } from '../sdk/plugin.ts';
 
 const geladenePluginCache = new Map<string, SidelinePlugin>();
 
-function istGueltigesFrontendPlugin(kandidat: unknown): kandidat is SidelinePlugin {
+function istReactKomponente(kandidat: unknown): boolean {
+  return (
+    typeof kandidat === 'function' ||
+    (typeof kandidat === 'object' && kandidat !== null && '$$typeof' in kandidat)
+  );
+}
+
+/**
+ * Prüft, ob ein geladenes Client-Bundle den verbindlichen `SidelinePlugin`-Vertrag erfüllt.
+ * Unterstützt sowohl klassische UI-Plugins (`renderMainView`) als auch Headless-/Theme- oder
+ * reine Settings-/Share-Plugins (`Provider`, `settingsPanels`, `renderPublicShareView`).
+ */
+export function istGueltigesFrontendPlugin(kandidat: unknown): kandidat is SidelinePlugin {
   if (!kandidat || typeof kandidat !== 'object') return false;
   const obj = kandidat as Partial<SidelinePlugin>;
-  return (
-    Boolean(obj.manifest?.id) &&
-    typeof obj.getTabs === 'function' &&
-    typeof obj.renderMainView === 'function'
+  if (typeof obj.manifest?.id !== 'string' || !obj.manifest.id.trim()) {
+    return false;
+  }
+
+  if (obj.Provider !== undefined && !istReactKomponente(obj.Provider)) return false;
+  if (obj.getTabs !== undefined && typeof obj.getTabs !== 'function') return false;
+  if (obj.renderMainView !== undefined && typeof obj.renderMainView !== 'function') return false;
+  if (obj.PrimaerAktion !== undefined && !istReactKomponente(obj.PrimaerAktion)) return false;
+  if (obj.renderPublicShareView !== undefined && typeof obj.renderPublicShareView !== 'function') {
+    return false;
+  }
+  if (obj.defaultTab !== undefined && typeof obj.defaultTab !== 'string') return false;
+
+  const panels = obj.settingsPanels;
+  if (panels !== undefined && (!panels || typeof panels !== 'object')) return false;
+  if (panels?.user !== undefined && !istReactKomponente(panels.user)) return false;
+  if (panels?.team !== undefined && !istReactKomponente(panels.team)) return false;
+  if (panels?.sysadmin !== undefined && !istReactKomponente(panels.sysadmin)) return false;
+
+  const hatHauptansicht = typeof obj.renderMainView === 'function';
+  const hatProvider = istReactKomponente(obj.Provider);
+  const hatPublicShare = typeof obj.renderPublicShareView === 'function';
+  const hatSettingsPanel = Boolean(
+    panels &&
+      (istReactKomponente(panels.user) ||
+        istReactKomponente(panels.team) ||
+        istReactKomponente(panels.sysadmin))
   );
+
+  return hatHauptansicht || hatProvider || hatPublicShare || hatSettingsPanel;
 }
 
 function synchronisierePluginStylesheets(eintraege: readonly RuntimePluginClientDTO[]): void {

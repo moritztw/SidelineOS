@@ -89,6 +89,7 @@ Der Plugin-Installer liest zuerst `plugin.manifest.json`, bevor Code entpackt od
 | `s3Prefix` | Nein | Relative S3-Ablage pro Team: `teams/<teamId>/<s3Prefix>` |
 | `permissions` | Ja | Liste erlaubter Least-Privilege-Scopes (siehe Abschnitt 6) |
 | `settingsAnker` | Ja | Objekt `{ user?, team?, sysadmin? }` mit `<section id="...">`-Ankern |
+| `hideHubTile` | Nein | `true` blendet die Modul-Kachel auf der Hub-Startseite aus (ideal für Headless- oder Theme-Plugins ohne eigene Hauptansicht) |
 
 ### Wann prüft der Core die Kompatibilität?
 1. **`sdkVersion` (Major.Minor):**
@@ -250,6 +251,40 @@ const plugin: SidelinePlugin = {
 };
 
 export default plugin;
+```
+
+### Headless- & Theme-Plugins (`hideHubTile`, `Provider` mit `PluginProviderKontext`)
+`defaultTab`, `getTabs` und `renderMainView` sind im `SidelinePlugin`-Vertrag **optional**. Plugins ohne eigene Hauptansicht (z. B. reine Theme-, Branding- oder Hintergrund-Plugins) setzen `hideHubTile: true` im Manifest und implementieren stattdessen einen `Provider` (und bei Bedarf `settingsPanels`):
+
+* Der Core hält `Provider` aller **global aktivierten** Plugins dauerhaft über alle Ansichten (`login`, `hub`, `modul`, `settings`, `sysadmin`) gemountet und übergibt den Live-Kontext `ctx: PluginProviderKontext` (`team`, `aktiveTeamAnsicht`, `bereich`, `routeArt`, `istGlobalAktiv`, `istFuerAktivesTeamAktiv`, `locale`, `benutzer`).
+* Möchte ein Theme-Plugin eigene Akzentfarben setzen, setzt es `document.documentElement.dataset.slThemeAccentOverride = 'true'` (und entfernt das Attribut samt eigener CSS-Tokens sauber im `useEffect`-Cleanup).
+
+```tsx
+import { useEffect } from 'react';
+import type { PluginProviderProps, SidelinePlugin } from '@sidelineos/plugin-sdk';
+import manifest from '../plugin.manifest.json';
+
+function ThemeProvider({ children, ctx }: PluginProviderProps) {
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!ctx?.istGlobalAktiv) return;
+    root.dataset.slThemeAccentOverride = 'true';
+    root.style.setProperty('--sl-accent', '#10B981');
+    return () => {
+      delete root.dataset.slThemeAccentOverride;
+      root.style.removeProperty('--sl-accent');
+    };
+  }, [ctx?.istGlobalAktiv, ctx?.team?.id]);
+
+  return <>{children}</>;
+}
+
+const themePlugin: SidelinePlugin = {
+  manifest: manifest as SidelinePlugin['manifest'],
+  Provider: ThemeProvider,
+};
+
+export default themePlugin;
 ```
 
 ### Frontend → Core/Backend-API aufrufen (wichtig: Routing & CSRF)

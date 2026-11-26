@@ -1,7 +1,9 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { UnterstuetzteSprache } from '../shared/i18n.ts';
 import type {
+  AppRouteModus,
   BenutzerKonto,
+  CoreBereich,
   PluginId,
   S3Konfiguration,
   TeamKontext,
@@ -9,7 +11,9 @@ import type {
 } from '../shared/types.ts';
 
 export type {
+  AppRouteModus,
   BenutzerKonto,
+  CoreBereich,
   PluginId,
   S3Konfiguration,
   TeamKontext,
@@ -83,6 +87,8 @@ export interface PluginManifest {
   icon: PluginIconName;
   status: 'AKTIV' | 'VORSCHAU';
   standardAktiviert: boolean;
+  /** Blendet die Kachel auf der Hub-Startseite aus (z. B. für Headless- oder reine Theme-Plugins) */
+  hideHubTile?: boolean;
   permissions: PluginPermission[];
   /** Isoliertes Datenbank-Präfix für Tabellen dieses Plugins (z. B. "mod_video_") */
   dbPrefix: string;
@@ -126,6 +132,28 @@ export interface PluginSettingsKontext {
   aktiveTeamAnsicht: TeamRolle | null;
   s3Konfig: S3Konfiguration;
   locale: string;
+}
+
+/**
+ * Laufzeit-Kontext für dauerhaft gemountete `SidelinePlugin.Provider`-Komponenten.
+ * Ermöglicht Headless- und Theme-Plugins den Zugriff auf Team-, Rollen- und Bereichs-Kontext.
+ */
+export interface PluginProviderKontext {
+  pluginId: PluginId;
+  team: TeamKontext | null;
+  aktiveTeamAnsicht: TeamRolle | null;
+  gewaehlteSaison: string | null;
+  benutzer: BenutzerKonto | null;
+  locale: string;
+  bereich: CoreBereich;
+  routeArt: AppRouteModus['art'];
+  istGlobalAktiv: boolean;
+  istFuerAktivesTeamAktiv: boolean;
+}
+
+export interface PluginProviderProps {
+  children: ReactNode;
+  ctx?: PluginProviderKontext;
 }
 
 /**
@@ -352,13 +380,13 @@ export interface SidelineBackendPlugin {
  */
 export interface SidelinePlugin {
   manifest: PluginManifest;
-  /** Optionaler State-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
-  Provider?: ComponentType<{ children: ReactNode }>;
-  defaultTab: string;
-  getTabs: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
+  /** Optionaler State-/Theme-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
+  Provider?: ComponentType<PluginProviderProps>;
+  defaultTab?: string;
+  getTabs?: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
   /** Optionale Primäraktion rechts in der TopBar (als eigenständige React-Komponente) */
   PrimaerAktion?: ComponentType<{ ctx: PluginLaufzeitKontext; className: string }>;
-  renderMainView: (ctx: PluginLaufzeitKontext) => ReactNode;
+  renderMainView?: (ctx: PluginLaufzeitKontext) => ReactNode;
   /** Optionaler öffentlicher Empfänger-View für /share/<token> ohne Anmeldung */
   renderPublicShareView?: (ctx: {
     token: string;

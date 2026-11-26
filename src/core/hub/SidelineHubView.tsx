@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type { CoreBereich, PluginId, TeamRolle } from '../../shared/types.ts';
 import type { PluginIconName, SidelinePlugin } from '../../sdk/plugin.ts';
+import { istPluginAufHubSichtbar } from '../pluginRegistry.ts';
 import { useI18n } from '../i18n/I18nContext.tsx';
 
 interface SidelineHubViewProps {
@@ -41,6 +42,7 @@ export function SidelineHubView({
 }: SidelineHubViewProps) {
   const { t } = useI18n();
   const istTeamAdmin = aktiveTeamAnsicht === 'TEAM_ADMIN';
+  const sichtbarePlugins = aktivePlugins.filter(istPluginAufHubSichtbar);
 
   return (
     <section
@@ -48,7 +50,7 @@ export function SidelineHubView({
       className="mx-auto max-w-5xl py-4 sm:py-8"
     >
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {aktivePlugins.map((plugin) => {
+        {sichtbarePlugins.map((plugin) => {
           const { manifest } = plugin;
           const Icon = ICON_MAP[manifest.icon] ?? Puzzle;
           const istVorschau = manifest.status === 'VORSCHAU';

@@ -35,6 +35,7 @@ import {
   STANDARD_INSTALLIERTE_PLUGIN_IDS,
 } from './core/pluginStoreCatalog.ts';
 import {
+  ermittlePluginProviderKontext,
   erstelleCustomPluginManifest,
   findePlugin,
   istPluginFuerTeamAktiv,
@@ -50,6 +51,7 @@ import {
 import type {
   PluginLaufzeitKontext,
   PluginManifest,
+  PluginProviderKontext,
   PluginStoreEintrag,
   SidelinePlugin,
 } from './sdk/plugin.ts';
@@ -82,19 +84,23 @@ function fehlerAusUnbekannt(err: unknown, fallback: string): ApiAktionErgebnis {
 }
 
 /**
- * Schachtelt alle optionalen React-Provider der installierten Plugins um den App-Kern,
- * sodass jedes Plugin seinen eigenen Zustand unabhängig von `App.tsx` verwaltet.
+ * Schachtelt alle optionalen React-Provider der global aktiven Plugins um die Core-Shell,
+ * sodass jedes Plugin seinen Zustand bzw. Theme-Effekte unabhängig verwaltet und Live-Kontext erhält.
  */
 function PluginProviderStack({
   plugins,
+  erzeugeKontext,
   children,
 }: {
   plugins: SidelinePlugin[];
+  erzeugeKontext?: (plugin: SidelinePlugin) => PluginProviderKontext;
   children: ReactNode;
 }) {
   return plugins.reduceRight<ReactNode>((acc, plugin) => {
     const Provider = plugin.Provider;
-    return Provider ? <Provider>{acc}</Provider> : acc;
+    if (!Provider) return acc;
+    const ctx = erzeugeKontext ? erzeugeKontext(plugin) : undefined;
+    return <Provider ctx={ctx}>{acc}</Provider>;
   }, children);
 }
 
@@ -443,6 +449,41 @@ function SidelineCoreShell({
       ).length
     : 0;
 
+  const globalAktivePlugins = useMemo(
+    () =>
+      installiertePlugins.filter((plugin) =>
+        globalAktivierteModule.includes(plugin.manifest.id)
+      ),
+    [installiertePlugins, globalAktivierteModule]
+  );
+
+  const erzeugeProviderKontext = useCallback(
+    (plugin: SidelinePlugin): PluginProviderKontext =>
+      ermittlePluginProviderKontext({
+        pluginId: plugin.manifest.id,
+        installierteIds: installiertePluginIds,
+        globalAktivierteIds: globalAktivierteModule,
+        routeArt: routeModus.art,
+        bereich,
+        locale,
+        benutzer: aktuellerBenutzer,
+        aktivesTeam,
+        aktiveTeamAnsicht,
+        gewaehlteSaison: aktiveSaisonAuswahl,
+      }),
+    [
+      installiertePluginIds,
+      globalAktivierteModule,
+      routeModus.art,
+      bereich,
+      locale,
+      aktuellerBenutzer,
+      aktivesTeam,
+      aktiveTeamAnsicht,
+      aktiveSaisonAuswahl,
+    ]
+  );
+
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -604,9 +645,10 @@ function SidelineCoreShell({
 
   const handleModulOeffnen = (pluginId: PluginId) => {
     const ziel = findePlugin(aktiveTeamPlugins, pluginId);
-    if (!ziel) return;
+    if (!ziel || typeof ziel.renderMainView !== 'function') return;
+    const tabs = ziel.getTabs?.({ teamRolle: aktiveTeamAnsicht ?? 'PLAYER', locale }) ?? [];
     setAktivesPluginId(pluginId);
-    setAktiverPluginTab(ziel.defaultTab);
+    setAktiverPluginTab(ziel.defaultTab ?? tabs[0]?.id ?? '');
     setBereich('modul');
   };
 
@@ -625,9 +667,9 @@ function SidelineCoreShell({
       return;
     }
     if (aktivesPlugin && bereich === 'modul') {
-      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: zielRolle, locale });
-      if (!erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
-        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab);
+      const erlaubteTabs = aktivesPlugin.getTabs?.({ teamRolle: zielRolle, locale }) ?? [];
+      if (erlaubteTabs.length > 0 && !erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
+        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab ?? '');
       }
     }
   };
@@ -1163,8 +1205,54 @@ function SidelineCoreShell({
     }
   };
 
-  // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
-  if (routeModus.art === 'share') {
+  const renderShellInhalt = (): ReactNode => {
+    // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
+    if (routeModus.art === 'share') {
+      if (sessionWirdGeprueft) {
+        return (
+          <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
+            {t('app.checkingSession')}
+          </div>
+        );
+      }
+      const sharePlugin = installiertePlugins.find(
+        (p) => typeof p.renderPublicShareView === 'function'
+      );
+      if (sharePlugin?.renderPublicShareView) {
+        return sharePlugin.renderPublicShareView({
+          token: routeModus.token,
+          locale,
+          onSchliessen: () => navigiereZuRoute({ art: 'app' }),
+        });
+      }
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-sl-canvas px-4 py-10 text-sl-primary">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
+            <h1 className="text-base font-semibold text-sl-heading">{t('app.noVideoPluginTitle')}</h1>
+            <p className="text-xs text-sl-muted">{t('app.noVideoPluginBody')}</p>
+            <button
+              type="button"
+              onClick={() => navigiereZuRoute({ art: 'app' })}
+              className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-canvas px-4 py-2 text-xs font-medium text-sl-heading hover:border-sl-accent"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('app.backToBrand')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (routeModus.art === 'invite') {
+      return (
+        <InviteRegisterView
+          token={routeModus.token}
+          onBeigetreten={(res) => void handleInviteBeigetreten(res)}
+          onZurueckZumLogin={() => navigiereZuRoute({ art: 'login' })}
+        />
+      );
+    }
+
     if (sessionWirdGeprueft) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
@@ -1172,81 +1260,39 @@ function SidelineCoreShell({
         </div>
       );
     }
-    const sharePlugin = installiertePlugins.find(
-      (p) => typeof p.renderPublicShareView === 'function'
-    );
-    if (sharePlugin?.renderPublicShareView) {
-      return sharePlugin.renderPublicShareView({
-        token: routeModus.token,
-        locale,
-        onSchliessen: () => navigiereZuRoute({ art: 'app' }),
-      });
+
+    if (routeModus.art === 'login' || !konto || !aktuellerBenutzer) {
+      return <LoginView onAnmelden={handleAnmelden} />;
     }
+
+    const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
+      bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null && aktivesTeam
+        ? {
+            team: aktivesTeam,
+            aktiveTeamAnsicht,
+            gewaehlteSaison: aktiveSaisonAuswahl,
+            benutzer: aktuellerBenutzer,
+            locale,
+            aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab || '',
+            onTabWechseln: setAktiverPluginTab,
+            onTeamSettingsOeffnen: () => {
+              setAktivesPluginId(null);
+              setBereich('team-settings');
+            },
+            onZurueckZurStartseite: handleLogoKlick,
+            onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
+          }
+        : null;
+
+    const pluginTabs =
+      pluginLaufzeitKontext && aktivesPlugin
+        ? aktivesPlugin.getTabs?.({
+            teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht,
+            locale,
+          }) ?? []
+        : [];
+
     return (
-      <div className="flex min-h-screen items-center justify-center bg-sl-canvas px-4 py-10 text-sl-primary">
-        <div className="w-full max-w-md space-y-4 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
-          <h1 className="text-base font-semibold text-sl-heading">{t('app.noVideoPluginTitle')}</h1>
-          <p className="text-xs text-sl-muted">{t('app.noVideoPluginBody')}</p>
-          <button
-            type="button"
-            onClick={() => navigiereZuRoute({ art: 'app' })}
-            className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-canvas px-4 py-2 text-xs font-medium text-sl-heading hover:border-sl-accent"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            {t('app.backToBrand')}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (routeModus.art === 'invite') {
-    return (
-      <InviteRegisterView
-        token={routeModus.token}
-        onBeigetreten={(res) => void handleInviteBeigetreten(res)}
-        onZurueckZumLogin={() => navigiereZuRoute({ art: 'login' })}
-      />
-    );
-  }
-
-  if (sessionWirdGeprueft) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
-        {t('app.checkingSession')}
-      </div>
-    );
-  }
-
-  if (routeModus.art === 'login' || !konto || !aktuellerBenutzer) {
-    return <LoginView onAnmelden={handleAnmelden} />;
-  }
-
-  const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
-    bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null && aktivesTeam
-      ? {
-          team: aktivesTeam,
-          aktiveTeamAnsicht,
-          gewaehlteSaison: aktiveSaisonAuswahl,
-          benutzer: aktuellerBenutzer,
-          locale,
-          aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab,
-          onTabWechseln: setAktiverPluginTab,
-          onTeamSettingsOeffnen: () => {
-            setAktivesPluginId(null);
-            setBereich('team-settings');
-          },
-          onZurueckZurStartseite: handleLogoKlick,
-          onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
-        }
-      : null;
-
-  const pluginTabs =
-    pluginLaufzeitKontext && aktivesPlugin
-      ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht, locale })
-      : [];
-
-  return (
     <div className="min-h-screen bg-sl-canvas text-sl-primary">
       <CoreTopBar
         bereich={bereich}
@@ -1535,7 +1581,10 @@ function SidelineCoreShell({
             onEinladungTesten={(token) => navigiereZuRoute({ art: 'invite', token })}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
-        ) : bereich === 'modul' && aktivesPlugin && pluginLaufzeitKontext ? (
+        ) : bereich === 'modul' &&
+          aktivesPlugin &&
+          typeof aktivesPlugin.renderMainView === 'function' &&
+          pluginLaufzeitKontext ? (
           aktivesPlugin.renderMainView(pluginLaufzeitKontext)
         ) : (
           <SidelineHubView
@@ -1548,6 +1597,16 @@ function SidelineCoreShell({
         )}
       </main>
     </div>
+    );
+  };
+
+  return (
+    <PluginProviderStack
+      plugins={globalAktivePlugins}
+      erzeugeKontext={erzeugeProviderKontext}
+    >
+      {renderShellInhalt()}
+    </PluginProviderStack>
   );
 }
 
@@ -1631,22 +1690,20 @@ export default function App() {
 
   return (
     <I18nProvider>
-      <PluginProviderStack plugins={installiertePlugins}>
-        <SidelineCoreShell
-          storeKatalog={storeKatalog}
-          installiertePlugins={installiertePlugins}
-          installiertePluginIds={installiertePluginIds}
-          globalAktivierteModule={globalAktivierteModule}
-          onPluginInstallieren={handlePluginInstallieren}
-          onPluginDeinstallieren={handlePluginDeinstallieren}
-          onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
-          onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
-          onGlobalModulToggle={handleGlobalModulToggle}
-          onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
-          onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
-          onRuntimeBundlesSynchronisieren={handleRuntimeBundlesSynchronisieren}
-        />
-      </PluginProviderStack>
+      <SidelineCoreShell
+        storeKatalog={storeKatalog}
+        installiertePlugins={installiertePlugins}
+        installiertePluginIds={installiertePluginIds}
+        globalAktivierteModule={globalAktivierteModule}
+        onPluginInstallieren={handlePluginInstallieren}
+        onPluginDeinstallieren={handlePluginDeinstallieren}
+        onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
+        onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
+        onGlobalModulToggle={handleGlobalModulToggle}
+        onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
+        onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
+        onRuntimeBundlesSynchronisieren={handleRuntimeBundlesSynchronisieren}
+      />
     </I18nProvider>
   );
 }

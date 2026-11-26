@@ -1,5 +1,5 @@
-import type { PluginId } from '../shared/types.ts';
-import type { PluginManifest, SidelinePlugin } from '../sdk/plugin.ts';
+import type { AppRouteModus, BenutzerKonto, CoreBereich, PluginId, TeamKontext, TeamRolle } from '../shared/types.ts';
+import type { PluginManifest, PluginProviderKontext, SidelinePlugin } from '../sdk/plugin.ts';
 
 /**
  * Ein Plugin ist für ein Team nur verfügbar, wenn es sowohl instanzweit (installiert & aktiv)
@@ -16,6 +16,79 @@ export function istPluginFuerTeamAktiv(
     globalAktivierteIds.includes(pluginId) &&
     teamAktivierteIds.includes(pluginId)
   );
+}
+
+/**
+ * Ein Plugin erscheint nur auf der Hub-Startseite, wenn es eine Hauptansicht bereitstellt
+ * und `manifest.hideHubTile` nicht auf `true` gesetzt ist.
+ */
+export function istPluginAufHubSichtbar(plugin: SidelinePlugin): boolean {
+  return !plugin.manifest.hideHubTile && typeof plugin.renderMainView === 'function';
+}
+
+export interface ErmittlePluginProviderKontextEingabe {
+  pluginId: PluginId;
+  installierteIds: readonly PluginId[];
+  globalAktivierteIds: readonly PluginId[];
+  routeArt: AppRouteModus['art'];
+  bereich: CoreBereich;
+  locale: string;
+  benutzer: BenutzerKonto | null;
+  aktivesTeam: TeamKontext | null;
+  aktiveTeamAnsicht: TeamRolle | null;
+  gewaehlteSaison: string | null;
+}
+
+/**
+ * Berechnet den Live-Kontext (`PluginProviderKontext`) für dauerhaft gemountete
+ * `SidelinePlugin.Provider`-Komponenten über alle Routen und Bereiche hinweg.
+ */
+export function ermittlePluginProviderKontext(
+  eingabe: ErmittlePluginProviderKontextEingabe
+): PluginProviderKontext {
+  const istGlobalAktiv =
+    eingabe.installierteIds.includes(eingabe.pluginId) &&
+    eingabe.globalAktivierteIds.includes(eingabe.pluginId);
+
+  const hatAktivenTeamScope =
+    eingabe.routeArt === 'app' &&
+    Boolean(eingabe.benutzer) &&
+    eingabe.bereich !== 'sysadmin' &&
+    eingabe.aktiveTeamAnsicht !== null &&
+    eingabe.aktivesTeam !== null;
+
+  if (!hatAktivenTeamScope || !eingabe.aktivesTeam) {
+    return {
+      pluginId: eingabe.pluginId,
+      team: null,
+      aktiveTeamAnsicht: null,
+      gewaehlteSaison: null,
+      benutzer: eingabe.benutzer,
+      locale: eingabe.locale,
+      bereich: eingabe.bereich,
+      routeArt: eingabe.routeArt,
+      istGlobalAktiv,
+      istFuerAktivesTeamAktiv: false,
+    };
+  }
+
+  return {
+    pluginId: eingabe.pluginId,
+    team: eingabe.aktivesTeam,
+    aktiveTeamAnsicht: eingabe.aktiveTeamAnsicht,
+    gewaehlteSaison: eingabe.gewaehlteSaison ?? eingabe.aktivesTeam.aktiveSaison,
+    benutzer: eingabe.benutzer,
+    locale: eingabe.locale,
+    bereich: eingabe.bereich,
+    routeArt: eingabe.routeArt,
+    istGlobalAktiv,
+    istFuerAktivesTeamAktiv: istPluginFuerTeamAktiv(
+      eingabe.pluginId,
+      eingabe.installierteIds,
+      eingabe.globalAktivierteIds,
+      eingabe.aktivesTeam.aktivierteModule
+    ),
+  };
 }
 
 /**

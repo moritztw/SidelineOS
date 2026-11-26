@@ -380,6 +380,7 @@ export function validierePluginManifest(
         : 'puzzle',
     status: m.status === 'AKTIV' ? 'AKTIV' : 'VORSCHAU',
     standardAktiviert: Boolean(m.standardAktiviert),
+    ...(typeof m.hideHubTile === 'boolean' ? { hideHubTile: m.hideHubTile } : {}),
     permissions: Array.from(new Set(permissions)),
     dbPrefix,
     ...(typeof m.s3Prefix === 'string' && m.s3Prefix.trim()
