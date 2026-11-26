@@ -82,21 +82,21 @@ export function SettingsShell({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg border border-[#232933] bg-[#13171D] p-5">
+      <section className="rounded-lg border border-sl-border bg-sl-surface p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             {onZurueck && (
               <button
                 type="button"
                 onClick={onZurueck}
-                className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-[#8B949E] transition-colors hover:text-[#F59E0B]"
+                className="mb-2 inline-flex items-center gap-1.5 text-xs font-medium text-sl-muted transition-colors hover:text-sl-accent"
               >
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
                 {zurueckLabel ?? t('settingsShell.allSettings')}
               </button>
             )}
-            <h1 className="text-lg font-semibold text-white">{titel}</h1>
-            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-[#8B949E]">{untertitel}</p>
+            <h1 className="text-lg font-semibold text-sl-heading">{titel}</h1>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-sl-muted">{untertitel}</p>
           </div>
           {kopfAktion && <div className="shrink-0">{kopfAktion}</div>}
         </div>
@@ -116,13 +116,13 @@ export function SettingsShell({
               onClick={() => springeZu(kat.id)}
               className={`rounded-md border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
                 aktiv
-                  ? 'border-[#F59E0B] bg-[#F59E0B]/10 text-[#F59E0B]'
-                  : 'border-[#232933] bg-[#13171D] text-[#8B949E] hover:text-white'
+                  ? 'border-sl-accent bg-sl-accent/10 text-sl-accent'
+                  : 'border-sl-border bg-sl-surface text-sl-muted hover:text-sl-heading'
               }`}
             >
               {kat.label}
               {kat.badge !== undefined && kat.badge > 0 && (
-                <span className="ml-1.5 font-mono text-[10px] text-[#F59E0B]">({kat.badge})</span>
+                <span className="ml-1.5 font-mono text-[10px] text-sl-accent">({kat.badge})</span>
               )}
             </button>
           );
@@ -133,12 +133,12 @@ export function SettingsShell({
         {/* Offenes, dauerhaft sichtbares sticky Seitenmenü */}
         <aside
           aria-label={t('settingsShell.sideNavAria')}
-          className="hidden lg:sticky lg:top-20 lg:block rounded-lg border border-[#232933] bg-[#13171D] p-3"
+          className="hidden lg:sticky lg:top-20 lg:block rounded-lg border border-sl-border bg-sl-surface p-3"
         >
           <div className="space-y-4">
             {gruppen.map((gruppe) => (
               <div key={gruppe} className="space-y-1">
-                <div className="px-2.5 py-1 text-[11px] font-semibold text-[#6E7681]">
+                <div className="px-2.5 py-1 text-[11px] font-semibold text-sl-subtle">
                   {gruppe}
                 </div>
                 <ul className="space-y-0.5">
@@ -153,13 +153,13 @@ export function SettingsShell({
                             onClick={() => springeZu(kat.id)}
                             className={`flex w-full items-center justify-between gap-2 rounded-md border-l-2 px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
                               aktiv
-                                ? 'border-[#F59E0B] bg-[#0B0E11] text-white'
-                                : 'border-transparent text-[#8B949E] hover:bg-[#0B0E11]/60 hover:text-[#E6EDF3]'
+                                ? 'border-sl-accent bg-sl-canvas text-sl-heading'
+                                : 'border-transparent text-sl-muted hover:bg-sl-canvas/60 hover:text-sl-primary'
                             }`}
                           >
                             <span className="truncate">{kat.label}</span>
                             {kat.badge !== undefined && kat.badge > 0 && (
-                              <span className="font-mono text-[10px] font-semibold text-[#F59E0B] tabular-nums">
+                              <span className="font-mono text-[10px] font-semibold text-sl-accent tabular-nums">
                                 {kat.badge}
                               </span>
                             )}

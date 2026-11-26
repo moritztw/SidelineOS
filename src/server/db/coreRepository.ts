@@ -10,6 +10,11 @@ import type {
   TeamRolle,
 } from '../../shared/types.ts';
 import { normalisiereSprache } from '../../shared/i18n.ts';
+import {
+  STANDARD_THEME_REF,
+  SYSTEM_THEME_SETTING_KEY,
+  parseThemeRef,
+} from '../../shared/theme.ts';
 import type { PluginManifest, PluginStoreEintrag } from '../../sdk/plugin.ts';
 import type { CoreDatabaseClient } from './client.ts';
 
@@ -54,11 +59,16 @@ interface UserRow {
   position: string;
   is_sysadmin: boolean;
   preferred_locale?: string;
+  preferred_theme?: string;
   custom_profile_values: unknown;
   created_at: unknown;
 }
 
 function mapUserRow(row: UserRow): DbBenutzerMitHash {
+  const cleanTheme =
+    typeof row.preferred_theme === 'string' && row.preferred_theme.trim()
+      ? row.preferred_theme.trim()
+      : undefined;
   return {
     passwordHash: row.password_hash,
     konto: {
@@ -72,6 +82,7 @@ function mapUserRow(row: UserRow): DbBenutzerMitHash {
       istSysadmin: Boolean(row.is_sysadmin),
       erstelltAm: toIsoDate(row.created_at),
       preferredLocale: normalisiereSprache(row.preferred_locale, 'de'),
+      ...(cleanTheme ? { preferredTheme: cleanTheme } : {}),
       customProfilWerte: parseJsonWert<Record<string, string>>(row.custom_profile_values, {}),
     },
   };
@@ -92,7 +103,7 @@ export class CoreRepository {
   async listeBenutzer(): Promise<BenutzerKonto[]> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        ORDER BY created_at ASC, full_name ASC`
     );
@@ -104,7 +115,7 @@ export class CoreRepository {
     if (!norm) return null;
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        WHERE LOWER(email) = $1 OR LOWER(username) = $1
        LIMIT 1`,
@@ -116,7 +127,7 @@ export class CoreRepository {
   async findeBenutzerNachUuid(uuid: string): Promise<DbBenutzerMitHash | null> {
     const res = await this.db.query<UserRow>(
       `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, custom_profile_values, created_at
+              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
        FROM core.users
        WHERE uuid = $1
        LIMIT 1`,
@@ -144,10 +155,10 @@ export class CoreRepository {
     const res = await this.db.query<UserRow>(
       `INSERT INTO core.users (
          uuid, username, full_name, email, password_hash,
-         phone, jersey_number, position, is_sysadmin, preferred_locale, custom_profile_values, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+         phone, jersey_number, position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -159,6 +170,7 @@ export class CoreRepository {
         konto.position ?? '',
         konto.istSysadmin,
         normalisiereSprache(konto.preferredLocale, 'de'),
+        konto.preferredTheme?.trim() ?? '',
         JSON.stringify(konto.customProfilWerte ?? {}),
         konto.erstelltAm || new Date().toISOString().slice(0, 10),
       ]
@@ -177,11 +189,12 @@ export class CoreRepository {
            position = $7,
            is_sysadmin = $8,
            preferred_locale = $9,
-           custom_profile_values = $10::jsonb,
+           preferred_theme = $10,
+           custom_profile_values = $11::jsonb,
            updated_at = NOW()
        WHERE uuid = $1
        RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, custom_profile_values, created_at`,
+                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
       [
         konto.uuid,
         konto.benutzername.trim().toLowerCase(),
@@ -192,6 +205,7 @@ export class CoreRepository {
         konto.position ?? '',
         konto.istSysadmin,
         normalisiereSprache(konto.preferredLocale, 'de'),
+        konto.preferredTheme?.trim() ?? '',
         JSON.stringify(konto.customProfilWerte ?? {}),
       ]
     );
@@ -446,6 +460,57 @@ export class CoreRepository {
     await this.db.query(`DELETE FROM core.memberships WHERE id = $1`, [mitgliedschaftId]);
   }
 
+  async setzeBenutzerMitgliedschaften(
+    userUuid: string,
+    gewuenschte: Array<{
+      teamId: string;
+      rolle: TeamRolle;
+      units: SpielerUnit[];
+      status: 'AKTIV' | 'WARTET_AUF_FREIGABE';
+    }>
+  ): Promise<TeamMitgliedschaft[]> {
+    const heute = new Date().toISOString().slice(0, 10);
+    await this.db.transaction(async (tx) => {
+      const bestehendRes = await tx.query<{
+        id: string;
+        team_id: string;
+        joined_at: unknown;
+      }>(`SELECT id, team_id, joined_at FROM core.memberships WHERE user_uuid = $1`, [userUuid]);
+      const bestehendNachTeam = new Map(bestehendRes.rows.map((r) => [r.team_id, r]));
+      const zielTeamIds = new Set(gewuenschte.map((g) => g.teamId));
+
+      for (const alt of bestehendRes.rows) {
+        if (!zielTeamIds.has(alt.team_id)) {
+          await tx.query(`DELETE FROM core.memberships WHERE id = $1`, [alt.id]);
+        }
+      }
+
+      for (const eintrag of gewuenschte) {
+        const alt = bestehendNachTeam.get(eintrag.teamId);
+        const id = alt?.id ?? `mem-${crypto.randomUUID()}`;
+        const joinedAt = alt ? toIsoDate(alt.joined_at) : heute;
+        await tx.query(
+          `INSERT INTO core.memberships (id, user_uuid, team_id, role, units, status, joined_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+           ON CONFLICT (user_uuid, team_id) DO UPDATE
+           SET role = EXCLUDED.role, units = EXCLUDED.units, status = EXCLUDED.status`,
+          [
+            id,
+            userUuid,
+            eintrag.teamId,
+            eintrag.rolle,
+            JSON.stringify(eintrag.units),
+            eintrag.status,
+            joinedAt,
+          ]
+        );
+      }
+    });
+
+    const alle = await this.listeMitgliedschaften();
+    return alle.filter((m) => m.userUuid === userUuid);
+  }
+
   // --- Einladungen ---
 
   async listeEinladungen(teamId?: string): Promise<TeamEinladung[]> {
@@ -584,15 +649,17 @@ export class CoreRepository {
   }): Promise<void> {
     const bestehend = await this.findePluginStatus(params.manifest.id);
     const previousVersion =
-      bestehend && bestehend.installedVersion !== params.manifest.version
-        ? bestehend.installedVersion
-        : bestehend?.previousVersion ?? null;
+      params.installMode === 'DEV_GIT'
+        ? null
+        : bestehend && bestehend.installedVersion !== params.manifest.version
+          ? bestehend.installedVersion
+          : bestehend?.previousVersion ?? null;
 
     await this.db.query(
       `INSERT INTO core.installed_plugins (
          plugin_id, manifest_json, source, release_tag, enabled_globally,
-         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error
-       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error, installed_at
+       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NOW())
        ON CONFLICT (plugin_id) DO UPDATE SET
          manifest_json = EXCLUDED.manifest_json,
          source = EXCLUDED.source,
@@ -602,7 +669,8 @@ export class CoreRepository {
          install_mode = EXCLUDED.install_mode,
          package_sha256 = EXCLUDED.package_sha256,
          dev_branch = EXCLUDED.dev_branch,
-         last_error = NULL`,
+         last_error = NULL,
+         installed_at = NOW()`,
       [
         params.manifest.id,
         JSON.stringify(params.manifest),
@@ -629,6 +697,8 @@ export class CoreRepository {
       installMode: string;
       packageSha256: string | null;
       devBranch: string | null;
+      installedAt: string;
+      lastError: string | null;
     }>
   > {
     const res = await this.db.query<{
@@ -641,9 +711,12 @@ export class CoreRepository {
       install_mode: string;
       package_sha256: string | null;
       dev_branch: string | null;
+      installed_at: unknown;
+      last_error: string | null;
     }>(
       `SELECT manifest_json, enabled_globally, source, release_tag,
-              installed_version, previous_version, install_mode, package_sha256, dev_branch
+              installed_version, previous_version, install_mode, package_sha256, dev_branch,
+              installed_at, last_error
        FROM core.installed_plugins
        ORDER BY installed_at ASC`
     );
@@ -659,6 +732,11 @@ export class CoreRepository {
         installMode: r.install_mode || 'CATALOG',
         packageSha256: r.package_sha256 ?? null,
         devBranch: r.dev_branch ?? null,
+        installedAt:
+          r.installed_at instanceof Date
+            ? r.installed_at.toISOString()
+            : String(r.installed_at ?? ''),
+        lastError: r.last_error ?? null,
       };
     });
   }
@@ -671,6 +749,8 @@ export class CoreRepository {
     installMode: string;
     source: string;
     releaseTag: string;
+    installedAt: string;
+    lastError: string | null;
   } | null> {
     const res = await this.db.query<{
       manifest_json: unknown;
@@ -680,8 +760,11 @@ export class CoreRepository {
       install_mode: string;
       source: string;
       release_tag: string;
+      installed_at: unknown;
+      last_error: string | null;
     }>(
-      `SELECT manifest_json, enabled_globally, installed_version, previous_version, install_mode, source, release_tag
+      `SELECT manifest_json, enabled_globally, installed_version, previous_version,
+              install_mode, source, release_tag, installed_at, last_error
        FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
       [pluginId]
     );
@@ -696,6 +779,11 @@ export class CoreRepository {
       installMode: r.install_mode || 'CATALOG',
       source: r.source,
       releaseTag: r.release_tag,
+      installedAt:
+        r.installed_at instanceof Date
+          ? r.installed_at.toISOString()
+          : String(r.installed_at ?? ''),
+      lastError: r.last_error ?? null,
     };
   }
 
@@ -710,9 +798,18 @@ export class CoreRepository {
        SET manifest_json = $2::jsonb,
            installed_version = $3,
            release_tag = $4,
-           previous_version = NULL
+           previous_version = NULL,
+           last_error = NULL,
+           installed_at = NOW()
        WHERE plugin_id = $1`,
       [pluginId, JSON.stringify(manifest), zielVersion, releaseTag]
+    );
+  }
+
+  async speicherePluginFehler(pluginId: string, fehler: string | null): Promise<void> {
+    await this.db.query(
+      `UPDATE core.installed_plugins SET last_error = $2 WHERE plugin_id = $1`,
+      [pluginId, fehler]
     );
   }
 
@@ -768,6 +865,26 @@ export class CoreRepository {
        SET value_json = EXCLUDED.value_json, updated_at = NOW()`,
       [key, JSON.stringify(value)]
     );
+  }
+
+  async holeStandardThemeRef(): Promise<string> {
+    const gespeicherte = await this.holeSystemSetting<{ themeRef?: unknown }>(
+      SYSTEM_THEME_SETTING_KEY
+    );
+    const parsed = parseThemeRef(gespeicherte?.themeRef);
+    if (!parsed) return STANDARD_THEME_REF;
+    return parsed.typ === 'core'
+      ? STANDARD_THEME_REF
+      : `${parsed.pluginId}:${parsed.themeId}`;
+  }
+
+  async speichereStandardThemeRef(themeRef: string): Promise<string> {
+    const parsed = parseThemeRef(themeRef);
+    const normalisiert = !parsed || parsed.typ === 'core'
+      ? STANDARD_THEME_REF
+      : `${parsed.pluginId}:${parsed.themeId}`;
+    await this.speichereSystemSetting(SYSTEM_THEME_SETTING_KEY, { themeRef: normalisiert });
+    return normalisiert;
   }
 
   // --- Benachrichtigungen (In-App-Standardkanal) ---

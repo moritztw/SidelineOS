@@ -1,0 +1,6 @@
+{
+  "summary": "Implementierungsplan für die offenen DEV-Issues #16 (Browser-History mit sprechenden Pfaden), #17 (zuverlässiges Git-Pull-Update & Live-Reload für Dev-Plugins) und #18 (Public-Share S3 Read-Only-Signierung & userUnits im Plugin-SDK v1.0) inklusive Kompatibilitätsschutz für bestehende Plugins.",
+  "updatedAt": "2026-11-26T10:34:16.193965014Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

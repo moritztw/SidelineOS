@@ -1,11 +1,20 @@
 import { Router, type Request, type Response } from 'express';
-import type { S3MultipartPartRef } from '../../sdk/plugin.ts';
+import type {
+  PluginPublicKontext,
+  PluginPublicS3ReadScope,
+  PluginPublicSignedDownloadFn,
+  PluginPublicSignedDownloadParams,
+  S3MultipartPartRef,
+} from '../../sdk/plugin.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import type { PluginBackendHost } from '../plugins/backendHost.ts';
 import type { NotificationService } from '../services/notificationService.ts';
-import type { S3BrokerService } from '../services/s3Broker.ts';
+import {
+  ermittleTeamPluginPrefix,
+  type S3BrokerService,
+} from '../services/s3Broker.ts';
 import type { S3CleanupService } from '../services/s3CleanupService.ts';
 
 function normalisiereSubPfad(rawParam: unknown): string {
@@ -371,6 +380,7 @@ export function erstellePluginGatewayRouter(
       user: req.coreAuth!.user,
       team,
       teamRolle: aktiv.rolle,
+      userUnits: aktiv.units,
     });
 
     const ergebnis = await plugin.handleRequest(
@@ -420,6 +430,83 @@ export function erstellePluginGatewayRouter(
     }
 
     const dbScope = pluginHost.erstelleDbScope(pluginId);
+
+    const hatPublicS3Leserecht =
+      Boolean(s3Broker) && plugin.manifest.permissions.includes('s3:team-rw');
+
+    const signiereOeffentlichenTeamDownload = async (
+      teamIdRaw: string,
+      objectPath: string,
+      expiresInSeconds?: number
+    ): Promise<{ url: string; key: string; expiresIn: number }> => {
+      if (!s3Broker || !hatPublicS3Leserecht) {
+        throw new Error(
+          `Plugin "${pluginId}" besitzt keine Berechtigung für öffentliche S3-Downloads.`
+        );
+      }
+      const cleanTeamId = typeof teamIdRaw === 'string' ? teamIdRaw.trim() : '';
+      if (!cleanTeamId || !/^[a-zA-Z0-9_-]+$/.test(cleanTeamId)) {
+        throw new Error('Ungültige Team-ID für öffentlichen S3-Download.');
+      }
+      const zielTeam = await repo.findeTeamNachId(cleanTeamId);
+      if (!zielTeam) {
+        throw new Error('Ziel-Team für öffentlichen S3-Download existiert nicht.');
+      }
+      const modulFuerTeamAktiv = await repo.istTeamModulAktiv(cleanTeamId, pluginId);
+      if (!modulFuerTeamAktiv) {
+        throw new Error(
+          `Modul "${pluginId}" ist für Team "${cleanTeamId}" nicht freigeschaltet.`
+        );
+      }
+      const gekappteAblaufzeit =
+        typeof expiresInSeconds === 'number' && Number.isFinite(expiresInSeconds)
+          ? Math.max(60, Math.min(3600, Math.floor(expiresInSeconds)))
+          : 900;
+
+      return s3Broker.erzeugePresignedDownloadUrl({
+        teamId: cleanTeamId,
+        pluginId,
+        manifest: plugin.manifest,
+        objectPath,
+        expiresInSeconds: gekappteAblaufzeit,
+      });
+    };
+
+    const getSignedDownloadUrlForTeam: PluginPublicSignedDownloadFn = (
+      arg1: PluginPublicSignedDownloadParams | string,
+      objectPathArg?: string,
+      expiresInArg?: number
+    ) => {
+      if (typeof arg1 === 'object' && arg1 !== null) {
+        return signiereOeffentlichenTeamDownload(
+          arg1.teamId,
+          arg1.objectPath,
+          arg1.expiresInSeconds
+        );
+      }
+      return signiereOeffentlichenTeamDownload(arg1, objectPathArg ?? '', expiresInArg);
+    };
+
+    const createTeamS3ReadScope = (teamId: string): PluginPublicS3ReadScope => {
+      const prefix = ermittleTeamPluginPrefix(teamId, pluginId, plugin.manifest.s3Prefix);
+      return {
+        prefix,
+        getSignedDownloadUrl: ({ objectPath, expiresInSeconds }) =>
+          signiereOeffentlichenTeamDownload(teamId, objectPath, expiresInSeconds),
+      };
+    };
+
+    const publicCtx: PluginPublicKontext = {
+      pluginId,
+      manifest: plugin.manifest,
+      ...(hatPublicS3Leserecht
+        ? {
+            createTeamS3ReadScope,
+            getSignedDownloadUrlForTeam,
+          }
+        : {}),
+    };
+
     const ergebnis = await plugin.handlePublicRequest(
       {
         method: req.method,
@@ -427,7 +514,8 @@ export function erstellePluginGatewayRouter(
         query: req.query as Record<string, unknown>,
         body: req.body,
       },
-      dbScope
+      dbScope,
+      publicCtx
     );
 
     res.status(ergebnis.status).json(ergebnis.body);

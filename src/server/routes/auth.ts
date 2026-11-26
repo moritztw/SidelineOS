@@ -17,6 +17,7 @@ import {
   hashSessionToken,
   pruefePasswort,
 } from '../security.ts';
+import { validiereThemeAuswahlFuerInstanz } from '../services/themeService.ts';
 
 const MIN_PASSWORT_LAENGE = 10;
 
@@ -60,11 +61,15 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
       await repo.erstelleSession(treffer.konto.uuid, tokenHash, config.sessionTtlStunden);
       setzeSessionCookie(res, req, config, rawToken);
 
-      const { memberships, teams } = await ladeUserKontext(repo, treffer.konto.uuid);
+      const [{ memberships, teams }, instanceDefaultTheme] = await Promise.all([
+        ladeUserKontext(repo, treffer.konto.uuid),
+        repo.holeStandardThemeRef(),
+      ]);
       res.status(200).json({
         user: treffer.konto,
         memberships,
         teams,
+        instanceDefaultTheme,
         token: rawToken,
       });
     } catch (err) {
@@ -89,8 +94,11 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
   router.get('/me', auth, async (req, res, next) => {
     try {
       const user = req.coreAuth!.user;
-      const { memberships, teams } = await ladeUserKontext(repo, user.uuid);
-      res.status(200).json({ user, memberships, teams });
+      const [{ memberships, teams }, instanceDefaultTheme] = await Promise.all([
+        ladeUserKontext(repo, user.uuid),
+        repo.holeStandardThemeRef(),
+      ]);
+      res.status(200).json({ user, memberships, teams, instanceDefaultTheme });
     } catch (err) {
       next(err);
     }
@@ -163,6 +171,18 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
         naechsteSprache = body.preferredLocale;
       }
 
+      let naechstesTheme = aktuell.preferredTheme;
+      if (body.preferredTheme !== undefined) {
+        const pruefung = await validiereThemeAuswahlFuerInstanz(repo, body.preferredTheme, {
+          erlaubeLeer: true,
+        });
+        if (!pruefung.ok) {
+          res.status(pruefung.status).json({ fehler: pruefung.fehler });
+          return;
+        }
+        naechstesTheme = pruefung.themeRef;
+      }
+
       const aktualisiert = await repo.aktualisiereBenutzer({
         ...aktuell,
         benutzername: neuerUsername,
@@ -173,6 +193,7 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
           typeof body.trikotNummer === 'string' ? body.trikotNummer.trim() : aktuell.trikotNummer,
         position: typeof body.position === 'string' ? body.position.trim() : aktuell.position,
         preferredLocale: naechsteSprache,
+        preferredTheme: naechstesTheme,
         customProfilWerte,
       });
 

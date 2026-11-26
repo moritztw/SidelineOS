@@ -321,7 +321,7 @@ export function TeamSettingsPage({
       {aktionFehler && (
         <div
           role="alert"
-          className="rounded-lg border border-[#DC2626]/50 bg-[#DC2626]/10 px-4 py-2.5 text-xs text-[#FCA5A5]"
+          className="rounded-lg border border-sl-danger/50 bg-sl-danger/10 px-4 py-2.5 text-xs text-sl-danger-text"
         >
           {aktionFehler}
         </div>
@@ -329,55 +329,55 @@ export function TeamSettingsPage({
       {/* 1. Team-Profil, Saisons & Farben */}
       <section
         id="team-profil"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
+        className="scroll-mt-20 rounded-lg border border-sl-border bg-sl-surface p-5 space-y-5"
       >
-        <div className="border-b border-[#232933] pb-3">
-          <h2 className="text-sm font-semibold text-white">Team-Profil, Saisons &amp; Farben</h2>
-          <p className="mt-0.5 text-xs text-[#8B949E]">
+        <div className="border-b border-sl-border pb-3">
+          <h2 className="text-sm font-semibold text-sl-heading">Team-Profil, Saisons &amp; Farben</h2>
+          <p className="mt-0.5 text-xs text-sl-muted">
             Das Team bleibt saisonübergreifend bestehen – Kader, Wörterbücher und alte Spielzeiten
             gehen beim Saisonwechsel nicht verloren.
           </p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="space-y-1 text-xs text-[#8B949E] sm:col-span-2">
+          <label className="space-y-1 text-xs text-sl-muted sm:col-span-2">
             <span>Teamname</span>
             <input
               type="text"
               value={teamName}
               onChange={(e) => setTeamName(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>Aktuelle Saison</span>
             <select
               value={aktiveSaison}
               onChange={(e) => setAktiveSaison(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 font-mono text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 font-mono text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             >
               {team.saisons.map((s) => (
-                <option key={s} value={s} className="bg-[#13171D]">
+                <option key={s} value={s} className="bg-sl-surface">
                   {s}
                 </option>
               ))}
             </select>
           </label>
-          <label className="space-y-1 text-xs text-[#8B949E]">
+          <label className="space-y-1 text-xs text-sl-muted">
             <span>Kurzname / Bereich</span>
             <input
               type="text"
               value={kurzname}
               onChange={(e) => setKurzname(e.target.value)}
-              className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-2 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-2 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
             />
           </label>
         </div>
 
-        <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
+        <div className="rounded-md border border-sl-border bg-sl-canvas p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2 text-xs font-semibold text-white">
-              <Calendar className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+            <div className="inline-flex items-center gap-2 text-xs font-semibold text-sl-heading">
+              <Calendar className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
               Saisons im Team ({team.saisons.length})
             </div>
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
@@ -386,8 +386,8 @@ export function TeamSettingsPage({
                   key={s}
                   className={`rounded border px-2 py-0.5 ${
                     s === team.aktiveSaison
-                      ? 'border-[#F59E0B]/50 bg-[#F59E0B]/10 text-[#F59E0B]'
-                      : 'border-[#232933] bg-[#13171D] text-[#8B949E]'
+                      ? 'border-sl-accent/50 bg-sl-accent/10 text-sl-accent'
+                      : 'border-sl-border bg-sl-surface text-sl-muted'
                   }`}
                 >
                   {s} {s === team.aktiveSaison ? '(Aktuell)' : '(Archiv)'}
@@ -402,37 +402,37 @@ export function TeamSettingsPage({
               value={neueSaisonEingabe}
               onChange={(e) => setNeueSaisonEingabe(e.target.value)}
               placeholder="Neue Saison (z. B. 2027)"
-              className="w-48 rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 font-mono text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+              className="w-48 rounded border border-sl-border bg-sl-surface px-3 py-1.5 font-mono text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
             <button
               type="button"
               onClick={handleNeueSaison}
-              className="inline-flex items-center gap-1.5 rounded border border-[#232933] bg-[#1E2530] px-3 py-1.5 text-xs font-medium text-white hover:border-[#F59E0B]"
+              className="inline-flex items-center gap-1.5 rounded border border-sl-border bg-sl-elevated px-3 py-1.5 text-xs font-medium text-sl-heading hover:border-sl-accent"
             >
-              <Plus className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+              <Plus className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
               Neue Saison starten
             </button>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-          <label className="flex items-center gap-2.5 text-xs text-[#8B949E]">
+          <label className="flex items-center gap-2.5 text-xs text-sl-muted">
             <span>Primäre Teamfarbe</span>
             <input
               type="color"
               value={primaerFarbe}
               onChange={(e) => setPrimaerFarbe(e.target.value)}
-              className="h-7 w-10 cursor-pointer rounded border border-[#232933] bg-[#0B0E11]"
+              className="h-7 w-10 cursor-pointer rounded border border-sl-border bg-sl-canvas"
             />
-            <span className="font-mono text-[#E6EDF3]">{primaerFarbe.toUpperCase()}</span>
+            <span className="font-mono text-sl-primary">{primaerFarbe.toUpperCase()}</span>
           </label>
 
           <div className="flex items-center gap-3">
-            {teamHinweis && <span className="text-xs text-[#86EFAC]">{teamHinweis}</span>}
+            {teamHinweis && <span className="text-xs text-sl-success-text">{teamHinweis}</span>}
             <button
               type="button"
               onClick={handleTeamSpeichern}
-              className="rounded-md bg-[#F59E0B] px-3.5 py-2 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+              className="rounded-md bg-sl-accent px-3.5 py-2 text-xs font-semibold text-sl-accent-contrast hover:bg-sl-accent-hover"
             >
               Team speichern
             </button>
@@ -443,16 +443,16 @@ export function TeamSettingsPage({
       {/* 2. Mitglieder, Rollen & Multi-Units */}
       <section
         id="team-mitglieder"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
+        className="scroll-mt-20 rounded-lg border border-sl-border bg-sl-surface p-5 space-y-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#232933] pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sl-border pb-3">
           <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
+            <Users className="h-4 w-4 text-sl-accent" aria-hidden="true" />
             <div>
-              <h2 className="text-sm font-semibold text-white">
+              <h2 className="text-sm font-semibold text-sl-heading">
                 Mitglieder, Rollen &amp; Multi-Units ({aktiveMitglieder.length})
               </h2>
-              <p className="text-[11px] text-[#8B949E]">
+              <p className="text-[11px] text-sl-muted">
                 Two-Way-Spieler können gleichzeitig Offense, Defense und Special Teams zugeordnet
                 sein. „Aus Team entfernen“ löscht das Benutzerkonto nicht.
               </p>
@@ -463,7 +463,7 @@ export function TeamSettingsPage({
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
-              <tr className="border-b border-[#232933] text-[#8B949E]">
+              <tr className="border-b border-sl-border text-sl-muted">
                 <th className="py-2 pr-3 font-medium">Person</th>
                 <th className="py-2 pr-3 font-medium">Pos / #</th>
                 <th className="py-2 pr-3 font-medium">Rolle im Team</th>
@@ -471,21 +471,21 @@ export function TeamSettingsPage({
                 <th className="py-2 text-right font-medium">Aktion</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#232933]">
+            <tbody className="divide-y divide-sl-border">
               {aktiveMitglieder.map((mem) => {
                 const user = findeBenutzer(mem.userUuid);
                 if (!user) return null;
                 return (
                   <tr key={mem.id}>
                     <td className="py-3 pr-3">
-                      <div className="font-medium text-[#E6EDF3]">{user.vollerName}</div>
-                      <div className="font-mono text-[11px] text-[#8B949E]">
+                      <div className="font-medium text-sl-primary">{user.vollerName}</div>
+                      <div className="font-mono text-[11px] text-sl-muted">
                         {user.email ?? `@${user.benutzername}`}
                       </div>
                     </td>
-                    <td className="py-3 pr-3 font-mono text-[#E6EDF3] whitespace-nowrap">
+                    <td className="py-3 pr-3 font-mono text-sl-primary whitespace-nowrap">
                       {user.trikotNummer ? `#${user.trikotNummer}` : '–'}{' '}
-                      <span className="text-[#8B949E]">{user.position || ''}</span>
+                      <span className="text-sl-muted">{user.position || ''}</span>
                     </td>
                     <td className="py-3 pr-3">
                       <select
@@ -496,7 +496,7 @@ export function TeamSettingsPage({
                             onMitgliedRolleAendern(mem.id, e.target.value as TeamRolle)
                           )
                         }
-                        className="rounded border border-[#232933] bg-[#0B0E11] px-2 py-1 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                        className="rounded border border-sl-border bg-sl-canvas px-2 py-1 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
                       >
                         {ALLE_ROLLEN.map((r) => (
                           <option key={r} value={r}>
@@ -512,7 +512,7 @@ export function TeamSettingsPage({
                           return (
                             <label
                               key={unit}
-                              className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-[#E6EDF3]"
+                              className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-sl-primary"
                             >
                               <input
                                 type="checkbox"
@@ -525,7 +525,7 @@ export function TeamSettingsPage({
                                     )
                                   )
                                 }
-                                className="h-3.5 w-3.5 accent-[#F59E0B]"
+                                className="h-3.5 w-3.5 accent-sl-accent"
                               />
                               <span>
                                 {unit === 'SPECIAL_TEAMS'
@@ -541,7 +541,7 @@ export function TeamSettingsPage({
                       <button
                         type="button"
                         onClick={() => void fuehreAus(() => onMitgliedEntfernen(mem.id))}
-                        className="rounded border border-[#232933] bg-[#0B0E11] px-2.5 py-1 text-[11px] text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
+                        className="rounded border border-sl-border bg-sl-canvas px-2.5 py-1 text-[11px] text-sl-muted hover:border-sl-danger/50 hover:text-sl-danger-text"
                       >
                         Entfernen
                       </button>
@@ -557,26 +557,26 @@ export function TeamSettingsPage({
       {/* 3. Einladungen & Bestätigungs-Warteliste */}
       <section
         id="team-einladungen"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-5"
+        className="scroll-mt-20 rounded-lg border border-sl-border bg-sl-surface p-5 space-y-5"
       >
-        <div className="border-b border-[#232933] pb-3">
-          <h2 className="text-sm font-semibold text-white">
+        <div className="border-b border-sl-border pb-3">
+          <h2 className="text-sm font-semibold text-sl-heading">
             Einladungen (E-Mail &amp; Team-Link) &amp; Freigabe-Warteliste
           </h2>
-          <p className="mt-0.5 text-xs text-[#8B949E]">
+          <p className="mt-0.5 text-xs text-sl-muted">
             Lade gezielt per E-Mail ein oder teile einen Team-Link (z. B. für die Team-Gruppe) mit
             Bestätigungspflicht.
           </p>
         </div>
 
         <div className="space-y-2.5">
-          <div className="flex items-center gap-2 text-xs font-semibold text-[#F59E0B]">
+          <div className="flex items-center gap-2 text-xs font-semibold text-sl-accent">
             <UserCheck className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Ausstehende Beitrittsanfragen ({offeneAnfragen.length})</span>
           </div>
 
           {offeneAnfragen.length === 0 ? (
-            <p className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-3 text-xs text-[#6E7681]">
+            <p className="rounded border border-sl-border bg-sl-canvas px-3 py-3 text-xs text-sl-subtle">
               Aktuell warten keine neuen Registrierungen auf Bestätigung.
             </p>
           ) : (
@@ -587,19 +587,19 @@ export function TeamSettingsPage({
                 return (
                   <div
                     key={anfrage.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[#F59E0B]/40 bg-[#0B0E11] p-3 text-xs"
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-sl-accent/40 bg-sl-canvas p-3 text-xs"
                   >
                     <div>
-                      <div className="font-medium text-white">
+                      <div className="font-medium text-sl-heading">
                         {user.vollerName}{' '}
                         {user.trikotNummer && (
-                          <span className="font-mono text-[#F59E0B]">#{user.trikotNummer}</span>
+                          <span className="font-mono text-sl-accent">#{user.trikotNummer}</span>
                         )}{' '}
                         {user.position && (
-                          <span className="text-[#8B949E]">· {user.position}</span>
+                          <span className="text-sl-muted">· {user.position}</span>
                         )}
                       </div>
-                      <div className="mt-0.5 text-[11px] text-[#8B949E]">
+                      <div className="mt-0.5 text-[11px] text-sl-muted">
                         {user.email} · Angefragt am {anfrage.beigetretenAm}
                       </div>
                     </div>
@@ -608,7 +608,7 @@ export function TeamSettingsPage({
                       {ALLE_UNITS.map((unit) => (
                         <label
                           key={unit}
-                          className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-[#E6EDF3]"
+                          className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-sl-primary"
                         >
                           <input
                             type="checkbox"
@@ -621,7 +621,7 @@ export function TeamSettingsPage({
                                 )
                               )
                             }
-                            className="h-3.5 w-3.5 accent-[#F59E0B]"
+                            className="h-3.5 w-3.5 accent-sl-accent"
                           />
                           <span>{unit === 'SPECIAL_TEAMS' ? 'ST' : SPIELER_UNIT_LABELS[unit]}</span>
                         </label>
@@ -630,7 +630,7 @@ export function TeamSettingsPage({
                       <button
                         type="button"
                         onClick={() => void fuehreAus(() => onMitgliedBestaetigen(anfrage.id))}
-                        className="inline-flex items-center gap-1 rounded bg-[#F59E0B] px-2.5 py-1 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+                        className="inline-flex items-center gap-1 rounded bg-sl-accent px-2.5 py-1 text-xs font-semibold text-sl-accent-contrast hover:bg-sl-accent-hover"
                       >
                         <Check className="h-3.5 w-3.5" aria-hidden="true" />
                         Bestätigen
@@ -638,7 +638,7 @@ export function TeamSettingsPage({
                       <button
                         type="button"
                         onClick={() => void fuehreAus(() => onMitgliedEntfernen(anfrage.id))}
-                        className="inline-flex items-center gap-1 rounded border border-[#232933] px-2.5 py-1 text-xs text-[#8B949E] hover:border-[#DC2626]/50 hover:text-[#FCA5A5]"
+                        className="inline-flex items-center gap-1 rounded border border-sl-border px-2.5 py-1 text-xs text-sl-muted hover:border-sl-danger/50 hover:text-sl-danger-text"
                       >
                         <X className="h-3.5 w-3.5" aria-hidden="true" />
                         Ablehnen
@@ -652,9 +652,9 @@ export function TeamSettingsPage({
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-white">
-              <Mail className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+          <div className="rounded-md border border-sl-border bg-sl-canvas p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-sl-heading">
+              <Mail className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
               Direkte E-Mail-Einladung (sofort aktiv)
             </div>
             <input
@@ -662,13 +662,13 @@ export function TeamSettingsPage({
               value={mailAdresse}
               onChange={(e) => setMailAdresse(e.target.value)}
               placeholder="spieler@verein.de"
-              className="w-full rounded border border-[#232933] bg-[#13171D] px-3 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+              className="w-full rounded border border-sl-border bg-sl-surface px-3 py-1.5 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <select
                 value={mailRolle}
                 onChange={(e) => setMailRolle(e.target.value as TeamRolle)}
-                className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                className="rounded border border-sl-border bg-sl-surface px-2.5 py-1.5 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
               >
                 {ALLE_ROLLEN.map((r) => (
                   <option key={r} value={r}>
@@ -681,13 +681,13 @@ export function TeamSettingsPage({
                 {ALLE_UNITS.map((unit) => (
                   <label
                     key={unit}
-                    className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-[#E6EDF3]"
+                    className="inline-flex cursor-pointer items-center gap-1 text-[11px] text-sl-primary"
                   >
                     <input
                       type="checkbox"
                       checked={mailUnits.includes(unit)}
                       onChange={() => setMailUnits((alt) => toggleUnitInListe(alt, unit))}
-                      className="h-3.5 w-3.5 accent-[#F59E0B]"
+                      className="h-3.5 w-3.5 accent-sl-accent"
                     />
                     <span>{unit === 'SPECIAL_TEAMS' ? 'ST' : SPIELER_UNIT_LABELS[unit]}</span>
                   </label>
@@ -698,22 +698,22 @@ export function TeamSettingsPage({
             <button
               type="button"
               onClick={handleMailEinladung}
-              className="w-full rounded bg-[#1E2530] py-1.5 text-xs font-medium text-white hover:bg-[#2A3342]"
+              className="w-full rounded border border-sl-border bg-sl-elevated py-1.5 text-xs font-medium text-sl-heading hover:border-sl-accent"
             >
               E-Mail-Einladung erzeugen
             </button>
           </div>
 
-          <div className="rounded-md border border-[#232933] bg-[#0B0E11] p-4 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-white">
-              <Link2 className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+          <div className="rounded-md border border-sl-border bg-sl-canvas p-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-sl-heading">
+              <Link2 className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
               Teilbarer Team-Einladungslink
             </div>
             <div className="grid grid-cols-2 gap-2">
               <select
                 value={linkRolle}
                 onChange={(e) => setLinkRolle(e.target.value as TeamRolle)}
-                className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                className="rounded border border-sl-border bg-sl-surface px-2.5 py-1.5 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
               >
                 <option value="PLAYER">Standard-Rolle: Spieler</option>
                 <option value="COACH">Standard-Rolle: Coach</option>
@@ -721,7 +721,7 @@ export function TeamSettingsPage({
               <select
                 value={linkTage}
                 onChange={(e) => setLinkTage(Number(e.target.value))}
-                className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+                className="rounded border border-sl-border bg-sl-surface px-2.5 py-1.5 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
               >
                 <option value={7}>Gültig: 7 Tage</option>
                 <option value={14}>Gültig: 14 Tage</option>
@@ -729,12 +729,12 @@ export function TeamSettingsPage({
               </select>
             </div>
 
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-[#E6EDF3]">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-sl-primary">
               <input
                 type="checkbox"
                 checked={linkBestaetigung}
                 onChange={(e) => setLinkBestaetigung(e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#F59E0B]"
+                className="h-3.5 w-3.5 accent-sl-accent"
               />
               <span>Beitritte müssen vom Team Admin bestätigt werden (empfohlen)</span>
             </label>
@@ -742,7 +742,7 @@ export function TeamSettingsPage({
             <button
               type="button"
               onClick={handleTeamLinkErstellen}
-              className="w-full rounded bg-[#F59E0B] py-1.5 text-xs font-semibold text-[#0B0E11] hover:bg-[#FBBF24]"
+              className="w-full rounded bg-sl-accent py-1.5 text-xs font-semibold text-sl-accent-contrast hover:bg-sl-accent-hover"
             >
               Neuen Team-Link generieren
             </button>
@@ -752,7 +752,7 @@ export function TeamSettingsPage({
         {einladungHinweis && (
           <div
             role="status"
-            className="rounded border border-[#16A34A]/40 bg-[#16A34A]/10 px-3 py-2 text-xs text-[#86EFAC]"
+            className="rounded border border-sl-success/40 bg-sl-success/10 px-3 py-2 text-xs text-sl-success-text"
           >
             {einladungHinweis}
           </div>
@@ -760,8 +760,8 @@ export function TeamSettingsPage({
 
         {teamEinladungen.length > 0 && (
           <div className="space-y-1.5">
-            <div className="text-xs font-medium text-[#8B949E]">Aktive Einladungen</div>
-            <div className="divide-y divide-[#232933] rounded-md border border-[#232933] bg-[#0B0E11]">
+            <div className="text-xs font-medium text-sl-muted">Aktive Einladungen</div>
+            <div className="divide-y divide-sl-border rounded-md border border-sl-border bg-sl-canvas">
               {teamEinladungen.map((inv) => (
                 <div
                   key={inv.id}
@@ -769,13 +769,13 @@ export function TeamSettingsPage({
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-[#E6EDF3]">{inv.pfad}</span>
-                      <span className="text-[11px] text-[#8B949E]">
+                      <span className="font-mono text-sl-primary">{inv.pfad}</span>
+                      <span className="text-[11px] text-sl-muted">
                         {inv.typ === 'EMAIL' ? `Mail: ${inv.zielEmail}` : 'Team-Link'} ·{' '}
                         {TEAM_ROLLEN_LABELS[inv.rolle]}
                       </span>
                     </div>
-                    <div className="text-[11px] text-[#6E7681]">
+                    <div className="text-[11px] text-sl-subtle">
                       Gültig bis {inv.gueltigBis} ·{' '}
                       {inv.bestaetigungErforderlich
                         ? 'Mit Admin-Bestätigung'
@@ -789,7 +789,7 @@ export function TeamSettingsPage({
                         type="button"
                         onClick={() => onEinladungTesten(inv.token)}
                         title="Registrierungsseite /invite/<token> testen"
-                        className="inline-flex items-center gap-1 rounded border border-[#F59E0B]/40 bg-[#F59E0B]/10 px-2.5 py-1 text-[11px] font-medium text-[#F59E0B] hover:bg-[#F59E0B]/20"
+                        className="inline-flex items-center gap-1 rounded border border-sl-accent/40 bg-sl-accent/10 px-2.5 py-1 text-[11px] font-medium text-sl-accent hover:bg-sl-accent/20"
                       >
                         <ExternalLink className="h-3 w-3" aria-hidden="true" />
                         Öffnen
@@ -798,7 +798,7 @@ export function TeamSettingsPage({
                     <button
                       type="button"
                       onClick={() => void handleLinkKopieren(inv)}
-                      className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-[11px] text-[#E6EDF3] hover:border-[#F59E0B]"
+                      className="inline-flex items-center gap-1 rounded border border-sl-border bg-sl-surface px-2.5 py-1 text-[11px] text-sl-primary hover:border-sl-accent"
                     >
                       <Copy className="h-3 w-3" aria-hidden="true" />
                       {kopiertId === inv.id ? 'Kopiert' : 'Link kopieren'}
@@ -808,7 +808,7 @@ export function TeamSettingsPage({
                       onClick={() => void fuehreAus(() => onEinladungWiderrufen(inv.id))}
                       title="Einladung widerrufen"
                       aria-label="Einladung widerrufen"
-                      className="rounded p-1 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
+                      className="rounded p-1 text-sl-muted hover:bg-sl-danger/15 hover:text-sl-danger-text"
                     >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -823,24 +823,24 @@ export function TeamSettingsPage({
       {/* 4. Spieler-Profil Custom-Felder */}
       <section
         id="team-profilfelder"
-        className="scroll-mt-20 rounded-lg border border-[#232933] bg-[#13171D] p-5 space-y-4"
+        className="scroll-mt-20 rounded-lg border border-sl-border bg-sl-surface p-5 space-y-4"
       >
-        <div className="flex items-center gap-2 border-b border-[#232933] pb-3">
-          <ShieldCheck className="h-4 w-4 text-[#F59E0B]" aria-hidden="true" />
+        <div className="flex items-center gap-2 border-b border-sl-border pb-3">
+          <ShieldCheck className="h-4 w-4 text-sl-accent" aria-hidden="true" />
           <div>
-            <h2 className="text-sm font-semibold text-white">
+            <h2 className="text-sm font-semibold text-sl-heading">
               Spieler-Profil Custom-Felder ({team.customProfilFelder.length})
             </h2>
-            <p className="text-[11px] text-[#8B949E]">
+            <p className="text-[11px] text-sl-muted">
               Definiere vereins- oder teamspezifische Zusatzfelder (z. B. Spielerpass-Nr.,
               Notfallkontakt, Jersey-Größe). Sie erscheinen automatisch im Profil jedes Mitglieds.
             </p>
           </div>
         </div>
 
-        <div className="divide-y divide-[#232933] rounded-md border border-[#232933] bg-[#0B0E11]">
+        <div className="divide-y divide-sl-border rounded-md border border-sl-border bg-sl-canvas">
           {team.customProfilFelder.length === 0 ? (
-            <div className="px-3 py-4 text-center text-xs text-[#6E7681]">
+            <div className="px-3 py-4 text-center text-xs text-sl-subtle">
               Noch keine eigenen Profilfelder angelegt.
             </div>
           ) : (
@@ -850,13 +850,13 @@ export function TeamSettingsPage({
                 className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-xs"
               >
                 <div>
-                  <span className="font-medium text-[#E6EDF3]">{feld.label}</span>
-                  <span className="ml-2 font-mono text-[11px] text-[#8B949E]">
+                  <span className="font-medium text-sl-primary">{feld.label}</span>
+                  <span className="ml-2 font-mono text-[11px] text-sl-muted">
                     ({feld.typ}
                     {feld.pflicht ? ' · Pflicht' : ''})
                   </span>
                   {feld.optionen && feld.optionen.length > 0 && (
-                    <div className="text-[11px] text-[#6E7681]">
+                    <div className="text-[11px] text-sl-subtle">
                       Optionen: {feld.optionen.join(', ')}
                     </div>
                   )}
@@ -865,7 +865,7 @@ export function TeamSettingsPage({
                   type="button"
                   onClick={() => void fuehreAus(() => onProfilCustomFeldLoeschen(team.id, feld.key))}
                   aria-label={`Profilfeld ${feld.label} löschen`}
-                  className="rounded p-1 text-[#8B949E] hover:bg-[#DC2626]/15 hover:text-[#FCA5A5]"
+                  className="rounded p-1 text-sl-muted hover:bg-sl-danger/15 hover:text-sl-danger-text"
                 >
                   <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -880,23 +880,23 @@ export function TeamSettingsPage({
             value={profilFeldLabel}
             onChange={(e) => setProfilFeldLabel(e.target.value)}
             placeholder="Feldname (z. B. Helm-Größe)"
-            className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+            className="rounded border border-sl-border bg-sl-canvas px-3 py-1.5 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
           />
           <select
             value={profilFeldTyp}
             onChange={(e) => setProfilFeldTyp(e.target.value as ProfilCustomFeld['typ'])}
-            className="rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-white focus:border-[#F59E0B] focus:outline-none"
+            className="rounded border border-sl-border bg-sl-canvas px-3 py-1.5 text-xs text-sl-heading focus:border-sl-accent focus:outline-none"
           >
             <option value="text">Freitext</option>
             <option value="number">Zahl</option>
             <option value="select">Auswahlmenü</option>
           </select>
-          <label className="flex cursor-pointer items-center gap-2 rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-[#E6EDF3]">
+          <label className="flex cursor-pointer items-center gap-2 rounded border border-sl-border bg-sl-canvas px-3 py-1.5 text-xs text-sl-primary">
             <input
               type="checkbox"
               checked={profilFeldPflicht}
               onChange={(e) => setProfilFeldPflicht(e.target.checked)}
-              className="h-3.5 w-3.5 accent-[#F59E0B]"
+              className="h-3.5 w-3.5 accent-sl-accent"
             />
             <span>Pflichtfeld</span>
           </label>
@@ -908,17 +908,17 @@ export function TeamSettingsPage({
             value={profilFeldOptionen}
             onChange={(e) => setProfilFeldOptionen(e.target.value)}
             placeholder="Auswahl-Optionen kommagetrennt (z. B. S, M, L, XL)"
-            className="w-full rounded border border-[#232933] bg-[#0B0E11] px-3 py-1.5 text-xs text-white placeholder-[#6E7681] focus:border-[#F59E0B] focus:outline-none"
+            className="w-full rounded border border-sl-border bg-sl-canvas px-3 py-1.5 text-xs text-sl-heading placeholder-sl-subtle focus:border-sl-accent focus:outline-none"
           />
         )}
 
-        {profilFeldFehler && <p className="text-xs text-[#FCA5A5]">{profilFeldFehler}</p>}
+        {profilFeldFehler && <p className="text-xs text-sl-danger-text">{profilFeldFehler}</p>}
 
         <div className="flex justify-end">
           <button
             type="button"
             onClick={handleProfilCustomFeldAnlegen}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#1E2530] px-3 py-1.5 text-xs font-medium text-white hover:border-[#F59E0B]"
+            className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-elevated px-3 py-1.5 text-xs font-medium text-sl-heading hover:border-sl-accent"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
             Profilfeld hinzufügen
@@ -929,7 +929,12 @@ export function TeamSettingsPage({
       {/* 5. Dynamische Team-Einstellungs-Panels aller aktiven Plugins */}
       {pluginsMitTeamPanel.map((plugin) => {
         const TeamPanel = plugin.settingsPanels!.team!;
-        return <TeamPanel key={plugin.manifest.id} ctx={settingsKontext} />;
+        return (
+          <TeamPanel
+            key={`${plugin.manifest.id}@${plugin.manifest.version}`}
+            ctx={settingsKontext}
+          />
+        );
       })}
     </SettingsShell>
   );

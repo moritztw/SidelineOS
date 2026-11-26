@@ -145,7 +145,7 @@ export function BrandWortmarke({
   return (
     <span className={className}>
       {basis}
-      {akzent && <span className="text-[#F59E0B]">{akzent}</span>}
+      {akzent && <span className="text-sl-accent">{akzent}</span>}
     </span>
   );
 }
@@ -157,7 +157,7 @@ export function SprachUmschalter({ className = '' }: { className?: string }) {
     <div
       role="group"
       aria-label={t('nav.languageAria')}
-      className={`inline-flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5 ${className}`}
+      className={`inline-flex items-center gap-0.5 rounded-md border border-sl-border bg-sl-surface p-0.5 ${className}`}
     >
       {UNTERSTUETZTE_SPRACHEN.map((lang) => {
         const aktiv = locale === lang.code;
@@ -167,7 +167,7 @@ export function SprachUmschalter({ className = '' }: { className?: string }) {
             type="button"
             onClick={() => setLocale(lang.code)}
             className={`rounded px-2 py-1 text-[11px] font-mono uppercase transition-colors ${
-              aktiv ? 'bg-[#232933] text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
+              aktiv ? 'bg-sl-border text-sl-heading' : 'text-sl-muted hover:text-sl-primary'
             }`}
           >
             {lang.code}

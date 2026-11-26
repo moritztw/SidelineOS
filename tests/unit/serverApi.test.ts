@@ -410,4 +410,200 @@ describe('SidelineOS-Core API & Plugin-Gateway (Teilpaket 1B)', () => {
     );
     assert.equal(nachDeaktivierung.status, 403);
   });
+
+  it('ermöglicht Sysadmin-Rechteverwaltung inkl. Mehrfach-Teams, Kontobearbeitung, Passwort-Reset und Schutzregeln', async () => {
+    const adminLogin = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kennung: 'm.brenner', passwort: DEMO_STANDARD_PASSWORT }),
+    });
+    const adminData = (await adminLogin.json()) as { token: string; user: { uuid: string } };
+
+    // 1. Neuen Benutzer direkt mit mehreren Team-Mitgliedschaften anlegen
+    const createRes = await fetch(`${baseUrl}/api/v1/sysadmin/users`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({
+        vollerName: 'Lena Vogt',
+        benutzername: 'l.vogt',
+        email: 'lena.vogt@example.org',
+        passwort: 'initial-passwort-1234',
+        istSysadmin: false,
+        mitgliedschaften: [
+          {
+            teamId: 'team-stallions-seniors',
+            rolle: 'PLAYER',
+            units: ['OFFENSE'],
+            status: 'AKTIV',
+          },
+          {
+            teamId: 'team-stallions-u19',
+            rolle: 'COACH',
+            units: ['DEFENSE', 'SPECIAL_TEAMS'],
+            status: 'AKTIV',
+          },
+        ],
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const created = (await createRes.json()) as {
+      user: { uuid: string; email: string; istSysadmin: boolean };
+      memberships: Array<{ teamId: string; rolle: string; units: string[] }>;
+    };
+    assert.equal(created.memberships.length, 2);
+
+    // 2. Bestehendes Konto bearbeiten: Stammdaten, Passwort-Reset, Sysadmin aktivieren, Seniors entfernen & U19 auf TEAM_ADMIN hochstufen
+    const patchRes = await fetch(`${baseUrl}/api/v1/sysadmin/users/${created.user.uuid}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({
+        vollerName: 'Lena Vogt-Keller',
+        benutzername: 'l.vogt',
+        email: 'lena.keller@example.org',
+        telefon: '+49 170 9998877',
+        trikotNummer: '88',
+        position: 'WR',
+        istSysadmin: true,
+        neuesPasswort: 'neues-passwort-9876',
+        mitgliedschaften: [
+          {
+            teamId: 'team-stallions-u19',
+            rolle: 'TEAM_ADMIN',
+            units: ['OFFENSE', 'DEFENSE'],
+            status: 'AKTIV',
+          },
+        ],
+      }),
+    });
+    assert.equal(patchRes.status, 200);
+    const patched = (await patchRes.json()) as {
+      user: {
+        vollerName: string;
+        email: string;
+        trikotNummer?: string;
+        istSysadmin: boolean;
+      };
+      memberships: Array<{ teamId: string; rolle: string; units: string[] }>;
+    };
+    assert.equal(patched.user.vollerName, 'Lena Vogt-Keller');
+    assert.equal(patched.user.email, 'lena.keller@example.org');
+    assert.equal(patched.user.trikotNummer, '88');
+    assert.equal(patched.user.istSysadmin, true);
+    assert.equal(patched.memberships.length, 1);
+    assert.equal(patched.memberships[0]?.teamId, 'team-stallions-u19');
+    assert.equal(patched.memberships[0]?.rolle, 'TEAM_ADMIN');
+
+    // Login mit neuem Passwort funktioniert
+    const newPwLogin = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kennung: 'lena.keller@example.org',
+        passwort: 'neues-passwort-9876',
+      }),
+    });
+    assert.equal(newPwLogin.status, 200);
+
+    // 3. Doppelte E-Mail beim Bearbeiten -> 409
+    const dupRes = await fetch(`${baseUrl}/api/v1/sysadmin/users/${created.user.uuid}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({
+        email: 'headcoach@stallions-football.de',
+      }),
+    });
+    assert.equal(dupRes.status, 409);
+
+    // 4. Schutz: Letzten aktiven Team Admin von team-stallions-seniors (m.brenner) nicht entfernen
+    const lastTeamAdminRes = await fetch(
+      `${baseUrl}/api/v1/sysadmin/users/${adminData.user.uuid}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${adminData.token}`,
+        },
+        body: JSON.stringify({
+          mitgliedschaften: [],
+        }),
+      }
+    );
+    assert.equal(lastTeamAdminRes.status, 409);
+  });
+
+  it('Sysadmin kann existierende Teams ohne Team-Admin-Rolle bearbeiten', async () => {
+    const adminLogin = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kennung: 'm.brenner',
+        passwort: DEMO_STANDARD_PASSWORT,
+      }),
+    });
+    assert.equal(adminLogin.status, 200);
+    const adminData = (await adminLogin.json()) as { token: string };
+
+    // m.brenner ist nicht zwingend TEAM_ADMIN von team-stallions-u19, darf als Sysadmin aber bearbeiten
+    const patchRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-stallions-u19`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({
+        name: 'Munich Stallions U19 Elite',
+        kurzname: 'MS U19',
+        aktiveSaison: '2027',
+        primaerFarbe: '#10B981',
+      }),
+    });
+    assert.equal(patchRes.status, 200);
+    const patched = (await patchRes.json()) as {
+      team: {
+        id: string;
+        name: string;
+        kurzname: string;
+        aktiveSaison: string;
+        saisons: string[];
+        primaerFarbe: string;
+      };
+    };
+    assert.equal(patched.team.id, 'team-stallions-u19');
+    assert.equal(patched.team.name, 'Munich Stallions U19 Elite');
+    assert.equal(patched.team.kurzname, 'MS U19');
+    assert.equal(patched.team.aktiveSaison, '2027');
+    assert.equal(patched.team.primaerFarbe, '#10B981');
+    assert.ok(patched.team.saisons.includes('2027'));
+
+    // Leerer Teamname -> 400
+    const emptyNameRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-stallions-u19`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({ name: '   ' }),
+    });
+    assert.equal(emptyNameRes.status, 400);
+
+    // Unbekanntes Team -> 404
+    const notFoundRes = await fetch(`${baseUrl}/api/v1/sysadmin/teams/team-unbekannt`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${adminData.token}`,
+      },
+      body: JSON.stringify({ name: 'Test' }),
+    });
+    assert.equal(notFoundRes.status, 404);
+  });
 });

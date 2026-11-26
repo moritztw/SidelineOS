@@ -89,6 +89,8 @@ Der Plugin-Installer liest zuerst `plugin.manifest.json`, bevor Code entpackt od
 | `s3Prefix` | Nein | Relative S3-Ablage pro Team: `teams/<teamId>/<s3Prefix>` |
 | `permissions` | Ja | Liste erlaubter Least-Privilege-Scopes (siehe Abschnitt 6) |
 | `settingsAnker` | Ja | Objekt `{ user?, team?, sysadmin? }` mit `<section id="...">`-Ankern |
+| `hideHubTile` | Nein | `true` blendet die Modul-Kachel auf der Hub-Startseite aus (ideal für Headless- oder Theme-Plugins ohne eigene Hauptansicht) |
+| `themes` | Nein | Optionale Theme-Presets (`PluginThemePreset[]`) für das Core-Theme-Auswahlmenü (`#sys-theme` & Konto-Einstellungen) |
 
 ### Wann prüft der Core die Kompatibilität?
 1. **`sdkVersion` (Major.Minor):**
@@ -217,10 +219,10 @@ const t = createPluginTranslator({
 });
 
 function MainView({ ctx }: { ctx: PluginLaufzeitKontext }) {
-  // ctx.team, ctx.aktiveTeamAnsicht, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
+  // ctx.team, ctx.aktiveTeamAnsicht, ctx.userUnits, ctx.gewaehlteSaison, ctx.benutzer, ctx.locale, ctx.aktuellerTab
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold text-white">
+      <h2 className="text-base font-semibold text-sl-heading">
         {t(ctx.locale, 'tabOverview')} · {ctx.team.name} ({ctx.gewaehlteSaison})
       </h2>
     </div>
@@ -251,6 +253,87 @@ const plugin: SidelinePlugin = {
 
 export default plugin;
 ```
+
+### Headless- & Theme-Plugins (`hideHubTile`, `Provider` mit `PluginProviderKontext`)
+`defaultTab`, `getTabs` und `renderMainView` sind im `SidelinePlugin`-Vertrag **optional**. Plugins ohne eigene Hauptansicht (z. B. reine Theme-, Branding- oder Hintergrund-Plugins) setzen `hideHubTile: true` im Manifest und implementieren stattdessen einen `Provider` (und bei Bedarf `settingsPanels`):
+
+* Der Core hält `Provider` aller **global aktivierten** Plugins dauerhaft über alle Ansichten (`login`, `hub`, `modul`, `settings`, `sysadmin`) gemountet und übergibt den Live-Kontext `ctx: PluginProviderKontext` (`team`, `aktiveTeamAnsicht`, `bereich`, `routeArt`, `istGlobalAktiv`, `istFuerAktivesTeamAktiv`, `locale`, `benutzer`).
+* Möchte ein Theme-Plugin eigene Akzentfarben setzen, setzt es `document.documentElement.dataset.slThemeAccentOverride = 'true'` (und entfernt das Attribut samt eigener CSS-Tokens sauber im `useEffect`-Cleanup).
+
+```tsx
+import { useEffect } from 'react';
+import type { PluginProviderProps, SidelinePlugin } from '@sidelineos/plugin-sdk';
+import manifest from '../plugin.manifest.json';
+
+function ThemeProvider({ children, ctx }: PluginProviderProps) {
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!ctx?.istGlobalAktiv) return;
+    root.dataset.slThemeAccentOverride = 'true';
+    root.style.setProperty('--sl-accent', '#10B981');
+    return () => {
+      delete root.dataset.slThemeAccentOverride;
+      root.style.removeProperty('--sl-accent');
+    };
+  }, [ctx?.istGlobalAktiv, ctx?.team?.id]);
+
+  return <>{children}</>;
+}
+
+const themePlugin: SidelinePlugin = {
+  manifest: manifest as SidelinePlugin['manifest'],
+  Provider: ThemeProvider,
+};
+
+export default themePlugin;
+```
+
+### Deklarative Theme-Presets (`manifest.themes` / `SidelinePlugin.themes`)
+Für klassische Farb- oder Light-/High-Contrast-Themes ist kein eigener `Provider` nötig: Ein Plugin kann ein oder mehrere `PluginThemePreset`-Einträge direkt in `plugin.manifest.json` (und/oder auf `SidelinePlugin.themes`) deklarieren. Der Core prüft und bereinigt alle Token-Werte automatisch gegen eine strikte `--sl-*`-Allowlist, stellt die Presets in der Sysadmin-Konfiguration (`#sys-theme`) sowie im persönlichen Konto (`#konto`) zur Auswahl bereit und wendet die Auflösung `Benutzer-Präferenz → Instanz-Standard → core:default` bereits beim Booten (inkl. `/login`, `/invite`, `/share`) an.
+
+```json
+{
+  "id": "daylight-theme",
+  "name": "SidelineOS Daylight",
+  "kurzbeschreibung": "Helles Erscheinungsbild für Outdoor- und Tageslicht-Nutzung.",
+  "version": "1.0.0",
+  "sdkVersion": "1.0",
+  "autor": "Dein Verein",
+  "repositoryUrl": "https://github.com/dein-verein/SidelineOS-daylight-theme",
+  "icon": "layers",
+  "status": "AKTIV",
+  "standardAktiviert": true,
+  "hideHubTile": true,
+  "permissions": [],
+  "dbPrefix": "mod_daylight_theme_",
+  "settingsAnker": {},
+  "themes": [
+    {
+      "id": "daylight",
+      "name": "Daylight (Hell)",
+      "beschreibung": "Hoher Kontrast bei direktem Sonnenlicht",
+      "colorScheme": "light",
+      "overrideTeamAccent": false,
+      "tokens": {
+        "--sl-bg-canvas": "#F8FAFC",
+        "--sl-bg-topbar": "#F1F5F9",
+        "--sl-bg-surface": "#FFFFFF",
+        "--sl-bg-elevated": "#E2E8F0",
+        "--sl-border": "#CBD5E1",
+        "--sl-border-strong": "#94A3B8",
+        "--sl-text-heading": "#0F172A",
+        "--sl-text-primary": "#1E293B",
+        "--sl-text-muted": "#475569",
+        "--sl-text-subtle": "#64748B"
+      }
+    }
+  ]
+}
+```
+
+* `tokens` akzeptiert ausschließlich gültige Hex-Farben (`#RGB`, `#RRGGBB`, `#RRGGBBAA`) sowie `'dark' | 'light'` für `--sl-color-scheme`.
+* Mit `overrideTeamAccent: false` (Standard) bleibt die dynamische Team-Primärfarbe im Team-Kontext erhalten; `overrideTeamAccent: true` erzwingt die im Preset definierte `--sl-accent*`-Farbe.
+* Reine deklarative Theme-Plugins benötigen weder `renderMainView` noch zwingend einen `Provider` – sofern `themes` in `plugin.manifest.json` hinterlegt sind.
 
 ### Frontend → Core/Backend-API aufrufen (wichtig: Routing & CSRF)
 Alle geschützten Backend-Aufrufe eines Plugins laufen über das Core-Gateway:
@@ -289,10 +372,35 @@ async function pluginApi<T>(
 ### Öffentliche `/share/<token>`-Ansicht
 Möchte ein Plugin öffentliche Empfänger-Links unterstützen (`"share:public-links"`):
 1. Im Frontend `renderPublicShareView({ token, locale, onSchliessen })` implementieren.
-2. Im Backend `handlePublicRequest(req, db)` bereitstellen → erreichbar unter `/api/v1/public/plugins/<pluginId>/<subPfad>` (ohne Login, nur aktiv wenn das Plugin global aktiviert ist).
+2. Im Backend `handlePublicRequest(req, db, publicCtx)` bereitstellen → erreichbar unter `/api/v1/public/plugins/<pluginId>/<subPfad>` (ohne Login, nur aktiv wenn das Plugin global aktiviert ist).
+3. Besitzt das Plugin zusätzlich `"s3:team-rw"`, stellt der Core im optionalen 3. Parameter `publicCtx` schreibgeschützte S3-Signierhelfer (`publicCtx.createTeamS3ReadScope(teamId)` sowie `publicCtx.getSignedDownloadUrlForTeam(...)`) bereit, um nach erfolgreicher Token-Prüfung jederzeit frische, kurzlebige Download-/Stream-URLs für das zugehörige Team zu erzeugen.
+
+### Benutzer-Units (`userUnits`) im Frontend & Backend
+Sowohl `PluginLaufzeitKontext` (`ctx.userUnits`) als auch `PluginBackendKontext` (`ctx.userUnits`) enthalten die dem eingeloggten Benutzer in der aktiven Team-Mitgliedschaft zugewiesenen `SpielerUnit[]` (`'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS'`). Damit können Plugins Inhalte (z. B. Playbooks, Anmerkungen oder Einladungen) direkt ohne zusätzliche Roster-Abfrage nach Unit filtern.
 
 ### Einstellungs-Panels einhängen
 `settingsPanels` (`{ user?, team?, sysadmin? }`) wird automatisch auf der jeweiligen Core-Einstellungsseite gerendert. Die dort gerenderten `<section id="...">`-Elemente müssen den `id`s aus `manifest.settingsAnker` entsprechen, damit das sticky Seitenmenü direkt dorthin scrollt.
+
+### Design-Tokens & Theme-Kompatibilität (`--sl-*` / Tailwind)
+Der Core stellt auf `:root` semantische `--sl-*` CSS Custom Properties bereit (sowie Tailwind-Utilities `bg-sl-*`, `text-sl-*`, `border-sl-*`, `placeholder-sl-*`, `accent-sl-accent`). Plugins sollten auf hartkodierte Hex-Farben verzichten und stattdessen diese Tokens nutzen, damit sie automatisch auf Team-Akzentfarben und Theme-Anpassungen reagieren:
+
+| CSS-Variable | Tailwind-Farbe | Standard (Dark) | Verwendung |
+| :--- | :--- | :--- | :--- |
+| `--sl-color-scheme` | — | `dark` | Natives `color-scheme` (`dark` / `light`) |
+| `--sl-bg-canvas` | `sl-canvas` | `#0B0E11` | Seitenhintergrund & Eingabeflächen |
+| `--sl-bg-topbar` | `sl-topbar` | `#0F1318` | Sub-Navigationsleiste |
+| `--sl-bg-surface` | `sl-surface` | `#13171D` | Karten, Modals, Sidebars |
+| `--sl-bg-elevated` | `sl-elevated` | `#1E2530` | Sekundäre Buttons & Hervorhebungen |
+| `--sl-border` / `--sl-border-strong` | `sl-border` / `sl-border-strong` | `#232933` / `#36404F` | Rahmen, Trenner & aktive Segmente |
+| `--sl-text-heading` / `--sl-text-primary` | `sl-heading` / `sl-primary` | `#FFFFFF` / `#E6EDF3` | Überschriften & Fließtext |
+| `--sl-text-muted` / `--sl-text-subtle` | `sl-muted` / `sl-subtle` | `#8B949E` / `#6E7681` | Meta-Texte, Inaktiv-Labels & Platzhalter |
+| `--sl-accent` / `--sl-accent-hover` / `--sl-accent-contrast` | `sl-accent` / `sl-accent-hover` / `sl-accent-contrast` | `#F59E0B` / `#FBBF24` / `#0B0E11` | Primäre Akzente & Kontrasttext auf Buttons |
+| `--sl-danger` / `--sl-danger-text` | `sl-danger` / `sl-danger-text` | `#DC2626` / `#FCA5A5` | Fehler & Löschaktionen |
+| `--sl-success` / `--sl-success-text` / `--sl-warning-text` | `sl-success` / `sl-success-text` / `sl-warning-text` | `#16A34A` / `#86EFAC` / `#FDE68A` | Status- und Warnhinweise |
+
+* **Team-Primärfarbe automatisch aktiv:** Im aktiven Team-Kontext setzt der Core `--sl-accent`, `--sl-accent-hover` und WCAG-kontrastierendes `--sl-accent-contrast` dynamisch aus `aktivesTeam.primaerFarbe` (außerhalb des Team-Kontexts fallen die Werte auf die Standard-Defaults zurück).
+* **Theme-Override-Schutz:** Setzt ein externes Theme-Plugin `document.documentElement.dataset.slThemeAccentOverride = 'true'`, überschreibt der Core `--sl-accent*` nicht mehr durch die Teamfarbe.
+* **SDK-Typen & Helfer:** `SIDELINE_CSS_TOKENS`, `SIDELINE_STANDARD_THEME_TOKENS`, `normalisiereHexFarbe`, `ermittleKontrastTextFarbe`, `ermittleHoverAkzentFarbe` und `ermittleTeamAkzentTokens` stehen direkt über `@sidelineos/plugin-sdk` bereit.
 
 ---
 

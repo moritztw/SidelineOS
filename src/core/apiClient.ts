@@ -12,6 +12,7 @@ import type {
   TeamRolle,
 } from '../shared/types.ts';
 import type { PluginManifest } from '../sdk/plugin.ts';
+import type { PluginThemePreset } from '../shared/theme.ts';
 
 export class CoreApiError extends Error {
   constructor(
@@ -28,6 +29,7 @@ export interface AuthSessionResponse {
   user: BenutzerKonto;
   memberships: TeamMitgliedschaft[];
   teams: TeamKontext[];
+  instanceDefaultTheme?: string;
   token?: string;
 }
 
@@ -84,6 +86,8 @@ export interface SysadminPluginStatusDTO {
   installMode?: string;
   packageSha256?: string | null;
   devBranch?: string | null;
+  installedAt?: string;
+  lastError?: string | null;
 }
 
 export interface SysadminCapabilitiesDTO {
@@ -93,6 +97,14 @@ export interface SysadminCapabilitiesDTO {
   supportedSdkVersion: string;
   brandName?: string;
   defaultLocale?: UnterstuetzteSprache;
+  defaultTheme?: string;
+}
+
+export interface SysadminMitgliedschaftEingabeDTO {
+  teamId: string;
+  rolle: TeamRolle;
+  units?: SpielerUnit[];
+  status?: 'AKTIV' | 'WARTET_AUF_FREIGABE';
 }
 
 export interface S3CleanupStatistikDTO {
@@ -156,12 +168,24 @@ export interface RuntimePluginClientDTO {
   manifest: PluginManifest;
   clientUrl: string;
   cssUrl?: string;
+  cacheBuster?: string;
 }
 
 export interface RuntimeManifestResponse {
   installedPluginIds: PluginId[];
   enabledPluginIds: PluginId[];
   bundles: RuntimePluginClientDTO[];
+}
+
+export interface PublicThemePluginDTO {
+  pluginId: PluginId;
+  pluginName: string;
+  themes: PluginThemePreset[];
+}
+
+export interface PublicThemesResponse {
+  instanceDefaultTheme: string;
+  plugins: PublicThemePluginDTO[];
 }
 
 /**
@@ -243,6 +267,7 @@ export const coreApi = {
     trikotNummer?: string;
     position?: string;
     preferredLocale?: UnterstuetzteSprache;
+    preferredTheme?: string | null;
     customProfilWerte?: Record<string, string>;
     altesPasswort?: string;
     neuesPasswort?: string;
@@ -388,6 +413,18 @@ export const coreApi = {
     });
   },
 
+  aktualisiereSysadminTeam(
+    teamId: string,
+    daten: Partial<
+      Pick<TeamKontext, 'name' | 'kurzname' | 'aktiveSaison' | 'primaerFarbe' | 'customProfilFelder'>
+    >
+  ): Promise<{ team: TeamKontext }> {
+    return apiRequest(`/api/v1/sysadmin/teams/${encodeURIComponent(teamId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(daten),
+    });
+  },
+
   loescheTeam(teamId: string): Promise<{ ok: boolean }> {
     return apiRequest(`/api/v1/sysadmin/teams/${encodeURIComponent(teamId)}`, {
       method: 'DELETE',
@@ -400,11 +437,40 @@ export const coreApi = {
     email: string;
     passwort: string;
     istSysadmin: boolean;
+    telefon?: string;
+    trikotNummer?: string;
+    position?: string;
     preferredLocale?: UnterstuetzteSprache;
     teamZuweisung?: { teamId: string; rolle: TeamRolle };
-  }): Promise<{ user: BenutzerKonto; membership?: TeamMitgliedschaft }> {
+    mitgliedschaften?: SysadminMitgliedschaftEingabeDTO[];
+  }): Promise<{
+    user: BenutzerKonto;
+    membership?: TeamMitgliedschaft;
+    memberships?: TeamMitgliedschaft[];
+  }> {
     return apiRequest('/api/v1/sysadmin/users', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  aktualisiereBenutzer(
+    userUuid: string,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
+      neuesPasswort?: string;
+      mitgliedschaften: SysadminMitgliedschaftEingabeDTO[];
+    }
+  ): Promise<{ user: BenutzerKonto; memberships: TeamMitgliedschaft[] }> {
+    return apiRequest(`/api/v1/sysadmin/users/${encodeURIComponent(userUuid)}`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     });
   },
@@ -569,12 +635,28 @@ export const coreApi = {
   },
 
   holeRuntimePlugins(): Promise<RuntimeManifestResponse> {
-    return apiRequest<RuntimeManifestResponse>('/api/v1/plugins/runtime/manifest');
+    return apiRequest<RuntimeManifestResponse>('/api/v1/plugins/runtime/manifest', {
+      cache: 'no-store',
+    });
   },
 
   holePublicRuntimePlugins(): Promise<{ bundles: RuntimePluginClientDTO[] }> {
     return apiRequest<{ bundles: RuntimePluginClientDTO[] }>(
-      '/api/v1/plugins/runtime/public-manifest'
+      '/api/v1/plugins/runtime/public-manifest',
+      { cache: 'no-store' }
     );
+  },
+
+  holePublicThemes(): Promise<PublicThemesResponse> {
+    return apiRequest<PublicThemesResponse>('/api/v1/plugins/runtime/themes', {
+      cache: 'no-store',
+    });
+  },
+
+  speichereStandardTheme(themeRef: string): Promise<{ ok: boolean; defaultTheme: string }> {
+    return apiRequest<{ ok: boolean; defaultTheme: string }>('/api/v1/sysadmin/theme', {
+      method: 'PUT',
+      body: JSON.stringify({ themeRef }),
+    });
   },
 };

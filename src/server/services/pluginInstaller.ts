@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import zlib from 'node:zlib';
 import { parseGitHubPluginQuelle } from '../../core/pluginRegistry.ts';
+import { bereinigePluginThemePresets } from '../../shared/theme.ts';
 import type { PluginManifest, PluginPermission } from '../../sdk/plugin.ts';
 import { PACKAGE_CORE_VERSION, type CoreServerConfig } from '../config.ts';
 import { fuehrePluginMigrationAus, type CoreDatabaseClient } from '../db/client.ts';
@@ -359,6 +360,9 @@ export function validierePluginManifest(
     permissions.push(p as PluginPermission);
   }
 
+  const bereinigteThemes =
+    m.themes !== undefined ? bereinigePluginThemePresets(m.themes) : [];
+
   return {
     id,
     name,
@@ -380,6 +384,7 @@ export function validierePluginManifest(
         : 'puzzle',
     status: m.status === 'AKTIV' ? 'AKTIV' : 'VORSCHAU',
     standardAktiviert: Boolean(m.standardAktiviert),
+    ...(typeof m.hideHubTile === 'boolean' ? { hideHubTile: m.hideHubTile } : {}),
     permissions: Array.from(new Set(permissions)),
     dbPrefix,
     ...(typeof m.s3Prefix === 'string' && m.s3Prefix.trim()
@@ -389,6 +394,7 @@ export function validierePluginManifest(
       m.settingsAnker && typeof m.settingsAnker === 'object'
         ? (m.settingsAnker as PluginManifest['settingsAnker'])
         : {},
+    ...(bereinigteThemes.length > 0 ? { themes: bereinigteThemes } : {}),
   };
 }
 
@@ -590,6 +596,7 @@ export class PluginInstallerService {
     dateien: Map<string, Buffer>
   ): Promise<string> {
     const zielBasis = path.resolve(this.config.pluginDataDir, pluginId, version);
+    await fs.rm(zielBasis, { recursive: true, force: true }).catch(() => undefined);
     await fs.mkdir(zielBasis, { recursive: true });
 
     for (const [relPfad, buf] of dateien.entries()) {
@@ -654,6 +661,7 @@ export class PluginInstallerService {
       manifest.version = normalisiereInstallVersion(params.effectiveVersion, manifest.version);
     }
 
+    await this.stelleSdkFuerPluginDataBereit();
     await this.schreibeDateienAufPlatte(manifest.id, manifest.version, dateien);
     const migrationenAusgefuehrt = await this.fuehreMigrationenAusDateienAus(
       manifest.id,
@@ -804,9 +812,8 @@ export class PluginInstallerService {
       const manifest = validierePluginManifest(manifestJson, {
         skipCompatibilityCheck: true,
       });
-      if (!manifest.repositoryUrl) {
-        manifest.repositoryUrl = quelle.repoUrl;
-      }
+      // Tatsächlich installierte Git-Quelle für künftige "Git Pull"-Läufe (inkl. Forks) beibehalten
+      manifest.repositoryUrl = quelle.repoUrl;
 
       const erkannteBranch = await this.commandRunner(
         'git',
@@ -869,6 +876,7 @@ export class PluginInstallerService {
         gesammelteDateien
       );
 
+      await this.stelleSdkFuerPluginDataBereit();
       await this.schreibeDateienAufPlatte(manifest.id, devVersion, gesammelteDateien);
       const migrationenAusgefuehrt = await this.fuehreMigrationenAusDateienAus(
         manifest.id,
@@ -883,6 +891,8 @@ export class PluginInstallerService {
         installMode: 'DEV_GIT',
         devBranch: effektiverBranch,
       });
+
+      await this.bereinigeAltePluginVersionen(manifest.id, devVersion);
 
       this.updateCache = null;
       return { manifest, branch: effektiverBranch, migrationenAusgefuehrt };
@@ -905,7 +915,7 @@ export class PluginInstallerService {
     }
   }
 
-  private async stelleLokalesSdkBereit(stagingDir: string): Promise<void> {
+  private async stelleLokalesSdkBereit(basisDir: string): Promise<void> {
     const sdkPackageJson = path.join(CORE_PLUGIN_SDK_DIR, 'package.json');
     const sdkDistDir = path.join(CORE_PLUGIN_SDK_DIR, 'dist');
     try {
@@ -915,11 +925,33 @@ export class PluginInstallerService {
       return;
     }
 
-    const zielDir = path.join(stagingDir, 'node_modules', '@sidelineos', 'plugin-sdk');
+    const zielDir = path.join(basisDir, 'node_modules', '@sidelineos', 'plugin-sdk');
     await fs.rm(zielDir, { recursive: true, force: true }).catch(() => undefined);
     await fs.mkdir(zielDir, { recursive: true });
     await fs.cp(sdkPackageJson, path.join(zielDir, 'package.json'));
     await fs.cp(sdkDistDir, path.join(zielDir, 'dist'), { recursive: true });
+  }
+
+  private async stelleSdkFuerPluginDataBereit(): Promise<void> {
+    await this.stelleLokalesSdkBereit(path.resolve(this.config.pluginDataDir));
+  }
+
+  private async bereinigeAltePluginVersionen(
+    pluginId: string,
+    behalteVersion: string
+  ): Promise<void> {
+    const pluginDir = path.resolve(this.config.pluginDataDir, pluginId);
+    try {
+      const eintraege = await fs.readdir(pluginDir, { withFileTypes: true });
+      for (const eintrag of eintraege) {
+        if (eintrag.name === behalteVersion) continue;
+        await fs
+          .rm(path.join(pluginDir, eintrag.name), { recursive: true, force: true })
+          .catch(() => undefined);
+      }
+    } catch {
+      // Verzeichnis existiert nicht -> ignorieren
+    }
   }
 
   private async sammleVerzeichnisRekursiv(

@@ -1,17 +1,23 @@
 import type { ComponentType, ReactNode } from 'react';
 import type { UnterstuetzteSprache } from '../shared/i18n.ts';
 import type {
+  AppRouteModus,
   BenutzerKonto,
+  CoreBereich,
   PluginId,
   S3Konfiguration,
+  SpielerUnit,
   TeamKontext,
   TeamRolle,
 } from '../shared/types.ts';
 
 export type {
+  AppRouteModus,
   BenutzerKonto,
+  CoreBereich,
   PluginId,
   S3Konfiguration,
+  SpielerUnit,
   TeamKontext,
   TeamRolle,
 } from '../shared/types.ts';
@@ -25,6 +31,34 @@ export type {
 export type { BrandKonfiguration } from '../shared/brand.ts';
 export { holeAktuelleBrandKonfig, teileWortmarke } from '../shared/brand.ts';
 export { createPluginTranslator, uebersetzeSchluessel } from '../shared/i18n.ts';
+import type { PluginThemePreset } from '../shared/theme.ts';
+export type {
+  AufgeloestesThemeErgebnis,
+  GeparsteThemeRef,
+  PluginThemePreset,
+  SidelineCssToken,
+  SidelineCssTokenDefinition,
+  TeamAkzentTokens,
+  VerfuegbaresThemeEintrag,
+} from '../shared/theme.ts';
+export {
+  CORE_STANDARD_THEME_PRESET,
+  SIDELINE_CSS_TOKENS,
+  SIDELINE_STANDARD_THEME_TOKENS,
+  STANDARD_THEME_REF,
+  bauePluginThemeRef,
+  berechneRelativeLuminanz,
+  bereinigePluginThemePresets,
+  ermittleHoverAkzentFarbe,
+  ermittleKontrastTextFarbe,
+  ermittleTeamAkzentTokens,
+  loeseAktivesThemeAuf,
+  normalisiereHexFarbe,
+  parseThemeRef,
+  sammleVerfuegbareThemes,
+  validiereThemeSlug,
+  validiereThemeTokenWert,
+} from '../shared/theme.ts';
 
 /**
  * Granulare Berechtigungen, die ein externes Plugin in seinem `plugin.manifest.json`
@@ -69,6 +103,8 @@ export interface PluginManifest {
   icon: PluginIconName;
   status: 'AKTIV' | 'VORSCHAU';
   standardAktiviert: boolean;
+  /** Blendet die Kachel auf der Hub-Startseite aus (z. B. für Headless- oder reine Theme-Plugins) */
+  hideHubTile?: boolean;
   permissions: PluginPermission[];
   /** Isoliertes Datenbank-Präfix für Tabellen dieses Plugins (z. B. "mod_video_") */
   dbPrefix: string;
@@ -80,6 +116,8 @@ export interface PluginManifest {
     team?: PluginSettingsAnker[];
     sysadmin?: PluginSettingsAnker[];
   };
+  /** Optionale Theme-Presets, die dieses Plugin im Core-Theme-Auswahlmenü bereitstellt */
+  themes?: PluginThemePreset[];
 }
 
 export interface PluginTab {
@@ -93,6 +131,8 @@ export interface PluginTab {
 export interface PluginLaufzeitKontext {
   team: TeamKontext;
   aktiveTeamAnsicht: TeamRolle;
+  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers im aktiven Team */
+  userUnits?: SpielerUnit[];
   gewaehlteSaison: string;
   benutzer: BenutzerKonto;
   locale: string;
@@ -112,6 +152,28 @@ export interface PluginSettingsKontext {
   aktiveTeamAnsicht: TeamRolle | null;
   s3Konfig: S3Konfiguration;
   locale: string;
+}
+
+/**
+ * Laufzeit-Kontext für dauerhaft gemountete `SidelinePlugin.Provider`-Komponenten.
+ * Ermöglicht Headless- und Theme-Plugins den Zugriff auf Team-, Rollen- und Bereichs-Kontext.
+ */
+export interface PluginProviderKontext {
+  pluginId: PluginId;
+  team: TeamKontext | null;
+  aktiveTeamAnsicht: TeamRolle | null;
+  gewaehlteSaison: string | null;
+  benutzer: BenutzerKonto | null;
+  locale: string;
+  bereich: CoreBereich;
+  routeArt: AppRouteModus['art'];
+  istGlobalAktiv: boolean;
+  istFuerAktivesTeamAktiv: boolean;
+}
+
+export interface PluginProviderProps {
+  children: ReactNode;
+  ctx?: PluginProviderKontext;
 }
 
 /**
@@ -270,6 +332,45 @@ export interface PluginNotificationScope {
   listChannels(): Promise<PluginNotificationChannelInfo[]>;
 }
 
+export interface PluginPublicS3ReadScope {
+  readonly prefix: string;
+  getSignedDownloadUrl(params: {
+    objectPath: string;
+    expiresInSeconds?: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+}
+
+export interface PluginPublicSignedDownloadParams {
+  teamId: string;
+  objectPath: string;
+  expiresInSeconds?: number;
+}
+
+export type PluginPublicSignedDownloadFn = {
+  (params: PluginPublicSignedDownloadParams): Promise<{
+    url: string;
+    key: string;
+    expiresIn: number;
+  }>;
+  (
+    teamId: string,
+    objectPath: string,
+    expiresInSeconds?: number
+  ): Promise<{ url: string; key: string; expiresIn: number }>;
+};
+
+/**
+ * Optionaler Kontext für unauthentifizierte `handlePublicRequest`-Aufrufe (`/share/<token>`).
+ * Read-Only S3-Signierhelfer werden nur injiziert, wenn das Plugin sowohl `share:public-links`
+ * als auch `s3:team-rw` besitzt und der Ziel-Team-Scope aktiv ist.
+ */
+export interface PluginPublicKontext {
+  readonly pluginId: PluginId;
+  readonly manifest: PluginManifest;
+  readonly createTeamS3ReadScope?: (teamId: string) => PluginPublicS3ReadScope;
+  readonly getSignedDownloadUrlForTeam?: PluginPublicSignedDownloadFn;
+}
+
 /**
  * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
  */
@@ -284,6 +385,8 @@ export interface PluginBackendKontext {
   readonly locale: string;
   readonly team: TeamKontext;
   readonly teamRolle: TeamRolle;
+  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers in diesem Team */
+  readonly userUnits?: SpielerUnit[];
   hasPermission(permission: PluginPermission): boolean;
 }
 
@@ -315,7 +418,8 @@ export interface SidelineBackendPlugin {
       query: Record<string, unknown>;
       body: unknown;
     },
-    db: PluginDbScope
+    db: PluginDbScope,
+    publicCtx?: PluginPublicKontext
   ) => Promise<{ status: number; body: unknown }>;
   listExportableItems?: (
     ctx: PluginBackendKontext,
@@ -338,13 +442,13 @@ export interface SidelineBackendPlugin {
  */
 export interface SidelinePlugin {
   manifest: PluginManifest;
-  /** Optionaler State-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
-  Provider?: ComponentType<{ children: ReactNode }>;
-  defaultTab: string;
-  getTabs: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
+  /** Optionaler State-/Theme-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
+  Provider?: ComponentType<PluginProviderProps>;
+  defaultTab?: string;
+  getTabs?: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
   /** Optionale Primäraktion rechts in der TopBar (als eigenständige React-Komponente) */
   PrimaerAktion?: ComponentType<{ ctx: PluginLaufzeitKontext; className: string }>;
-  renderMainView: (ctx: PluginLaufzeitKontext) => ReactNode;
+  renderMainView?: (ctx: PluginLaufzeitKontext) => ReactNode;
   /** Optionaler öffentlicher Empfänger-View für /share/<token> ohne Anmeldung */
   renderPublicShareView?: (ctx: {
     token: string;
@@ -356,6 +460,8 @@ export interface SidelinePlugin {
     team?: ComponentType<{ ctx: PluginSettingsKontext }>;
     sysadmin?: ComponentType<{ ctx: PluginSettingsKontext }>;
   };
+  /** Optionale Theme-Presets (ergänzt oder überschreibt `manifest.themes` zur Laufzeit) */
+  themes?: readonly PluginThemePreset[];
 }
 
 /**

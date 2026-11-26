@@ -24,7 +24,7 @@ const EINSTELLUNGS_BEREICHE: CoreBereich[] = [
 ];
 
 const PRIMAER_AKTION_KLASSE =
-  'rounded-md bg-[#F59E0B] px-4 py-2 text-xs font-semibold text-[#0B0E11] transition-colors hover:bg-[#FBBF24] whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#F59E0B]';
+  'rounded-md bg-sl-accent px-4 py-2 text-xs font-semibold text-sl-accent-contrast transition-colors hover:bg-sl-accent-hover whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sl-accent';
 
 export function CoreTopBar({
   bereich,
@@ -67,7 +67,7 @@ export function CoreTopBar({
   }
 
   return (
-    <header className="sticky top-0 z-30 border-b border-[#232933] bg-[#0B0E11]/95 backdrop-blur-sm">
+    <header className="sticky top-0 z-30 border-b border-sl-border bg-sl-canvas/95 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between gap-6 px-6">
         {/* Zone 1: Wortmarke (Klick führt immer zurück zur Startseite) + Plugin-Breadcrumb */}
         <div className="flex items-center gap-2.5 shrink-0">
@@ -75,17 +75,17 @@ export function CoreTopBar({
             type="button"
             onClick={onLogoKlick}
             title={t('nav.homeTitle')}
-            className="font-display text-lg font-bold tracking-tight text-white whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#F59E0B]"
+            className="font-display text-lg font-bold tracking-tight text-sl-heading whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-sl-accent"
           >
             <BrandWortmarke />
           </button>
 
           {imPlugin && aktivesPlugin && (
             <>
-              <span aria-hidden="true" className="text-[#36404F]">
+              <span aria-hidden="true" className="text-sl-border-strong">
                 /
               </span>
-              <span className="text-xs font-medium text-[#8B949E] whitespace-nowrap">
+              <span className="text-xs font-medium text-sl-muted whitespace-nowrap">
                 {aktivesPlugin.manifest.name}
               </span>
             </>
@@ -102,15 +102,15 @@ export function CoreTopBar({
                     key={eintrag.id}
                     type="button"
                     onClick={() => onPluginTabWechseln(eintrag.id)}
-                    className={`relative h-14 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#F59E0B] ${
-                      istAktiv ? 'text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                    className={`relative h-14 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sl-accent ${
+                      istAktiv ? 'text-sl-heading' : 'text-sl-muted hover:text-sl-primary'
                     }`}
                   >
                     {eintrag.label}
                     {istAktiv && (
                       <span
                         aria-hidden="true"
-                        className="absolute inset-x-0 bottom-0 h-[2px] bg-[#F59E0B]"
+                        className="absolute inset-x-0 bottom-0 h-[2px] bg-sl-accent"
                       />
                     )}
                   </button>
@@ -121,20 +121,20 @@ export function CoreTopBar({
                   key={eintrag.id}
                   type="button"
                   onClick={() => onBereichWechseln(eintrag.id)}
-                  className={`relative inline-flex h-14 items-center gap-1.5 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#F59E0B] ${
-                    eintrag.aktiv ? 'text-white' : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                  className={`relative inline-flex h-14 items-center gap-1.5 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-sl-accent ${
+                    eintrag.aktiv ? 'text-sl-heading' : 'text-sl-muted hover:text-sl-primary'
                   }`}
                 >
                   <span>{eintrag.label}</span>
                   {eintrag.badge !== undefined && (
-                    <span className="font-mono text-[11px] font-semibold text-[#F59E0B] tabular-nums">
+                    <span className="font-mono text-[11px] font-semibold text-sl-accent tabular-nums">
                       ({eintrag.badge})
                     </span>
                   )}
                   {eintrag.aktiv && (
                     <span
                       aria-hidden="true"
-                      className="absolute inset-x-0 bottom-0 h-[2px] bg-[#F59E0B]"
+                      className="absolute inset-x-0 bottom-0 h-[2px] bg-sl-accent"
                     />
                   )}
                 </button>

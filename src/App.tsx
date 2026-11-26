@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, Eye, LogOut, RotateCcw } from 'lucide-react';
 import { CoreTopBar } from './core/layout/CoreTopBar.tsx';
 import { SidelineHubView } from './core/hub/SidelineHubView.tsx';
@@ -16,16 +16,24 @@ import {
   coreApi,
   type AuthSessionResponse,
   type InviteAcceptResponse,
+  type PublicThemePluginDTO,
   type RuntimePluginClientDTO,
   type S3CleanupStatistikDTO,
   type SysadminCapabilitiesDTO,
+  type SysadminMitgliedschaftEingabeDTO,
   type SysadminPluginStatusDTO,
   type UpdatePruefErgebnisDTO,
 } from './core/apiClient.ts';
 import {
+  ermittleEigeneTeams,
   ermittleProfilAusKonto,
-  parseAppRouteAusPfad,
 } from './core/authService.ts';
+import {
+  baueAppAnsichtPfad,
+  baueRoutePfad,
+  parseBrowserPfad,
+  type AppAnsichtZiel,
+} from './core/navigation.ts';
 import { INITIALE_S3_KONFIG, INITIALE_SMTP_KONFIG } from './core/demoOrgData.ts';
 import {
   OFFIZIELLER_PLUGIN_KATALOG,
@@ -33,6 +41,7 @@ import {
   STANDARD_INSTALLIERTE_PLUGIN_IDS,
 } from './core/pluginStoreCatalog.ts';
 import {
+  ermittlePluginProviderKontext,
   erstelleCustomPluginManifest,
   findePlugin,
   istPluginFuerTeamAktiv,
@@ -48,6 +57,7 @@ import {
 import type {
   PluginLaufzeitKontext,
   PluginManifest,
+  PluginProviderKontext,
   PluginStoreEintrag,
   SidelinePlugin,
 } from './sdk/plugin.ts';
@@ -68,6 +78,13 @@ import type {
 } from './shared/types.ts';
 import type { UnterstuetzteSprache } from './shared/i18n.ts';
 import { normalisiereSprache } from './shared/i18n.ts';
+import {
+  STANDARD_THEME_REF,
+  ermittleTeamAkzentTokens,
+  loeseAktivesThemeAuf,
+  sammleVerfuegbareThemes,
+  type PluginThemePreset,
+} from './shared/theme.ts';
 import { holeRollenLabel } from './shared/types.ts';
 import { I18nProvider, useI18n } from './core/i18n/I18nContext.tsx';
 
@@ -79,19 +96,27 @@ function fehlerAusUnbekannt(err: unknown, fallback: string): ApiAktionErgebnis {
 }
 
 /**
- * Schachtelt alle optionalen React-Provider der installierten Plugins um den App-Kern,
- * sodass jedes Plugin seinen eigenen Zustand unabhängig von `App.tsx` verwaltet.
+ * Schachtelt alle optionalen React-Provider der global aktiven Plugins um die Core-Shell,
+ * sodass jedes Plugin seinen Zustand bzw. Theme-Effekte unabhängig verwaltet und Live-Kontext erhält.
  */
 function PluginProviderStack({
   plugins,
+  erzeugeKontext,
   children,
 }: {
   plugins: SidelinePlugin[];
+  erzeugeKontext?: (plugin: SidelinePlugin) => PluginProviderKontext;
   children: ReactNode;
 }) {
   return plugins.reduceRight<ReactNode>((acc, plugin) => {
     const Provider = plugin.Provider;
-    return Provider ? <Provider>{acc}</Provider> : acc;
+    if (!Provider) return acc;
+    const ctx = erzeugeKontext ? erzeugeKontext(plugin) : undefined;
+    return (
+      <Provider key={`${plugin.manifest.id}@${plugin.manifest.version}`} ctx={ctx}>
+        {acc}
+      </Provider>
+    );
   }, children);
 }
 
@@ -125,13 +150,25 @@ function SidelineCoreShell({
   onRuntimeBundlesSynchronisieren,
 }: SidelineShellProps) {
   const { locale, setLocale, setBrandName, t } = useI18n();
-  const [routeModus, setRouteModus] = useState<AppRouteModus>(() =>
-    parseAppRouteAusPfad(typeof window !== 'undefined' ? window.location.pathname : '/')
+  const initialPfad = useMemo(
+    () => parseBrowserPfad(typeof window !== 'undefined' ? window.location.pathname : '/'),
+    []
   );
+  const [routeModus, setRouteModus] = useState<AppRouteModus>(() => initialPfad.routeModus);
 
-  const [bereich, setBereich] = useState<CoreBereich>('hub');
-  const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(null);
-  const [aktiverPluginTab, setAktiverPluginTab] = useState<string>('');
+  const [bereich, setBereich] = useState<CoreBereich>(() => initialPfad.ansicht.bereich);
+  const [aktivesPluginId, setAktivesPluginId] = useState<PluginId | null>(
+    () => initialPfad.ansicht.pluginId
+  );
+  const [aktiverPluginTab, setAktiverPluginTab] = useState<string>(
+    () => initialPfad.ansicht.pluginTab
+  );
+  const [runtimePluginsGeladen, setRuntimePluginsGeladen] = useState<boolean>(false);
+  const ausstehendeZielAnsichtRef = useRef<AppAnsichtZiel | null>(
+    initialPfad.routeModus.art === 'app' && initialPfad.istBekannterAppPfad
+      ? initialPfad.ansicht
+      : null
+  );
 
   const [sessionWirdGeprueft, setSessionWirdGeprueft] = useState<boolean>(true);
   const [aktuellerBenutzer, setAktuellerBenutzer] = useState<BenutzerKonto | null>(null);
@@ -158,34 +195,75 @@ function SidelineCoreShell({
   );
   const [updateStatus, setUpdateStatus] = useState<UpdatePruefErgebnisDTO | null>(null);
   const [cleanupStats, setCleanupStats] = useState<S3CleanupStatistikDTO | null>(null);
+  const [instanceDefaultTheme, setInstanceDefaultTheme] = useState<string>(STANDARD_THEME_REF);
+  const [publicThemePlugins, setPublicThemePlugins] = useState<PublicThemePluginDTO[]>([]);
+  const angewandteThemeTokensRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const onPopState = () => {
-      setRouteModus(parseAppRouteAusPfad(window.location.pathname));
+      const geparst = parseBrowserPfad(window.location.pathname);
+      setRouteModus(geparst.routeModus);
+      if (geparst.routeModus.art === 'app') {
+        setBereich(geparst.ansicht.bereich);
+        setAktivesPluginId(geparst.ansicht.pluginId);
+        setAktiverPluginTab(geparst.ansicht.pluginTab);
+      }
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const navigiereZuRoute = useCallback((ziel: AppRouteModus) => {
-    setRouteModus(ziel);
-    if (typeof window === 'undefined') return;
-    const zielPfad =
-      ziel.art === 'app'
-        ? '/'
-        : ziel.art === 'login'
-          ? '/login'
-          : ziel.art === 'invite'
-            ? `/invite/${encodeURIComponent(ziel.token)}`
-            : `/share/${encodeURIComponent(ziel.token)}`;
-    try {
-      if (window.location.pathname !== zielPfad) {
-        window.history.pushState(null, '', zielPfad);
+  const navigiereZuAppAnsicht = useCallback(
+    (ziel: AppAnsichtZiel, optionen: { replace?: boolean } = {}) => {
+      const normalisiert: AppAnsichtZiel =
+        ziel.bereich === 'modul'
+          ? ziel
+          : { bereich: ziel.bereich, pluginId: null, pluginTab: '' };
+      setRouteModus({ art: 'app' });
+      setBereich(normalisiert.bereich);
+      setAktivesPluginId(normalisiert.pluginId);
+      setAktiverPluginTab(normalisiert.pluginTab);
+      if (typeof window === 'undefined') return;
+      const zielPfad = baueAppAnsichtPfad(normalisiert);
+      try {
+        if (window.location.pathname !== zielPfad) {
+          if (optionen.replace) {
+            window.history.replaceState(null, '', zielPfad);
+          } else {
+            window.history.pushState(null, '', zielPfad);
+          }
+        }
+      } catch {
+        // Ignorieren in restriktiven Sandbox-Umgebungen
       }
-    } catch {
-      // Ignorieren in restriktiven Sandbox-Umgebungen
-    }
-  }, []);
+    },
+    []
+  );
+
+  const navigiereZuRoute = useCallback(
+    (ziel: AppRouteModus, optionen: { replace?: boolean; appAnsicht?: AppAnsichtZiel } = {}) => {
+      setRouteModus(ziel);
+      if (ziel.art === 'app' && optionen.appAnsicht) {
+        setBereich(optionen.appAnsicht.bereich);
+        setAktivesPluginId(optionen.appAnsicht.pluginId);
+        setAktiverPluginTab(optionen.appAnsicht.pluginTab);
+      }
+      if (typeof window === 'undefined') return;
+      const zielPfad = baueRoutePfad(ziel, optionen.appAnsicht);
+      try {
+        if (window.location.pathname !== zielPfad) {
+          if (optionen.replace) {
+            window.history.replaceState(null, '', zielPfad);
+          } else {
+            window.history.pushState(null, '', zielPfad);
+          }
+        }
+      } catch {
+        // Ignorieren in restriktiven Sandbox-Umgebungen
+      }
+    },
+    []
+  );
 
   const ladeSysadminUebersicht = useCallback(async () => {
     try {
@@ -198,6 +276,9 @@ function SidelineCoreShell({
         setSysCapabilities(ov.capabilities);
         if (ov.capabilities.brandName) {
           setBrandName(ov.capabilities.brandName);
+        }
+        if (ov.capabilities.defaultTheme) {
+          setInstanceDefaultTheme(ov.capabilities.defaultTheme);
         }
       }
       if (ov.s3Config) setS3Konfig(ov.s3Config);
@@ -236,6 +317,10 @@ function SidelineCoreShell({
         await onRuntimeBundlesSynchronisieren(rt.bundles);
       } catch {
         // Stille Fehlerbehandlung, falls Backend offline oder Bundle noch nicht gebaut ist
+      } finally {
+        if (!nurPublicShare) {
+          setRuntimePluginsGeladen(true);
+        }
       }
     },
     [
@@ -245,11 +330,26 @@ function SidelineCoreShell({
     ]
   );
 
+  const aktualisierePublicThemes = useCallback(async () => {
+    try {
+      const pub = await coreApi.holePublicThemes();
+      if (pub.instanceDefaultTheme) {
+        setInstanceDefaultTheme(pub.instanceDefaultTheme);
+      }
+      setPublicThemePlugins(Array.isArray(pub.plugins) ? pub.plugins : []);
+    } catch {
+      // Ignorieren falls Backend noch nicht bereit ist
+    }
+  }, []);
+
   const uebernehmeSitzung = useCallback(
-    async (sitzung: AuthSessionResponse) => {
+    async (sitzung: AuthSessionResponse): Promise<AppAnsichtZiel> => {
       setAktuellerBenutzer(sitzung.user);
       if (sitzung.user.preferredLocale) {
         setLocale(normalisiereSprache(sitzung.user.preferredLocale, 'de'));
+      }
+      if (sitzung.instanceDefaultTheme) {
+        setInstanceDefaultTheme(sitzung.instanceDefaultTheme);
       }
       setTeams(sitzung.teams);
       setMitgliedschaften(sitzung.memberships);
@@ -264,8 +364,27 @@ function SidelineCoreShell({
       const profil = ermittleProfilAusKonto(sitzung.user, zielTeamId, sitzung.memberships);
       setAktuellesProfil(profil);
       setAktiveTeamAnsicht(profil.teamRolle);
-      setAktivesPluginId(null);
-      setBereich(profil.teamRolle === null ? 'sysadmin' : 'hub');
+
+      const standardAnsicht: AppAnsichtZiel = {
+        bereich: profil.teamRolle === null ? 'sysadmin' : 'hub',
+        pluginId: null,
+        pluginTab: '',
+      };
+      const zielAusUrl =
+        ausstehendeZielAnsichtRef.current ??
+        (typeof window !== 'undefined'
+          ? (() => {
+              const p = parseBrowserPfad(window.location.pathname);
+              return p.routeModus.art === 'app' && p.istBekannterAppPfad ? p.ansicht : null;
+            })()
+          : null);
+      ausstehendeZielAnsichtRef.current = null;
+      const zielAnsicht = zielAusUrl ?? standardAnsicht;
+
+      setRouteModus({ art: 'app' });
+      setBereich(zielAnsicht.bereich);
+      setAktivesPluginId(zielAnsicht.pluginId);
+      setAktiverPluginTab(zielAnsicht.pluginTab);
 
       if (sitzung.user.istSysadmin) {
         await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
@@ -273,13 +392,16 @@ function SidelineCoreShell({
         setBenutzerListe([sitzung.user]);
         await synchronisiereRuntimePlugins(false);
       }
+      return zielAnsicht;
     },
     [ladeSysadminUebersicht, setLocale, synchronisiereRuntimePlugins]
   );
 
-  // Initialer Session-Check beim App-Start
+  // Initialer Session- & Public-Theme-Check beim App-Start
   useEffect(() => {
     let aktiv = true;
+    void aktualisierePublicThemes();
+
     if (routeModus.art === 'share') {
       void synchronisiereRuntimePlugins(true).finally(() => {
         if (aktiv) setSessionWirdGeprueft(false);
@@ -310,9 +432,15 @@ function SidelineCoreShell({
     return () => {
       aktiv = false;
     };
-  }, [routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
+  }, [aktualisierePublicThemes, routeModus.art, synchronisiereRuntimePlugins, uebernehmeSitzung]);
 
-  const aktivesTeam = teams.find((t) => t.id === aktivesTeamId) ?? teams[0] ?? null;
+  const eigeneTeams = useMemo(
+    () => ermittleEigeneTeams(aktuellerBenutzer, teams, mitgliedschaften),
+    [aktuellerBenutzer, teams, mitgliedschaften]
+  );
+
+  const aktivesTeam =
+    eigeneTeams.find((t) => t.id === aktivesTeamId) ?? eigeneTeams[0] ?? null;
 
   // Team-Mitglieder und Einladungen beim Teamwechsel nachladen
   useEffect(() => {
@@ -434,6 +562,286 @@ function SidelineCoreShell({
       ).length
     : 0;
 
+  const globalAktivePlugins = useMemo(
+    () =>
+      installiertePlugins.filter((plugin) =>
+        globalAktivierteModule.includes(plugin.manifest.id)
+      ),
+    [installiertePlugins, globalAktivierteModule]
+  );
+
+  const erzeugeProviderKontext = useCallback(
+    (plugin: SidelinePlugin): PluginProviderKontext =>
+      ermittlePluginProviderKontext({
+        pluginId: plugin.manifest.id,
+        installierteIds: installiertePluginIds,
+        globalAktivierteIds: globalAktivierteModule,
+        routeArt: routeModus.art,
+        bereich,
+        locale,
+        benutzer: aktuellerBenutzer,
+        aktivesTeam,
+        aktiveTeamAnsicht,
+        gewaehlteSaison: aktiveSaisonAuswahl,
+      }),
+    [
+      installiertePluginIds,
+      globalAktivierteModule,
+      routeModus.art,
+      bereich,
+      locale,
+      aktuellerBenutzer,
+      aktivesTeam,
+      aktiveTeamAnsicht,
+      aktiveSaisonAuswahl,
+    ]
+  );
+
+  const verfuegbareThemes = useMemo(() => {
+    const quellen = new Map<
+      string,
+      { pluginId: string; pluginName: string; themes?: readonly PluginThemePreset[] }
+    >();
+
+    for (const plugin of globalAktivePlugins) {
+      quellen.set(plugin.manifest.id, {
+        pluginId: plugin.manifest.id,
+        pluginName: plugin.manifest.name,
+        themes: plugin.themes ?? plugin.manifest.themes,
+      });
+    }
+
+    const istOeffentlicheAnsicht =
+      !aktuellerBenutzer ||
+      routeModus.art === 'login' ||
+      routeModus.art === 'invite' ||
+      routeModus.art === 'share';
+
+    for (const pub of publicThemePlugins) {
+      if (!istOeffentlicheAnsicht && !globalAktivierteModule.includes(pub.pluginId)) {
+        continue;
+      }
+      const vorhanden = quellen.get(pub.pluginId);
+      if (!vorhanden || !vorhanden.themes || vorhanden.themes.length === 0) {
+        quellen.set(pub.pluginId, {
+          pluginId: pub.pluginId,
+          pluginName: pub.pluginName,
+          themes: pub.themes,
+        });
+      }
+    }
+
+    return sammleVerfuegbareThemes(Array.from(quellen.values()));
+  }, [
+    aktuellerBenutzer,
+    globalAktivierteModule,
+    globalAktivePlugins,
+    publicThemePlugins,
+    routeModus.art,
+  ]);
+
+  const aufgeloestesTheme = useMemo(
+    () =>
+      loeseAktivesThemeAuf({
+        userPreferredTheme: aktuellerBenutzer?.preferredTheme,
+        instanceDefaultTheme,
+        verfuegbareThemes,
+      }),
+    [aktuellerBenutzer?.preferredTheme, instanceDefaultTheme, verfuegbareThemes]
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    const vorherige = angewandteThemeTokensRef.current;
+    const neuAngewandt = new Set<string>();
+
+    const akzentKeys = new Set(['--sl-accent', '--sl-accent-hover', '--sl-accent-contrast']);
+    const istPresetAktiv = aufgeloestesTheme.themeRef !== STANDARD_THEME_REF;
+    const presetTokens = istPresetAktiv ? aufgeloestesTheme.preset.tokens : {};
+
+    // Basis-Tokens aus aktivem Preset anwenden (außer Akzentfarben, die separat koordiniert werden)
+    for (const [token, wert] of Object.entries(presetTokens)) {
+      if (akzentKeys.has(token) || typeof wert !== 'string') continue;
+      root.style.setProperty(token, wert);
+      neuAngewandt.add(token);
+    }
+
+    // Zuvor gesetzte Theme-Tokens entfernen, wenn sie im neuen Theme fehlen
+    for (const alterToken of vorherige) {
+      if (akzentKeys.has(alterToken)) continue;
+      if (!neuAngewandt.has(alterToken)) {
+        root.style.removeProperty(alterToken);
+      }
+    }
+    angewandteThemeTokensRef.current = neuAngewandt;
+
+    // Akzentfarben koordinieren: Preset-Override -> PR2-Provider-Override -> Team-Primärfarbe -> Preset-Akzent -> Core-Default
+    if (istPresetAktiv && aufgeloestesTheme.preset.overrideTeamAccent === true && presetTokens['--sl-accent']) {
+      const abgeleitet = ermittleTeamAkzentTokens(presetTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent', presetTokens['--sl-accent']);
+      root.style.setProperty(
+        '--sl-accent-hover',
+        presetTokens['--sl-accent-hover'] ?? abgeleitet?.['--sl-accent-hover'] ?? '#FBBF24'
+      );
+      root.style.setProperty(
+        '--sl-accent-contrast',
+        presetTokens['--sl-accent-contrast'] ?? abgeleitet?.['--sl-accent-contrast'] ?? '#0B0E11'
+      );
+      return;
+    }
+
+    if (root.dataset.slThemeAccentOverride === 'true') {
+      return;
+    }
+
+    const imTeamKontext =
+      routeModus.art === 'app' &&
+      Boolean(konto) &&
+      Boolean(aktuellerBenutzer) &&
+      bereich !== 'sysadmin' &&
+      aktiveTeamAnsicht !== null &&
+      aktivesTeam !== null;
+
+    const akzentTokens = imTeamKontext
+      ? ermittleTeamAkzentTokens(aktivesTeam?.primaerFarbe)
+      : null;
+
+    if (akzentTokens) {
+      root.style.setProperty('--sl-accent', akzentTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent-hover', akzentTokens['--sl-accent-hover']);
+      root.style.setProperty('--sl-accent-contrast', akzentTokens['--sl-accent-contrast']);
+      return;
+    }
+
+    if (istPresetAktiv && presetTokens['--sl-accent']) {
+      const abgeleitet = ermittleTeamAkzentTokens(presetTokens['--sl-accent']);
+      root.style.setProperty('--sl-accent', presetTokens['--sl-accent']);
+      root.style.setProperty(
+        '--sl-accent-hover',
+        presetTokens['--sl-accent-hover'] ?? abgeleitet?.['--sl-accent-hover'] ?? '#FBBF24'
+      );
+      root.style.setProperty(
+        '--sl-accent-contrast',
+        presetTokens['--sl-accent-contrast'] ?? abgeleitet?.['--sl-accent-contrast'] ?? '#0B0E11'
+      );
+      return;
+    }
+
+    root.style.removeProperty('--sl-accent');
+    root.style.removeProperty('--sl-accent-hover');
+    root.style.removeProperty('--sl-accent-contrast');
+  }, [
+    aufgeloestesTheme,
+    routeModus.art,
+    konto,
+    aktuellerBenutzer,
+    bereich,
+    aktiveTeamAnsicht,
+    aktivesTeam,
+    aktivesTeam?.primaerFarbe,
+  ]);
+
+  // --- URL-Validierung & Fallback nach Hydrierung (Deep-Links, Rollen-/Modul-Wechsel, unbekannte Pfade) ---
+  useEffect(() => {
+    if (sessionWirdGeprueft || routeModus.art !== 'app' || !aktuellerBenutzer || !konto) {
+      return;
+    }
+
+    if (aktiveTeamAnsicht === null || !aktivesTeam) {
+      if (konto.istSysadmin && bereich !== 'sysadmin') {
+        navigiereZuAppAnsicht(
+          { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+      }
+      return;
+    }
+
+    if (bereich === 'sysadmin' && !konto.istSysadmin) {
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
+      return;
+    }
+
+    if (bereich === 'team-settings' && aktiveTeamAnsicht !== 'TEAM_ADMIN') {
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
+      return;
+    }
+
+    if (bereich === 'modul') {
+      if (!aktivesPluginId) {
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+        return;
+      }
+      if (!runtimePluginsGeladen) {
+        return;
+      }
+      if (!aktivesPlugin || typeof aktivesPlugin.renderMainView !== 'function') {
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
+        return;
+      }
+      const tabs = aktivesPlugin.getTabs?.({ teamRolle: aktiveTeamAnsicht, locale }) ?? [];
+      const standardTab =
+        (aktivesPlugin.defaultTab && tabs.some((tab) => tab.id === aktivesPlugin.defaultTab)
+          ? aktivesPlugin.defaultTab
+          : tabs[0]?.id) ??
+        aktivesPlugin.defaultTab ??
+        '';
+      const gueltigerTab =
+        tabs.length > 0
+          ? tabs.some((tab) => tab.id === aktiverPluginTab)
+            ? aktiverPluginTab
+            : standardTab
+          : aktiverPluginTab || standardTab;
+
+      const erwarteterPfad = baueAppAnsichtPfad({
+        bereich: 'modul',
+        pluginId: aktivesPlugin.manifest.id,
+        pluginTab: gueltigerTab,
+      });
+      if (
+        gueltigerTab !== aktiverPluginTab ||
+        (typeof window !== 'undefined' && window.location.pathname !== erwarteterPfad)
+      ) {
+        navigiereZuAppAnsicht(
+          { bereich: 'modul', pluginId: aktivesPlugin.manifest.id, pluginTab: gueltigerTab },
+          { replace: true }
+        );
+      }
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      const geparst = parseBrowserPfad(window.location.pathname);
+      if (!geparst.istBekannterAppPfad) {
+        navigiereZuAppAnsicht(
+          { bereich, pluginId: aktivesPluginId, pluginTab: aktiverPluginTab },
+          { replace: true }
+        );
+      }
+    }
+  }, [
+    sessionWirdGeprueft,
+    routeModus.art,
+    aktuellerBenutzer,
+    konto,
+    aktiveTeamAnsicht,
+    aktivesTeam,
+    bereich,
+    aktivesPluginId,
+    aktiverPluginTab,
+    aktivesPlugin,
+    runtimePluginsGeladen,
+    locale,
+    navigiereZuAppAnsicht,
+  ]);
+
   // --- Auth & Einladungs-Handler ---
   const handleAnmelden = async (
     kennung: string,
@@ -441,8 +849,9 @@ function SidelineCoreShell({
   ): Promise<{ ok: boolean; fehler?: string }> => {
     try {
       const res = await coreApi.login(kennung, passwort);
-      await uebernehmeSitzung(res);
-      navigiereZuRoute({ art: 'app' });
+      const warLoginPfad = typeof window !== 'undefined' && window.location.pathname === '/login';
+      const zielAnsicht = await uebernehmeSitzung(res);
+      navigiereZuAppAnsicht(zielAnsicht, { replace: !warLoginPfad });
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Anmeldung fehlgeschlagen.');
@@ -462,9 +871,8 @@ function SidelineCoreShell({
     const profil = ermittleProfilAusKonto(ergebnis.user, ergebnis.team.id, [ergebnis.membership]);
     setAktuellesProfil(profil);
     setAktiveTeamAnsicht(profil.teamRolle);
-    setAktivesPluginId(null);
-    setBereich('hub');
-    navigiereZuRoute({ art: 'app' });
+    ausstehendeZielAnsichtRef.current = null;
+    navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' });
 
     try {
       const vollSitzung = await coreApi.holeAktuelleSitzung();
@@ -480,6 +888,9 @@ function SidelineCoreShell({
     setAktuellerBenutzer(null);
     setAktiveTeamAnsicht(null);
     setAktivesPluginId(null);
+    setAktiverPluginTab('');
+    setRuntimePluginsGeladen(false);
+    ausstehendeZielAnsichtRef.current = null;
     setTeams([]);
     setMitgliedschaften([]);
     setEinladungen([]);
@@ -541,25 +952,71 @@ function SidelineCoreShell({
     }
   };
 
+  const handleThemeSpeichern = async (
+    themeRef: string | null
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereEigenesProfil({ preferredTheme: themeRef });
+      setAktuellerBenutzer(res.user);
+      setBenutzerListe((alt) => alt.map((b) => (b.uuid === res.user.uuid ? res.user : b)));
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Theme-Einstellung konnte nicht gespeichert werden.');
+    }
+  };
+
+  const handleDefaultThemeSpeichern = async (
+    themeRef: string
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.speichereStandardTheme(themeRef);
+      setInstanceDefaultTheme(res.defaultTheme);
+      setSysCapabilities((alt) => (alt ? { ...alt, defaultTheme: res.defaultTheme } : alt));
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Instanz-Standard-Theme konnte nicht gespeichert werden.');
+    }
+  };
+
   // --- Navigation ---
   const handleLogoKlick = () => {
-    setAktivesPluginId(null);
-    setBereich(aktiveTeamAnsicht === null ? 'sysadmin' : 'hub');
+    navigiereZuAppAnsicht({
+      bereich: aktiveTeamAnsicht === null ? 'sysadmin' : 'hub',
+      pluginId: null,
+      pluginTab: '',
+    });
   };
 
   const handleBereichWechseln = (ziel: CoreBereich) => {
-    if (ziel !== 'modul') {
-      setAktivesPluginId(null);
-    }
-    setBereich(ziel);
+    navigiereZuAppAnsicht({
+      bereich: ziel,
+      pluginId: ziel === 'modul' ? aktivesPluginId : null,
+      pluginTab: ziel === 'modul' ? aktiverPluginTab : '',
+    });
   };
 
   const handleModulOeffnen = (pluginId: PluginId) => {
     const ziel = findePlugin(aktiveTeamPlugins, pluginId);
-    if (!ziel) return;
-    setAktivesPluginId(pluginId);
-    setAktiverPluginTab(ziel.defaultTab);
-    setBereich('modul');
+    if (!ziel || typeof ziel.renderMainView !== 'function') return;
+    const tabs = ziel.getTabs?.({ teamRolle: aktiveTeamAnsicht ?? 'PLAYER', locale }) ?? [];
+    const zielTab = ziel.defaultTab ?? tabs[0]?.id ?? '';
+    navigiereZuAppAnsicht({
+      bereich: 'modul',
+      pluginId,
+      pluginTab: zielTab,
+    });
+  };
+
+  const handlePluginTabWechseln = (neuerTab: string) => {
+    if (!aktivesPluginId) {
+      setAktiverPluginTab(neuerTab);
+      return;
+    }
+    navigiereZuAppAnsicht({
+      bereich: 'modul',
+      pluginId: aktivesPluginId,
+      pluginTab: neuerTab,
+    });
   };
 
   const handleTeamAnsichtWechseln = (zielRolle: TeamRolle) => {
@@ -567,31 +1024,32 @@ function SidelineCoreShell({
     setAktiveTeamAnsicht(zielRolle);
 
     if (bereich === 'sysadmin') {
-      setAktivesPluginId(null);
-      setBereich('hub');
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
       return;
     }
     if (zielRolle !== 'TEAM_ADMIN' && bereich === 'team-settings') {
-      setAktivesPluginId(null);
-      setBereich('hub');
+      navigiereZuAppAnsicht({ bereich: 'hub', pluginId: null, pluginTab: '' }, { replace: true });
       return;
     }
     if (aktivesPlugin && bereich === 'modul') {
-      const erlaubteTabs = aktivesPlugin.getTabs({ teamRolle: zielRolle, locale });
-      if (!erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
-        setAktiverPluginTab(erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab);
+      const erlaubteTabs = aktivesPlugin.getTabs?.({ teamRolle: zielRolle, locale }) ?? [];
+      if (erlaubteTabs.length > 0 && !erlaubteTabs.some((t) => t.id === aktiverPluginTab)) {
+        const fallbackTab = erlaubteTabs[0]?.id ?? aktivesPlugin.defaultTab ?? '';
+        navigiereZuAppAnsicht(
+          { bereich: 'modul', pluginId: aktivesPlugin.manifest.id, pluginTab: fallbackTab },
+          { replace: true }
+        );
       }
     }
   };
 
   const handleTeamWechseln = (neueTeamId: string) => {
-    setAktivesTeamId(neueTeamId);
-    const ziel = teams.find((t) => t.id === neueTeamId);
-    if (ziel) {
-      setGewaehlteSaison(ziel.aktiveSaison);
-    }
+    const ziel = eigeneTeams.find((t) => t.id === neueTeamId);
+    if (!ziel) return;
+    setAktivesTeamId(ziel.id);
+    setGewaehlteSaison(ziel.aktiveSaison);
     if (aktuellerBenutzer) {
-      const neuesProfil = ermittleProfilAusKonto(aktuellerBenutzer, neueTeamId, mitgliedschaften);
+      const neuesProfil = ermittleProfilAusKonto(aktuellerBenutzer, ziel.id, mitgliedschaften);
       setAktiveTeamAnsicht(neuesProfil.teamRolle);
     }
   };
@@ -758,13 +1216,20 @@ function SidelineCoreShell({
     try {
       await coreApi.setzePluginGlobalAktiv(pluginId, zielAktiv);
       if (aktivesPluginId === pluginId && !zielAktiv) {
-        setAktivesPluginId(null);
-        setBereich('hub');
+        navigiereZuAppAnsicht(
+          { bereich: 'hub', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
       }
       onGlobalModulToggle(pluginId);
-      await synchronisiereRuntimePlugins(false);
+      await Promise.all([synchronisiereRuntimePlugins(false), aktualisierePublicThemes()]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Globaler Plugin-Status konnte nicht gespeichert werden.');
     }
   };
@@ -813,19 +1278,52 @@ function SidelineCoreShell({
     }
   };
 
+  const handleSysadminTeamAktualisieren = async (
+    teamId: string,
+    daten: Partial<
+      Pick<TeamKontext, 'name' | 'kurzname' | 'aktiveSaison' | 'primaerFarbe' | 'customProfilFelder'>
+    >
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereSysadminTeam(teamId, daten);
+      setTeams((alt) => alt.map((t) => (t.id === teamId ? res.team : t)));
+      if (teamId === aktivesTeamId && daten.aktiveSaison) {
+        setGewaehlteSaison(res.team.aktiveSaison);
+      }
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Team konnte nicht aktualisiert werden.');
+    }
+  };
+
   const handleTeamLoeschen = async (teamId: string): Promise<ApiAktionErgebnis> => {
     try {
       await coreApi.loescheTeam(teamId);
-      setTeams((alt) => {
-        const rest = alt.filter((t) => t.id !== teamId);
-        if (rest.length > 0 && aktivesTeamId === teamId) {
-          setAktivesTeamId(rest[0].id);
-          setGewaehlteSaison(rest[0].aktiveSaison);
-        }
-        return rest;
-      });
-      setMitgliedschaften((alt) => alt.filter((m) => m.teamId !== teamId));
+      const verbleibendeTeams = teams.filter((t) => t.id !== teamId);
+      const verbleibendeMitgliedschaften = mitgliedschaften.filter((m) => m.teamId !== teamId);
+      setTeams(verbleibendeTeams);
+      setMitgliedschaften(verbleibendeMitgliedschaften);
       setEinladungen((alt) => alt.filter((e) => e.teamId !== teamId));
+      if (aktivesTeamId === teamId) {
+        const naechsteEigene = ermittleEigeneTeams(
+          aktuellerBenutzer,
+          verbleibendeTeams,
+          verbleibendeMitgliedschaften
+        );
+        const naechstesTeam = naechsteEigene[0] ?? null;
+        setAktivesTeamId(naechstesTeam?.id ?? '');
+        if (naechstesTeam) {
+          setGewaehlteSaison(naechstesTeam.aktiveSaison);
+        }
+        if (aktuellerBenutzer) {
+          const neuesProfil = ermittleProfilAusKonto(
+            aktuellerBenutzer,
+            naechstesTeam?.id ?? '',
+            verbleibendeMitgliedschaften
+          );
+          setAktiveTeamAnsicht(neuesProfil.teamRolle);
+        }
+      }
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Team konnte nicht gelöscht werden.');
@@ -839,18 +1337,72 @@ function SidelineCoreShell({
       email: string;
       passwort: string;
       istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
     },
-    teamZuweisung?: { teamId: string; rolle: TeamRolle }
+    teamZuweisung?: { teamId: string; rolle: TeamRolle },
+    mitgliedschaftenNeu?: SysadminMitgliedschaftEingabeDTO[]
   ): Promise<ApiAktionErgebnis> => {
     try {
-      const res = await coreApi.erstelleBenutzer({ ...payload, teamZuweisung });
+      const res = await coreApi.erstelleBenutzer({
+        ...payload,
+        ...(mitgliedschaftenNeu !== undefined
+          ? { mitgliedschaften: mitgliedschaftenNeu }
+          : { teamZuweisung }),
+      });
       setBenutzerListe((alt) => [...alt, res.user]);
-      if (res.membership) {
-        setMitgliedschaften((alt) => [...alt, res.membership!]);
+      const hinzugefuegte =
+        res.memberships ?? (res.membership ? [res.membership] : []);
+      if (hinzugefuegte.length > 0) {
+        setMitgliedschaften((alt) => [...alt, ...hinzugefuegte]);
       }
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Benutzerkonto konnte nicht angelegt werden.');
+    }
+  };
+
+  const handleBenutzerAktualisieren = async (
+    userUuid: string,
+    payload: {
+      vollerName: string;
+      benutzername: string;
+      email: string;
+      istSysadmin: boolean;
+      telefon?: string;
+      trikotNummer?: string;
+      position?: string;
+      preferredLocale?: UnterstuetzteSprache;
+      neuesPasswort?: string;
+      mitgliedschaften: SysadminMitgliedschaftEingabeDTO[];
+    }
+  ): Promise<ApiAktionErgebnis> => {
+    try {
+      const res = await coreApi.aktualisiereBenutzer(userUuid, payload);
+      setBenutzerListe((alt) => alt.map((b) => (b.uuid === userUuid ? res.user : b)));
+      const aktualisierteMitgliedschaften = [
+        ...mitgliedschaften.filter((m) => m.userUuid !== userUuid),
+        ...res.memberships,
+      ];
+      setMitgliedschaften(aktualisierteMitgliedschaften);
+      if (aktuellerBenutzer?.uuid === userUuid) {
+        setAktuellerBenutzer(res.user);
+        const neueEigene = ermittleEigeneTeams(res.user, teams, aktualisierteMitgliedschaften);
+        const zielTeam =
+          neueEigene.find((t) => t.id === aktivesTeamId) ?? neueEigene[0] ?? null;
+        setAktivesTeamId(zielTeam?.id ?? '');
+        const neuesProfil = ermittleProfilAusKonto(
+          res.user,
+          zielTeam?.id ?? '',
+          aktualisierteMitgliedschaften
+        );
+        setAktiveTeamAnsicht(neuesProfil.teamRolle);
+      }
+      return { ok: true };
+    } catch (err) {
+      return fehlerAusUnbekannt(err, 'Benutzerkonto konnte nicht gespeichert werden.');
     }
   };
 
@@ -882,8 +1434,10 @@ function SidelineCoreShell({
 
   const handleDeinstallierenMitRuecksprung = (pluginId: PluginId) => {
     if (aktivesPluginId === pluginId) {
-      setAktivesPluginId(null);
-      setBereich('sysadmin');
+      navigiereZuAppAnsicht(
+        { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+        { replace: true }
+      );
     }
     onPluginDeinstallieren(pluginId);
   };
@@ -955,9 +1509,18 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginRelease(repoUrl, tag);
       onBackendPluginRegistrieren(res.manifest, res.releaseTag);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Release-Installation fehlgeschlagen.');
     }
   };
@@ -969,9 +1532,18 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginUpload(contentBase64, expectedSha256);
       onBackendPluginRegistrieren(res.manifest, `v${res.manifest.version}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Offline-Paket konnte nicht installiert werden.');
     }
   };
@@ -983,9 +1555,18 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.installierePluginDevGit(repoUrl, branch);
       onBackendPluginRegistrieren(res.manifest, `dev:${res.branch}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Dev-Git-Installation fehlgeschlagen.');
     }
   };
@@ -994,9 +1575,18 @@ function SidelineCoreShell({
     try {
       const res = await coreApi.rollbackPlugin(pluginId);
       onBackendPluginRegistrieren(res.manifest, `v${res.version}`);
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]).catch(() => undefined);
       return fehlerAusUnbekannt(err, 'Rollback fehlgeschlagen.');
     }
   };
@@ -1007,10 +1597,16 @@ function SidelineCoreShell({
     try {
       await coreApi.deinstallierePlugin(pluginId);
       if (aktivesPluginId === pluginId) {
-        setAktivesPluginId(null);
-        setBereich('sysadmin');
+        navigiereZuAppAnsicht(
+          { bereich: 'sysadmin', pluginId: null, pluginTab: '' },
+          { replace: true }
+        );
       }
-      await Promise.all([ladeSysadminUebersicht(), synchronisiereRuntimePlugins(false)]);
+      await Promise.all([
+        ladeSysadminUebersicht(),
+        synchronisiereRuntimePlugins(false),
+        aktualisierePublicThemes(),
+      ]);
       return { ok: true };
     } catch (err) {
       return fehlerAusUnbekannt(err, 'Plugin konnte nicht deinstalliert werden.');
@@ -1029,91 +1625,98 @@ function SidelineCoreShell({
     }
   };
 
-  // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
-  if (routeModus.art === 'share') {
+  const renderShellInhalt = (): ReactNode => {
+    // --- Öffentliche Routen (/share/<token>, /invite/<token>, /login) ---
+    if (routeModus.art === 'share') {
+      if (sessionWirdGeprueft) {
+        return (
+          <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
+            {t('app.checkingSession')}
+          </div>
+        );
+      }
+      const sharePlugin = installiertePlugins.find(
+        (p) => typeof p.renderPublicShareView === 'function'
+      );
+      if (sharePlugin?.renderPublicShareView) {
+        return sharePlugin.renderPublicShareView({
+          token: routeModus.token,
+          locale,
+          onSchliessen: () => navigiereZuRoute({ art: 'app' }),
+        });
+      }
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-sl-canvas px-4 py-10 text-sl-primary">
+          <div className="w-full max-w-md space-y-4 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
+            <h1 className="text-base font-semibold text-sl-heading">{t('app.noVideoPluginTitle')}</h1>
+            <p className="text-xs text-sl-muted">{t('app.noVideoPluginBody')}</p>
+            <button
+              type="button"
+              onClick={() => navigiereZuRoute({ art: 'app' })}
+              className="inline-flex items-center gap-1.5 rounded-md border border-sl-border bg-sl-canvas px-4 py-2 text-xs font-medium text-sl-heading hover:border-sl-accent"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+              {t('app.backToBrand')}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (routeModus.art === 'invite') {
+      return (
+        <InviteRegisterView
+          token={routeModus.token}
+          onBeigetreten={(res) => void handleInviteBeigetreten(res)}
+          onZurueckZumLogin={() => navigiereZuRoute({ art: 'login' })}
+        />
+      );
+    }
+
     if (sessionWirdGeprueft) {
       return (
-        <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
+        <div className="flex min-h-screen items-center justify-center bg-sl-canvas text-xs text-sl-muted">
           {t('app.checkingSession')}
         </div>
       );
     }
-    const sharePlugin = installiertePlugins.find(
-      (p) => typeof p.renderPublicShareView === 'function'
-    );
-    if (sharePlugin?.renderPublicShareView) {
-      return sharePlugin.renderPublicShareView({
-        token: routeModus.token,
-        locale,
-        onSchliessen: () => navigiereZuRoute({ art: 'app' }),
-      });
+
+    if (routeModus.art === 'login' || !konto || !aktuellerBenutzer) {
+      return <LoginView onAnmelden={handleAnmelden} />;
     }
+
+    const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
+      bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null && aktivesTeam
+        ? {
+            team: aktivesTeam,
+            aktiveTeamAnsicht,
+            gewaehlteSaison: aktiveSaisonAuswahl,
+            benutzer: aktuellerBenutzer,
+            userUnits: [...(aktuelleMitgliedschaft?.units ?? [])],
+            locale,
+            aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab || '',
+            onTabWechseln: handlePluginTabWechseln,
+            onTeamSettingsOeffnen: () =>
+              navigiereZuAppAnsicht({
+                bereich: 'team-settings',
+                pluginId: null,
+                pluginTab: '',
+              }),
+            onZurueckZurStartseite: handleLogoKlick,
+            onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
+          }
+        : null;
+
+    const pluginTabs =
+      pluginLaufzeitKontext && aktivesPlugin
+        ? aktivesPlugin.getTabs?.({
+            teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht,
+            locale,
+          }) ?? []
+        : [];
+
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] px-4 py-10 text-[#E6EDF3]">
-        <div className="w-full max-w-md space-y-4 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
-          <h1 className="text-base font-semibold text-white">{t('app.noVideoPluginTitle')}</h1>
-          <p className="text-xs text-[#8B949E]">{t('app.noVideoPluginBody')}</p>
-          <button
-            type="button"
-            onClick={() => navigiereZuRoute({ art: 'app' })}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#232933] bg-[#0B0E11] px-4 py-2 text-xs font-medium text-white hover:border-[#F59E0B]"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            {t('app.backToBrand')}
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (routeModus.art === 'invite') {
-    return (
-      <InviteRegisterView
-        token={routeModus.token}
-        onBeigetreten={(res) => void handleInviteBeigetreten(res)}
-        onZurueckZumLogin={() => navigiereZuRoute({ art: 'login' })}
-      />
-    );
-  }
-
-  if (sessionWirdGeprueft) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0E11] text-xs text-[#8B949E]">
-        {t('app.checkingSession')}
-      </div>
-    );
-  }
-
-  if (routeModus.art === 'login' || !konto || !aktuellerBenutzer) {
-    return <LoginView onAnmelden={handleAnmelden} />;
-  }
-
-  const pluginLaufzeitKontext: PluginLaufzeitKontext | null =
-    bereich === 'modul' && aktivesPlugin && aktiveTeamAnsicht !== null && aktivesTeam
-      ? {
-          team: aktivesTeam,
-          aktiveTeamAnsicht,
-          gewaehlteSaison: aktiveSaisonAuswahl,
-          benutzer: aktuellerBenutzer,
-          locale,
-          aktuellerTab: aktiverPluginTab || aktivesPlugin.defaultTab,
-          onTabWechseln: setAktiverPluginTab,
-          onTeamSettingsOeffnen: () => {
-            setAktivesPluginId(null);
-            setBereich('team-settings');
-          },
-          onZurueckZurStartseite: handleLogoKlick,
-          onPublicShareOeffnen: (token) => navigiereZuRoute({ art: 'share', token }),
-        }
-      : null;
-
-  const pluginTabs =
-    pluginLaufzeitKontext && aktivesPlugin
-      ? aktivesPlugin.getTabs({ teamRolle: pluginLaufzeitKontext.aktiveTeamAnsicht, locale })
-      : [];
-
-  return (
-    <div className="min-h-screen bg-[#0B0E11] text-[#E6EDF3]">
+    <div className="min-h-screen bg-sl-canvas text-sl-primary">
       <CoreTopBar
         bereich={bereich}
         aktivesPlugin={aktivesPlugin}
@@ -1125,51 +1728,58 @@ function SidelineCoreShell({
         ausstehendeAnfragenAnzahl={ausstehendeAnfragenAnzahl}
         onLogoKlick={handleLogoKlick}
         onBereichWechseln={handleBereichWechseln}
-        onPluginTabWechseln={setAktiverPluginTab}
+        onPluginTabWechseln={handlePluginTabWechseln}
       />
 
       {/* Kontext-Leiste: Team-Wahl, Saison-Wahl, Ansichts-Umschalter, Demo-Konto & Abmelden */}
-      <div className="border-b border-[#232933] bg-[#0F1318]">
+      <div className="border-b border-sl-border bg-sl-topbar">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-4 px-6 py-2.5">
           <div className="flex flex-wrap items-center gap-3">
             {aktiveTeamAnsicht === null || bereich === 'sysadmin' || !aktivesTeam ? (
-              <span className="text-xs font-medium text-[#8B949E]">
+              <span className="text-xs font-medium text-sl-muted">
                 {t('app.context.sysadminScope')}
               </span>
             ) : (
               <>
-                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
-                  <span>{t('app.context.team')}</span>
-                  <select
-                    value={aktivesTeam.id}
-                    onChange={(e) => handleTeamWechseln(e.target.value)}
-                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
-                  >
-                    {teams.map((team) => (
-                      <option key={team.id} value={team.id} className="bg-[#13171D]">
-                        {team.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {eigeneTeams.length > 1 ? (
+                  <label className="flex items-center gap-2 text-xs text-sl-muted">
+                    <span>{t('app.context.team')}</span>
+                    <select
+                      value={aktivesTeam.id}
+                      onChange={(e) => handleTeamWechseln(e.target.value)}
+                      className="rounded border border-sl-border bg-sl-surface px-2.5 py-1 text-xs font-medium text-sl-heading focus:border-sl-accent focus:outline-none"
+                    >
+                      {eigeneTeams.map((team) => (
+                        <option key={team.id} value={team.id} className="bg-sl-surface">
+                          {team.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="flex items-center gap-2 text-xs text-sl-muted">
+                    <span>{t('app.context.team')}</span>
+                    <span className="font-medium text-sl-heading">{aktivesTeam.name}</span>
+                  </div>
+                )}
 
-                <label className="flex items-center gap-2 text-xs text-[#8B949E]">
+                <label className="flex items-center gap-2 text-xs text-sl-muted">
                   <span>{t('app.context.season')}</span>
                   <select
                     aria-label={t('app.context.seasonSelectAria')}
                     value={aktiveSaisonAuswahl}
                     onChange={(e) => setGewaehlteSaison(e.target.value)}
-                    className="rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 font-mono text-xs font-medium text-white focus:border-[#F59E0B] focus:outline-none"
+                    className="rounded border border-sl-border bg-sl-surface px-2.5 py-1 font-mono text-xs font-medium text-sl-heading focus:border-sl-accent focus:outline-none"
                   >
                     {aktivesTeam.saisons.map((s) => (
-                      <option key={s} value={s} className="bg-[#13171D]">
+                      <option key={s} value={s} className="bg-sl-surface">
                         {s}{' '}
                         {s === aktivesTeam.aktiveSaison
                           ? t('app.context.seasonCurrent')
                           : t('app.context.seasonArchive')}
                       </option>
                     ))}
-                    <option value="ALL" className="bg-[#13171D]">
+                    <option value="ALL" className="bg-sl-surface">
                       {t('app.context.allSeasons')}
                     </option>
                   </select>
@@ -1181,14 +1791,14 @@ function SidelineCoreShell({
           <div className="flex flex-wrap items-center gap-3">
             {kannAnsichtWechseln && (
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-[#8B949E]">
-                  <Eye className="h-3.5 w-3.5 text-[#F59E0B]" aria-hidden="true" />
+                <span className="inline-flex items-center gap-1 text-xs text-sl-muted">
+                  <Eye className="h-3.5 w-3.5 text-sl-accent" aria-hidden="true" />
                   {t('app.context.view')}
                 </span>
                 <div
                   role="group"
                   aria-label={t('app.context.roleSwitchAria')}
-                  className="flex items-center gap-0.5 rounded-md border border-[#232933] bg-[#13171D] p-0.5"
+                  className="flex items-center gap-0.5 rounded-md border border-sl-border bg-sl-surface p-0.5"
                 >
                   {waehlbareAnsichten.map((rolle) => {
                     const aktiv = aktiveTeamAnsicht === rolle;
@@ -1199,8 +1809,8 @@ function SidelineCoreShell({
                         onClick={() => handleTeamAnsichtWechseln(rolle)}
                         className={`rounded px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
                           aktiv
-                            ? 'bg-[#232933] text-white'
-                            : 'text-[#8B949E] hover:text-[#E6EDF3]'
+                            ? 'bg-sl-border text-sl-heading'
+                            : 'text-sl-muted hover:text-sl-primary'
                         }`}
                       >
                         {holeRollenLabel(rolle, locale)}
@@ -1215,7 +1825,7 @@ function SidelineCoreShell({
               type="button"
               onClick={() => void handleAbmelden()}
               title={t('app.context.logout')}
-              className="inline-flex items-center gap-1 rounded border border-[#232933] bg-[#13171D] px-2.5 py-1 text-xs text-[#8B949E] transition-colors hover:border-[#F59E0B] hover:text-white"
+              className="inline-flex items-center gap-1 rounded border border-sl-border bg-sl-surface px-2.5 py-1 text-xs text-sl-muted transition-colors hover:border-sl-accent hover:text-sl-heading"
             >
               <LogOut className="h-3 w-3" aria-hidden="true" />
               {t('app.context.logout')}
@@ -1226,11 +1836,11 @@ function SidelineCoreShell({
 
       {/* Hinweis-Banner bei aktiver Vorschau einer untergeordneten Rolle */}
       {istVorschauModus && konto.teamRolle && aktiveTeamAnsicht && (
-        <div className="border-b border-[#F59E0B]/30 bg-[#F59E0B]/10">
-          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-[#FDE68A]">
+        <div className="border-b border-sl-accent/30 bg-sl-accent/10">
+          <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-3 px-6 py-2 text-xs text-sl-warning-text">
             <span>
               {t('app.previewBanner.prefix')}{' '}
-              <strong className="font-semibold text-white">
+              <strong className="font-semibold text-sl-heading">
                 {holeRollenLabel(aktiveTeamAnsicht, locale)}
               </strong>{' '}
               ({t('app.previewBanner.actualRole')}: {holeRollenLabel(konto.teamRolle, locale)}).
@@ -1238,7 +1848,7 @@ function SidelineCoreShell({
             <button
               type="button"
               onClick={() => handleTeamAnsichtWechseln(konto.teamRolle!)}
-              className="inline-flex items-center gap-1.5 rounded border border-[#F59E0B]/50 bg-[#0B0E11] px-2.5 py-1 text-xs font-medium text-[#F59E0B] hover:bg-[#13171D]"
+              className="inline-flex items-center gap-1.5 rounded border border-sl-accent/50 bg-sl-canvas px-2.5 py-1 text-xs font-medium text-sl-accent hover:bg-sl-surface"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
               {t('app.previewBanner.backTo')} {holeRollenLabel(konto.teamRolle, locale)}
@@ -1264,6 +1874,9 @@ function SidelineCoreShell({
             mitgliedschaften={mitgliedschaften}
             s3Konfig={s3Konfig}
             smtpKonfig={smtpKonfig}
+            defaultTheme={instanceDefaultTheme}
+            verfuegbareThemes={verfuegbareThemes}
+            onDefaultThemeSpeichern={handleDefaultThemeSpeichern}
             onPluginInstallieren={onPluginInstallieren}
             onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
             onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
@@ -1277,8 +1890,10 @@ function SidelineCoreShell({
             onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
             onTeamModulToggle={handleTeamModulToggle}
             onTeamErstellen={handleTeamErstellen}
+            onTeamAktualisieren={handleSysadminTeamAktualisieren}
             onTeamLoeschen={handleTeamLoeschen}
             onBenutzerErstellen={handleBenutzerErstellen}
+            onBenutzerAktualisieren={handleBenutzerAktualisieren}
             onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
             onBenutzerLoeschen={handleBenutzerLoeschen}
             onS3Speichern={handleS3Speichern}
@@ -1307,6 +1922,9 @@ function SidelineCoreShell({
               mitgliedschaften={mitgliedschaften}
               s3Konfig={s3Konfig}
               smtpKonfig={smtpKonfig}
+              defaultTheme={instanceDefaultTheme}
+              verfuegbareThemes={verfuegbareThemes}
+              onDefaultThemeSpeichern={handleDefaultThemeSpeichern}
               onPluginInstallieren={onPluginInstallieren}
               onPluginDeinstallieren={handleDeinstallierenMitRuecksprung}
               onCustomGitHubPluginHinzufuegen={onCustomGitHubPluginHinzufuegen}
@@ -1320,8 +1938,10 @@ function SidelineCoreShell({
               onGlobalModulToggle={handleGlobalToggleMitRuecksprung}
               onTeamModulToggle={handleTeamModulToggle}
               onTeamErstellen={handleTeamErstellen}
+              onTeamAktualisieren={handleSysadminTeamAktualisieren}
               onTeamLoeschen={handleTeamLoeschen}
               onBenutzerErstellen={handleBenutzerErstellen}
+              onBenutzerAktualisieren={handleBenutzerAktualisieren}
               onBenutzerSysadminToggle={handleBenutzerSysadminToggle}
               onBenutzerLoeschen={handleBenutzerLoeschen}
               onS3Speichern={handleS3Speichern}
@@ -1330,9 +1950,9 @@ function SidelineCoreShell({
               onSmtpTesten={handleSmtpTesten}
             />
           ) : (
-            <div className="mx-auto max-w-md space-y-3 rounded-xl border border-[#232933] bg-[#13171D] p-6 text-center">
-              <h1 className="text-base font-semibold text-white">{t('app.noTeamTitle')}</h1>
-              <p className="text-xs text-[#8B949E]">{t('app.noTeamBody')}</p>
+            <div className="mx-auto max-w-md space-y-3 rounded-xl border border-sl-border bg-sl-surface p-6 text-center">
+              <h1 className="text-base font-semibold text-sl-heading">{t('app.noTeamTitle')}</h1>
+              <p className="text-xs text-sl-muted">{t('app.noTeamBody')}</p>
             </div>
           )
         ) : bereich === 'hub' ? (
@@ -1361,9 +1981,12 @@ function SidelineCoreShell({
             aktiveTeamAnsicht={aktiveTeamAnsicht}
             s3Konfig={s3Konfig}
             aktivePlugins={aktiveTeamPlugins}
+            verfuegbareThemes={verfuegbareThemes}
+            instanceDefaultTheme={instanceDefaultTheme}
             onProfilSpeichern={handleProfilSpeichern}
             onZugangSpeichern={handleZugangSpeichern}
             onSpracheSpeichern={handleSpracheSpeichern}
+            onThemeSpeichern={handleThemeSpeichern}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
         ) : bereich === 'team-settings' && aktiveTeamAnsicht === 'TEAM_ADMIN' ? (
@@ -1390,8 +2013,13 @@ function SidelineCoreShell({
             onEinladungTesten={(token) => navigiereZuRoute({ art: 'invite', token })}
             onZurueck={() => handleBereichWechseln('settings-hub')}
           />
-        ) : bereich === 'modul' && aktivesPlugin && pluginLaufzeitKontext ? (
-          aktivesPlugin.renderMainView(pluginLaufzeitKontext)
+        ) : bereich === 'modul' &&
+          aktivesPlugin &&
+          typeof aktivesPlugin.renderMainView === 'function' &&
+          pluginLaufzeitKontext ? (
+          <div key={`${aktivesPlugin.manifest.id}@${aktivesPlugin.manifest.version}`}>
+            {aktivesPlugin.renderMainView(pluginLaufzeitKontext)}
+          </div>
         ) : (
           <SidelineHubView
             aktivePlugins={aktiveTeamPlugins}
@@ -1403,6 +2031,16 @@ function SidelineCoreShell({
         )}
       </main>
     </div>
+    );
+  };
+
+  return (
+    <PluginProviderStack
+      plugins={globalAktivePlugins}
+      erzeugeKontext={erzeugeProviderKontext}
+    >
+      {renderShellInhalt()}
+    </PluginProviderStack>
   );
 }
 
@@ -1486,22 +2124,20 @@ export default function App() {
 
   return (
     <I18nProvider>
-      <PluginProviderStack plugins={installiertePlugins}>
-        <SidelineCoreShell
-          storeKatalog={storeKatalog}
-          installiertePlugins={installiertePlugins}
-          installiertePluginIds={installiertePluginIds}
-          globalAktivierteModule={globalAktivierteModule}
-          onPluginInstallieren={handlePluginInstallieren}
-          onPluginDeinstallieren={handlePluginDeinstallieren}
-          onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
-          onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
-          onGlobalModulToggle={handleGlobalModulToggle}
-          onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
-          onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
-          onRuntimeBundlesSynchronisieren={handleRuntimeBundlesSynchronisieren}
-        />
-      </PluginProviderStack>
+      <SidelineCoreShell
+        storeKatalog={storeKatalog}
+        installiertePlugins={installiertePlugins}
+        installiertePluginIds={installiertePluginIds}
+        globalAktivierteModule={globalAktivierteModule}
+        onPluginInstallieren={handlePluginInstallieren}
+        onPluginDeinstallieren={handlePluginDeinstallieren}
+        onCustomGitHubPluginHinzufuegen={handleCustomGitHubPluginHinzufuegen}
+        onBackendPluginRegistrieren={handleBackendPluginRegistrieren}
+        onGlobalModulToggle={handleGlobalModulToggle}
+        onGlobalModuleSynchronisieren={setGlobalAktivierteModule}
+        onInstalledPluginsSynchronisieren={setInstalliertePluginIds}
+        onRuntimeBundlesSynchronisieren={handleRuntimeBundlesSynchronisieren}
+      />
     </I18nProvider>
   );
 }

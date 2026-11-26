@@ -7,7 +7,13 @@ import type {
   PluginPermission,
   SidelineBackendPlugin,
 } from '../../sdk/plugin.ts';
-import type { BenutzerKonto, PluginId, TeamKontext, TeamRolle } from '../../shared/types.ts';
+import type {
+  BenutzerKonto,
+  PluginId,
+  SpielerUnit,
+  TeamKontext,
+  TeamRolle,
+} from '../../shared/types.ts';
 import {
   erstellePluginDbScope,
   fuehrePluginMigrationAus,
@@ -87,6 +93,7 @@ export class PluginBackendHost {
     user: BenutzerKonto;
     team: TeamKontext;
     teamRolle: TeamRolle;
+    userUnits?: SpielerUnit[];
   }): PluginBackendKontext {
     const permissions = new Set<PluginPermission>(params.plugin.manifest.permissions);
     const s3 =
@@ -121,6 +128,7 @@ export class PluginBackendHost {
       locale: params.user.preferredLocale ?? 'de',
       team: params.team,
       teamRolle: params.teamRolle,
+      userUnits: params.userUnits ? [...params.userUnits] : [],
       hasPermission(permission: PluginPermission): boolean {
         return permissions.has(permission);
       },
