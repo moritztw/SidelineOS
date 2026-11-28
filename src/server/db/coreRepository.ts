@@ -1,97 +1,240 @@
 import crypto from 'node:crypto';
 import type {
-  BenutzerKonto,
-  PluginId,
-  ProfilCustomFeld,
-  SpielerUnit,
-  TeamEinladung,
-  TeamKontext,
-  TeamMitgliedschaft,
-  TeamRolle,
-} from '../../shared/types.ts';
+  PluginManifest,
+  PrivilegiertePluginPermission,
+} from '../../sdk/plugin.ts';
+import { istPrivilegierteCapability } from '../../sdk/plugin.ts';
 import { normalisiereSprache } from '../../shared/i18n.ts';
 import {
-  STANDARD_THEME_REF,
-  SYSTEM_THEME_SETTING_KEY,
-  parseThemeRef,
-} from '../../shared/theme.ts';
-import type { PluginManifest, PluginStoreEintrag } from '../../sdk/plugin.ts';
+  berechneClubSpeicherStatus,
+  ermittleEffektiveTeamRolle,
+  type BenutzerKonto,
+  type ClubKontext,
+  type ClubMitgliedschaft,
+  type ClubRolle,
+  type ClubSpeicherStatus,
+  type EffektiveTeamBerechtigung,
+  type EinladungEintrag,
+  type MitgliedschaftStatus,
+  type NotificationEintrag,
+  type NotificationPrioritaet,
+  type PluginId,
+  type ScopeTyp,
+  type TeamKontext,
+  type TeamMitgliedschaft,
+  type TeamRolle,
+  type TeamStatus,
+} from '../../shared/types.ts';
 import type { CoreDatabaseClient } from './client.ts';
 
-export interface DbBenutzerMitHash {
+export interface BenutzerMitHash {
   konto: BenutzerKonto;
   passwordHash: string;
 }
 
-export interface DbSessionEintrag {
-  id: string;
-  userUuid: string;
-  expiresAt: string;
+export interface InstalliertesPluginDatensatz {
+  pluginId: PluginId;
+  version: string;
+  previousVersion: string | null;
+  manifest: PluginManifest;
+  enabledGlobally: boolean;
+  approvedCapabilities: PrivilegiertePluginPermission[];
+  sourceUrl: string | null;
+  sha256: string | null;
+  installedAt: string;
+  lastError: string | null;
 }
 
-function toIsoDate(wert: unknown): string {
-  if (wert instanceof Date) {
-    return wert.toISOString().slice(0, 10);
+function isoString(raw: unknown): string {
+  if (raw instanceof Date) return raw.toISOString();
+  if (typeof raw === 'string') return raw;
+  return new Date().toISOString();
+}
+
+function parseJsonObject(raw: unknown): Record<string, unknown> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
   }
-  return String(wert ?? '').slice(0, 10);
-}
-
-function parseJsonWert<T>(wert: unknown, fallback: T): T {
-  if (wert === null || wert === undefined) return fallback;
-  if (typeof wert === 'string') {
+  if (typeof raw === 'string') {
     try {
-      return JSON.parse(wert) as T;
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
     } catch {
-      return fallback;
+      return {};
     }
   }
-  return wert as T;
+  return {};
 }
 
-interface UserRow {
-  uuid: string;
-  username: string;
-  full_name: string;
-  email: string;
-  password_hash: string;
-  phone: string;
-  jersey_number: string;
-  position: string;
-  is_sysadmin: boolean;
-  preferred_locale?: string;
-  preferred_theme?: string;
-  custom_profile_values: unknown;
-  created_at: unknown;
+function parseStringArray(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return raw.filter((e): e is string => typeof e === 'string' && e.trim().length > 0);
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((e): e is string => typeof e === 'string' && e.trim().length > 0);
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
-function mapUserRow(row: UserRow): DbBenutzerMitHash {
-  const cleanTheme =
-    typeof row.preferred_theme === 'string' && row.preferred_theme.trim()
-      ? row.preferred_theme.trim()
-      : undefined;
+function mapUserRow(row: Record<string, unknown>): BenutzerMitHash {
   return {
-    passwordHash: row.password_hash,
     konto: {
-      uuid: row.uuid,
-      benutzername: row.username,
-      vollerName: row.full_name,
-      email: row.email,
-      telefon: row.phone || undefined,
-      trikotNummer: row.jersey_number || undefined,
-      position: row.position || undefined,
+      uuid: String(row.uuid),
+      benutzername: String(row.username),
+      vollerName: String(row.display_name),
+      email: String(row.email),
       istSysadmin: Boolean(row.is_sysadmin),
-      erstelltAm: toIsoDate(row.created_at),
-      preferredLocale: normalisiereSprache(row.preferred_locale, 'de'),
-      ...(cleanTheme ? { preferredTheme: cleanTheme } : {}),
-      customProfilWerte: parseJsonWert<Record<string, string>>(row.custom_profile_values, {}),
+      preferredLocale: normalisiereSprache(String(row.preferred_locale ?? 'de'), 'de'),
+      ...(typeof row.preferred_theme === 'string' && row.preferred_theme
+        ? { preferredTheme: row.preferred_theme }
+        : {}),
+      metadata: parseJsonObject(row.metadata),
+      erstelltAm: isoString(row.created_at),
     },
+    passwordHash: String(row.password_hash),
   };
 }
 
+function mapClubRow(row: Record<string, unknown>): ClubKontext {
+  const quotaRaw = row.storage_quota_bytes;
+  const quotaBytes =
+    quotaRaw === null || quotaRaw === undefined ? null : Number(quotaRaw);
+  const usedBytes = Number(row.storage_used_bytes ?? 0);
+  const softLimitPercent = Number(row.storage_soft_limit_percent ?? 90);
+  const nodeId = String(row.storage_node_id ?? 'default');
+
+  return {
+    id: String(row.id),
+    slug: String(row.slug),
+    name: String(row.name),
+    speicher: berechneClubSpeicherStatus({
+      nodeId,
+      quotaBytes,
+      usedBytes,
+      softLimitPercent,
+    }),
+    metadata: parseJsonObject(row.metadata),
+    erstelltAm: isoString(row.created_at),
+  };
+}
+
+function mapTeamRow(row: Record<string, unknown>): TeamKontext {
+  const status = row.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE';
+  return {
+    id: String(row.id),
+    clubId: String(row.club_id),
+    slug: String(row.slug),
+    name: String(row.name),
+    status,
+    akzentFarbe: String(row.accent_color ?? '#F59E0B'),
+    metadata: parseJsonObject(row.metadata),
+    erstelltAm: isoString(row.created_at),
+  };
+}
+
+function mapClubMembershipRow(row: Record<string, unknown>): ClubMitgliedschaft {
+  return {
+    id: String(row.id),
+    userUuid: String(row.user_uuid),
+    clubId: String(row.club_id),
+    rolle: row.role === 'CLUB_ADMIN' ? 'CLUB_ADMIN' : 'CLUB_MEMBER',
+    status: (row.status as MitgliedschaftStatus) ?? 'ACTIVE',
+    beigetretenAm: isoString(row.joined_at),
+  };
+}
+
+function mapTeamMembershipRow(row: Record<string, unknown>): TeamMitgliedschaft {
+  return {
+    id: String(row.id),
+    userUuid: String(row.user_uuid),
+    teamId: String(row.team_id),
+    rolle: (row.role as TeamRolle) ?? 'MEMBER',
+    groups: parseStringArray(row.groups),
+    status: (row.status as MitgliedschaftStatus) ?? 'ACTIVE',
+    beigetretenAm: isoString(row.joined_at),
+  };
+}
+
+function mapInvitationRow(row: Record<string, unknown>): EinladungEintrag {
+  return {
+    id: String(row.id),
+    clubId: String(row.club_id),
+    teamId: row.team_id ? String(row.team_id) : null,
+    clubRolle: row.club_role === 'CLUB_ADMIN' ? 'CLUB_ADMIN' : 'CLUB_MEMBER',
+    teamRolle: (row.team_role as TeamRolle) ?? 'MEMBER',
+    groups: parseStringArray(row.groups),
+    ...(typeof row.target_email === 'string' && row.target_email
+      ? { zielEmail: row.target_email }
+      : {}),
+    bestaetigungErforderlich: Boolean(row.requires_approval),
+    gueltigBis: isoString(row.expires_at),
+    aktiv: Boolean(row.active),
+    erstelltAm: isoString(row.created_at),
+  };
+}
+
+function mapPluginRow(row: Record<string, unknown>): InstalliertesPluginDatensatz {
+  const manifestRaw =
+    typeof row.manifest_json === 'string'
+      ? (JSON.parse(row.manifest_json) as PluginManifest)
+      : (row.manifest_json as PluginManifest);
+
+  const approved = parseStringArray(row.approved_capabilities).filter((c) =>
+    istPrivilegierteCapability(c as PrivilegiertePluginPermission)
+  ) as PrivilegiertePluginPermission[];
+
+  return {
+    pluginId: String(row.plugin_id),
+    version: String(row.version),
+    previousVersion: row.previous_version ? String(row.previous_version) : null,
+    manifest: manifestRaw,
+    enabledGlobally: Boolean(row.enabled_globally),
+    approvedCapabilities: approved,
+    sourceUrl: row.source_url ? String(row.source_url) : null,
+    sha256: row.sha256 ? String(row.sha256) : null,
+    installedAt: isoString(row.installed_at),
+    lastError: row.last_error ? String(row.last_error) : null,
+  };
+}
+
+function mapNotificationRow(row: Record<string, unknown>): NotificationEintrag {
+  return {
+    id: String(row.id),
+    userUuid: String(row.user_uuid),
+    ...(row.club_id ? { clubId: String(row.club_id) } : {}),
+    ...(row.team_id ? { teamId: String(row.team_id) } : {}),
+    sourcePluginId: String(row.source_plugin_id ?? 'core'),
+    eventType: String(row.event_type),
+    title: String(row.title),
+    message: String(row.message),
+    ...(row.link_path ? { linkPath: String(row.link_path) } : {}),
+    priority: (row.priority as NotificationPrioritaet) ?? 'info',
+    metadata: parseJsonObject(row.metadata_json),
+    ...(row.read_at ? { readAt: isoString(row.read_at) } : {}),
+    createdAt: isoString(row.created_at),
+  };
+}
+
+export function hashEinladungsToken(token: string): string {
+  return crypto.createHash('sha256').update(token.trim()).digest('hex');
+}
+
+/**
+ * Schlankes Micro-Kernel-Repository für das v0.2.0-Schema `core`.
+ */
 export class CoreRepository {
   constructor(private readonly db: CoreDatabaseClient) {}
 
-  // --- Benutzer ---
+  // ---- Benutzer & Sessions ----
 
   async zaehleBenutzer(): Promise<number> {
     const res = await this.db.query<{ anzahl: string | number }>(
@@ -101,148 +244,127 @@ export class CoreRepository {
   }
 
   async listeBenutzer(): Promise<BenutzerKonto[]> {
-    const res = await this.db.query<UserRow>(
-      `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
-       FROM core.users
-       ORDER BY created_at ASC, full_name ASC`
-    );
+    const res = await this.db.query(`SELECT * FROM core.users ORDER BY created_at ASC`);
     return res.rows.map((r) => mapUserRow(r).konto);
   }
 
-  async findeBenutzerMitHashNachKennung(kennung: string): Promise<DbBenutzerMitHash | null> {
+  async findeBenutzerNachUuid(uuid: string): Promise<BenutzerMitHash | null> {
+    const res = await this.db.query(`SELECT * FROM core.users WHERE uuid = $1 LIMIT 1`, [uuid]);
+    return res.rows[0] ? mapUserRow(res.rows[0]) : null;
+  }
+
+  async findeBenutzerNachLogin(kennung: string): Promise<BenutzerMitHash | null> {
     const norm = kennung.trim().toLowerCase();
-    if (!norm) return null;
-    const res = await this.db.query<UserRow>(
-      `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
-       FROM core.users
-       WHERE LOWER(email) = $1 OR LOWER(username) = $1
-       LIMIT 1`,
+    const res = await this.db.query(
+      `SELECT * FROM core.users WHERE LOWER(username) = $1 OR LOWER(email) = $1 LIMIT 1`,
       [norm]
     );
     return res.rows[0] ? mapUserRow(res.rows[0]) : null;
   }
 
-  async findeBenutzerNachUuid(uuid: string): Promise<DbBenutzerMitHash | null> {
-    const res = await this.db.query<UserRow>(
-      `SELECT uuid, username, full_name, email, password_hash, phone, jersey_number,
-              position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
-       FROM core.users
-       WHERE uuid = $1
-       LIMIT 1`,
-      [uuid]
-    );
-    return res.rows[0] ? mapUserRow(res.rows[0]) : null;
-  }
-
-  async existiertEmailOderBenutzername(
-    email: string,
-    benutzername: string,
-    ignoriereUuid?: string
-  ): Promise<boolean> {
-    const res = await this.db.query<{ uuid: string }>(
-      `SELECT uuid FROM core.users
-       WHERE (LOWER(email) = $1 OR LOWER(username) = $2)
-         AND ($3::text IS NULL OR uuid <> $3)
-       LIMIT 1`,
-      [email.trim().toLowerCase(), benutzername.trim().toLowerCase(), ignoriereUuid ?? null]
-    );
-    return res.rows.length > 0;
-  }
-
-  async erstelleBenutzer(konto: BenutzerKonto, passwordHash: string): Promise<BenutzerKonto> {
-    const res = await this.db.query<UserRow>(
+  async erstelleBenutzer(
+    input: {
+      uuid?: string;
+      benutzername: string;
+      vollerName: string;
+      email: string;
+      istSysadmin?: boolean;
+      preferredLocale?: string;
+      preferredTheme?: string | null;
+      metadata?: Record<string, unknown>;
+    },
+    passwordHash: string
+  ): Promise<BenutzerKonto> {
+    const uuid = input.uuid ?? `usr-${crypto.randomUUID()}`;
+    const res = await this.db.query(
       `INSERT INTO core.users (
-         uuid, username, full_name, email, password_hash,
-         phone, jersey_number, position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13)
-       RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
+         uuid, username, display_name, email, password_hash,
+         is_sysadmin, preferred_locale, preferred_theme, metadata
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+       RETURNING *`,
       [
-        konto.uuid,
-        konto.benutzername.trim().toLowerCase(),
-        konto.vollerName.trim(),
-        konto.email.trim().toLowerCase(),
+        uuid,
+        input.benutzername.trim().toLowerCase(),
+        input.vollerName.trim(),
+        input.email.trim().toLowerCase(),
         passwordHash,
-        konto.telefon ?? '',
-        konto.trikotNummer ?? '',
-        konto.position ?? '',
-        konto.istSysadmin,
-        normalisiereSprache(konto.preferredLocale, 'de'),
-        konto.preferredTheme?.trim() ?? '',
-        JSON.stringify(konto.customProfilWerte ?? {}),
-        konto.erstelltAm || new Date().toISOString().slice(0, 10),
+        Boolean(input.istSysadmin),
+        normalisiereSprache(input.preferredLocale, 'de'),
+        input.preferredTheme ?? null,
+        JSON.stringify(input.metadata ?? {}),
       ]
     );
     return mapUserRow(res.rows[0]).konto;
   }
 
-  async aktualisiereBenutzer(konto: BenutzerKonto): Promise<BenutzerKonto | null> {
-    const res = await this.db.query<UserRow>(
+  async aktualisiereBenutzer(
+    uuid: string,
+    patch: {
+      vollerName?: string;
+      email?: string;
+      istSysadmin?: boolean;
+      preferredLocale?: string;
+      preferredTheme?: string | null;
+      metadata?: Record<string, unknown>;
+      passwordHash?: string;
+    }
+  ): Promise<BenutzerKonto | null> {
+    const vorhanden = await this.findeBenutzerNachUuid(uuid);
+    if (!vorhanden) return null;
+
+    const next = {
+      vollerName: patch.vollerName?.trim() || vorhanden.konto.vollerName,
+      email: patch.email?.trim().toLowerCase() || vorhanden.konto.email,
+      istSysadmin:
+        typeof patch.istSysadmin === 'boolean' ? patch.istSysadmin : vorhanden.konto.istSysadmin,
+      preferredLocale: patch.preferredLocale
+        ? normalisiereSprache(patch.preferredLocale, vorhanden.konto.preferredLocale)
+        : vorhanden.konto.preferredLocale,
+      preferredTheme:
+        patch.preferredTheme === undefined
+          ? vorhanden.konto.preferredTheme ?? null
+          : patch.preferredTheme,
+      metadata: patch.metadata ?? vorhanden.konto.metadata,
+      passwordHash: patch.passwordHash ?? vorhanden.passwordHash,
+    };
+
+    const res = await this.db.query(
       `UPDATE core.users
-       SET username = $2,
-           full_name = $3,
-           email = $4,
-           phone = $5,
-           jersey_number = $6,
-           position = $7,
-           is_sysadmin = $8,
-           preferred_locale = $9,
-           preferred_theme = $10,
-           custom_profile_values = $11::jsonb,
-           updated_at = NOW()
+       SET display_name = $2,
+           email = $3,
+           is_sysadmin = $4,
+           preferred_locale = $5,
+           preferred_theme = $6,
+           metadata = $7::jsonb,
+           password_hash = $8
        WHERE uuid = $1
-       RETURNING uuid, username, full_name, email, password_hash, phone, jersey_number,
-                 position, is_sysadmin, preferred_locale, preferred_theme, custom_profile_values, created_at`,
+       RETURNING *`,
       [
-        konto.uuid,
-        konto.benutzername.trim().toLowerCase(),
-        konto.vollerName.trim(),
-        konto.email.trim().toLowerCase(),
-        konto.telefon ?? '',
-        konto.trikotNummer ?? '',
-        konto.position ?? '',
-        konto.istSysadmin,
-        normalisiereSprache(konto.preferredLocale, 'de'),
-        konto.preferredTheme?.trim() ?? '',
-        JSON.stringify(konto.customProfilWerte ?? {}),
+        uuid,
+        next.vollerName,
+        next.email,
+        next.istSysadmin,
+        next.preferredLocale,
+        next.preferredTheme,
+        JSON.stringify(next.metadata),
+        next.passwordHash,
       ]
     );
     return res.rows[0] ? mapUserRow(res.rows[0]).konto : null;
   }
 
-  async aktualisierePasswortHash(userUuid: string, neuerHash: string): Promise<void> {
+  async erstelleSession(tokenHash: string, userUuid: string, expiresAtIso: string): Promise<void> {
     await this.db.query(
-      `UPDATE core.users SET password_hash = $2, updated_at = NOW() WHERE uuid = $1`,
-      [userUuid, neuerHash]
+      `INSERT INTO core.sessions (token_hash, user_uuid, expires_at) VALUES ($1, $2, $3)`,
+      [tokenHash, userUuid, expiresAtIso]
     );
   }
 
-  async loescheBenutzer(userUuid: string): Promise<void> {
-    await this.db.query(`DELETE FROM core.users WHERE uuid = $1`, [userUuid]);
-  }
-
-  // --- Sessions ---
-
-  async erstelleSession(
-    userUuid: string,
-    tokenHash: string,
-    ttlStunden: number
-  ): Promise<DbSessionEintrag> {
-    const id = `sess-${crypto.randomUUID()}`;
-    const expiresAt = new Date(Date.now() + ttlStunden * 3600 * 1000).toISOString();
-    await this.db.query(
-      `INSERT INTO core.sessions (id, token_hash, user_uuid, expires_at)
-       VALUES ($1, $2, $3, $4)`,
-      [id, tokenHash, userUuid, expiresAt]
-    );
-    return { id, userUuid, expiresAt };
-  }
-
-  async findeAktiveSession(tokenHash: string): Promise<DbSessionEintrag | null> {
-    const res = await this.db.query<{ id: string; user_uuid: string; expires_at: unknown }>(
-      `SELECT id, user_uuid, expires_at
+  async findeAktiveSession(
+    tokenHash: string
+  ): Promise<{ tokenHash: string; userUuid: string; expiresAt: string } | null> {
+    const res = await this.db.query(
+      `SELECT token_hash, user_uuid, expires_at
        FROM core.sessions
        WHERE token_hash = $1 AND expires_at > NOW()
        LIMIT 1`,
@@ -251,10 +373,9 @@ export class CoreRepository {
     const row = res.rows[0];
     if (!row) return null;
     return {
-      id: row.id,
-      userUuid: row.user_uuid,
-      expiresAt:
-        row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at),
+      tokenHash: String(row.token_hash),
+      userUuid: String(row.user_uuid),
+      expiresAt: isoString(row.expires_at),
     };
   }
 
@@ -262,791 +383,838 @@ export class CoreRepository {
     await this.db.query(`DELETE FROM core.sessions WHERE token_hash = $1`, [tokenHash]);
   }
 
-  // --- Teams & Saisons ---
+  // ---- Clubs (#21, #22, #23, #24) ----
 
-  async listeTeams(): Promise<TeamKontext[]> {
-    const teamsRes = await this.db.query<{
-      id: string;
-      name: string;
-      short_name: string;
-      active_season: string;
-      primary_color: string;
-      custom_profile_fields: unknown;
-    }>(
-      `SELECT id, name, short_name, active_season, primary_color, custom_profile_fields
-       FROM core.teams
-       ORDER BY created_at ASC, name ASC`
-    );
-
-    const saisonRes = await this.db.query<{ team_id: string; season: string }>(
-      `SELECT team_id, season FROM core.team_seasons ORDER BY season DESC`
-    );
-    const modulRes = await this.db.query<{ team_id: string; plugin_id: string }>(
-      `SELECT team_id, plugin_id FROM core.team_modules WHERE enabled = TRUE`
-    );
-
-    return teamsRes.rows.map((t) => {
-      const saisons = saisonRes.rows.filter((s) => s.team_id === t.id).map((s) => s.season);
-      const aktivierteModule = modulRes.rows
-        .filter((m) => m.team_id === t.id)
-        .map((m) => m.plugin_id);
-      return {
-        id: t.id,
-        name: t.name,
-        kurzname: t.short_name,
-        aktiveSaison: t.active_season,
-        saisons: saisons.length > 0 ? saisons : [t.active_season],
-        primaerFarbe: t.primary_color,
-        aktivierteModule,
-        customProfilFelder: parseJsonWert<ProfilCustomFeld[]>(t.custom_profile_fields, []),
-      };
-    });
+  async listeClubs(): Promise<ClubKontext[]> {
+    const res = await this.db.query(`SELECT * FROM core.clubs ORDER BY name ASC`);
+    return res.rows.map(mapClubRow);
   }
 
-  async erstelleTeam(team: TeamKontext): Promise<TeamKontext> {
-    await this.db.transaction(async (tx) => {
-      await tx.query(
-        `INSERT INTO core.teams (id, name, short_name, active_season, primary_color, custom_profile_fields)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-        [
-          team.id,
-          team.name.trim(),
-          team.kurzname.trim(),
-          team.aktiveSaison,
-          team.primaerFarbe ?? '#F59E0B',
-          JSON.stringify(team.customProfilFelder ?? []),
-        ]
-      );
+  async findeClubNachId(clubId: string): Promise<ClubKontext | null> {
+    const res = await this.db.query(`SELECT * FROM core.clubs WHERE id = $1 LIMIT 1`, [clubId]);
+    return res.rows[0] ? mapClubRow(res.rows[0]) : null;
+  }
 
-      const saisons = Array.from(new Set([team.aktiveSaison, ...team.saisons]));
-      for (const saison of saisons) {
-        await tx.query(
-          `INSERT INTO core.team_seasons (team_id, season) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-          [team.id, saison]
-        );
-      }
+  async erstelleClub(input: {
+    id?: string;
+    slug: string;
+    name: string;
+    storageNodeId?: string;
+    storageQuotaBytes?: number | null;
+    storageSoftLimitPercent?: number;
+    metadata?: Record<string, unknown>;
+  }): Promise<ClubKontext> {
+    const id = input.id ?? `club-${crypto.randomUUID()}`;
+    const res = await this.db.query(
+      `INSERT INTO core.clubs (
+         id, slug, name, storage_node_id, storage_quota_bytes,
+         storage_soft_limit_percent, metadata
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       RETURNING *`,
+      [
+        id,
+        input.slug.trim().toLowerCase(),
+        input.name.trim(),
+        input.storageNodeId?.trim() || 'default',
+        input.storageQuotaBytes ?? null,
+        input.storageSoftLimitPercent ?? 90,
+        JSON.stringify(input.metadata ?? {}),
+      ]
+    );
+    return mapClubRow(res.rows[0]);
+  }
 
-      for (const pluginId of team.aktivierteModule) {
-        await tx.query(
-          `INSERT INTO core.team_modules (team_id, plugin_id, enabled)
-           SELECT $1, plugin_id, TRUE
-           FROM core.installed_plugins
-           WHERE plugin_id = $2
-           ON CONFLICT (team_id, plugin_id) DO UPDATE SET enabled = TRUE`,
-          [team.id, pluginId]
-        );
-      }
-    });
+  async aktualisiereClub(
+    clubId: string,
+    patch: { name?: string; metadata?: Record<string, unknown> }
+  ): Promise<ClubKontext | null> {
+    const vorhanden = await this.findeClubNachId(clubId);
+    if (!vorhanden) return null;
+    const res = await this.db.query(
+      `UPDATE core.clubs SET name = $2, metadata = $3::jsonb WHERE id = $1 RETURNING *`,
+      [clubId, patch.name?.trim() || vorhanden.name, JSON.stringify(patch.metadata ?? vorhanden.metadata)]
+    );
+    return res.rows[0] ? mapClubRow(res.rows[0]) : null;
+  }
 
-    return team;
+  async setzeClubSpeicherQuota(
+    clubId: string,
+    params: { quotaBytes: number | null; softLimitPercent?: number }
+  ): Promise<ClubSpeicherStatus | null> {
+    const vorhanden = await this.findeClubNachId(clubId);
+    if (!vorhanden) return null;
+    const soft =
+      params.softLimitPercent !== undefined
+        ? Math.max(50, Math.min(99, Math.floor(params.softLimitPercent)))
+        : vorhanden.speicher.softLimitPercent;
+    const quota =
+      params.quotaBytes === null
+        ? null
+        : Math.max(1, Math.floor(params.quotaBytes));
+
+    const res = await this.db.query(
+      `UPDATE core.clubs
+       SET storage_quota_bytes = $2, storage_soft_limit_percent = $3
+       WHERE id = $1
+       RETURNING *`,
+      [clubId, quota, soft]
+    );
+    return res.rows[0] ? mapClubRow(res.rows[0]).speicher : null;
+  }
+
+  async setzeClubStorageNode(clubId: string, nodeId: string): Promise<ClubSpeicherStatus | null> {
+    const clean = nodeId.trim();
+    if (!/^[a-z0-9][a-z0-9_-]{0,62}$/i.test(clean)) {
+      throw new Error('Ungültige Storage-Node-ID.');
+    }
+    const res = await this.db.query(
+      `UPDATE core.clubs SET storage_node_id = $2 WHERE id = $1 RETURNING *`,
+      [clubId, clean]
+    );
+    return res.rows[0] ? mapClubRow(res.rows[0]).speicher : null;
+  }
+
+  async passeClubSpeicherVerbrauchAn(
+    clubId: string,
+    deltaBytes: number
+  ): Promise<ClubSpeicherStatus | null> {
+    const delta = Math.trunc(deltaBytes);
+    const res = await this.db.query(
+      `UPDATE core.clubs
+       SET storage_used_bytes = GREATEST(0, storage_used_bytes + $2)
+       WHERE id = $1
+       RETURNING *`,
+      [clubId, delta]
+    );
+    return res.rows[0] ? mapClubRow(res.rows[0]).speicher : null;
+  }
+
+  async setzeExaktenClubSpeicherVerbrauch(
+    clubId: string,
+    exactUsedBytes: number
+  ): Promise<ClubSpeicherStatus | null> {
+    const bytes = Math.max(0, Math.floor(exactUsedBytes));
+    const res = await this.db.query(
+      `UPDATE core.clubs SET storage_used_bytes = $2 WHERE id = $1 RETURNING *`,
+      [clubId, bytes]
+    );
+    return res.rows[0] ? mapClubRow(res.rows[0]).speicher : null;
+  }
+
+  // ---- Teams (#23, #25) ----
+
+  async listeTeamsNachClub(
+    clubId: string,
+    optionen: { includeArchived?: boolean } = {}
+  ): Promise<TeamKontext[]> {
+    const sql = optionen.includeArchived
+      ? `SELECT * FROM core.teams WHERE club_id = $1 ORDER BY status ASC, name ASC`
+      : `SELECT * FROM core.teams WHERE club_id = $1 AND status = 'ACTIVE' ORDER BY name ASC`;
+    const res = await this.db.query(sql, [clubId]);
+    return res.rows.map(mapTeamRow);
   }
 
   async findeTeamNachId(teamId: string): Promise<TeamKontext | null> {
-    const teams = await this.listeTeams();
-    return teams.find((t) => t.id === teamId) ?? null;
+    const res = await this.db.query(`SELECT * FROM core.teams WHERE id = $1 LIMIT 1`, [teamId]);
+    return res.rows[0] ? mapTeamRow(res.rows[0]) : null;
   }
 
-  async aktualisiereTeam(team: TeamKontext): Promise<TeamKontext | null> {
-    const res = await this.db.query<{ id: string }>(
-      `UPDATE core.teams
-       SET name = $2,
-           short_name = $3,
-           active_season = $4,
-           primary_color = $5,
-           custom_profile_fields = $6::jsonb
-       WHERE id = $1
-       RETURNING id`,
+  async erstelleTeam(input: {
+    id?: string;
+    clubId: string;
+    slug: string;
+    name: string;
+    status?: TeamStatus;
+    akzentFarbe?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<TeamKontext> {
+    const id = input.id ?? `team-${crypto.randomUUID()}`;
+    const res = await this.db.query(
+      `INSERT INTO core.teams (id, club_id, slug, name, status, accent_color, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+       RETURNING *`,
       [
-        team.id,
-        team.name.trim(),
-        team.kurzname.trim(),
-        team.aktiveSaison,
-        team.primaerFarbe ?? '#F59E0B',
-        JSON.stringify(team.customProfilFelder ?? []),
+        id,
+        input.clubId,
+        input.slug.trim().toLowerCase(),
+        input.name.trim(),
+        input.status === 'ARCHIVED' ? 'ARCHIVED' : 'ACTIVE',
+        input.akzentFarbe?.trim() || '#F59E0B',
+        JSON.stringify(input.metadata ?? {}),
       ]
     );
-    if (res.rows.length === 0) return null;
-    await this.fuegeTeamSaisonHinzu(team.id, team.aktiveSaison, true);
-    return this.findeTeamNachId(team.id);
+    return mapTeamRow(res.rows[0]);
   }
 
-  async fuegeTeamSaisonHinzu(teamId: string, saison: string, alsAktiv = true): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      await tx.query(
-        `INSERT INTO core.team_seasons (team_id, season) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [teamId, saison]
-      );
-      if (alsAktiv) {
-        await tx.query(`UPDATE core.teams SET active_season = $2 WHERE id = $1`, [
-          teamId,
-          saison,
-        ]);
-      }
-    });
-  }
-
-  async loescheTeam(teamId: string): Promise<void> {
-    await this.db.query(`DELETE FROM core.teams WHERE id = $1`, [teamId]);
-  }
-
-  // --- Mitgliedschaften ---
-
-  async findeMitgliedschaftNachId(id: string): Promise<TeamMitgliedschaft | null> {
-    const res = await this.db.query<{
-      id: string;
-      user_uuid: string;
-      team_id: string;
-      role: TeamRolle;
-      units: unknown;
-      status: TeamMitgliedschaft['status'];
-      joined_at: unknown;
-    }>(
-      `SELECT id, user_uuid, team_id, role, units, status, joined_at
-       FROM core.memberships WHERE id = $1 LIMIT 1`,
-      [id]
+  async aktualisiereTeam(
+    teamId: string,
+    patch: { name?: string; akzentFarbe?: string; metadata?: Record<string, unknown> }
+  ): Promise<TeamKontext | null> {
+    const vorhanden = await this.findeTeamNachId(teamId);
+    if (!vorhanden) return null;
+    const res = await this.db.query(
+      `UPDATE core.teams
+       SET name = $2, accent_color = $3, metadata = $4::jsonb
+       WHERE id = $1
+       RETURNING *`,
+      [
+        teamId,
+        patch.name?.trim() || vorhanden.name,
+        patch.akzentFarbe?.trim() || vorhanden.akzentFarbe,
+        JSON.stringify(patch.metadata ?? vorhanden.metadata),
+      ]
     );
-    const m = res.rows[0];
-    if (!m) return null;
-    return {
-      id: m.id,
-      userUuid: m.user_uuid,
-      teamId: m.team_id,
-      rolle: m.role,
-      units: parseJsonWert<SpielerUnit[]>(m.units, ['OFFENSE']),
-      status: m.status,
-      beigetretenAm: toIsoDate(m.joined_at),
-    };
+    return res.rows[0] ? mapTeamRow(res.rows[0]) : null;
   }
 
-  async listeMitgliedschaften(teamId?: string): Promise<TeamMitgliedschaft[]> {
-    const sql = teamId
-      ? `SELECT id, user_uuid, team_id, role, units, status, joined_at
-         FROM core.memberships WHERE team_id = $1 ORDER BY joined_at ASC`
-      : `SELECT id, user_uuid, team_id, role, units, status, joined_at
-         FROM core.memberships ORDER BY joined_at ASC`;
-    const res = await this.db.query<{
-      id: string;
-      user_uuid: string;
-      team_id: string;
-      role: TeamRolle;
-      units: unknown;
-      status: TeamMitgliedschaft['status'];
-      joined_at: unknown;
-    }>(sql, teamId ? [teamId] : []);
+  async setzeTeamStatus(teamId: string, status: TeamStatus): Promise<TeamKontext | null> {
+    const res = await this.db.query(
+      `UPDATE core.teams SET status = $2 WHERE id = $1 RETURNING *`,
+      [teamId, status]
+    );
+    return res.rows[0] ? mapTeamRow(res.rows[0]) : null;
+  }
 
-    return res.rows.map((m) => ({
-      id: m.id,
-      userUuid: m.user_uuid,
-      teamId: m.team_id,
-      rolle: m.role,
-      units: parseJsonWert<SpielerUnit[]>(m.units, ['OFFENSE']),
-      status: m.status,
-      beigetretenAm: toIsoDate(m.joined_at),
+  // ---- Getrennte Club- & Team-Mitgliedschaften + RBAC-Kaskade (#23, #26) ----
+
+  async speichereClubMitgliedschaft(input: {
+    userUuid: string;
+    clubId: string;
+    rolle: ClubRolle;
+    status?: MitgliedschaftStatus;
+  }): Promise<ClubMitgliedschaft> {
+    const id = `cmem-${crypto.randomUUID()}`;
+    const res = await this.db.query(
+      `INSERT INTO core.club_memberships (id, user_uuid, club_id, role, status)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_uuid, club_id)
+       DO UPDATE SET role = EXCLUDED.role, status = EXCLUDED.status
+       RETURNING *`,
+      [id, input.userUuid, input.clubId, input.rolle, input.status ?? 'ACTIVE']
+    );
+    return mapClubMembershipRow(res.rows[0]);
+  }
+
+  async findeClubMitgliedschaft(
+    userUuid: string,
+    clubId: string
+  ): Promise<ClubMitgliedschaft | null> {
+    const res = await this.db.query(
+      `SELECT * FROM core.club_memberships WHERE user_uuid = $1 AND club_id = $2 LIMIT 1`,
+      [userUuid, clubId]
+    );
+    return res.rows[0] ? mapClubMembershipRow(res.rows[0]) : null;
+  }
+
+  async listeClubMitgliedschaftenFuerUser(userUuid: string): Promise<ClubMitgliedschaft[]> {
+    const res = await this.db.query(
+      `SELECT * FROM core.club_memberships WHERE user_uuid = $1 ORDER BY joined_at ASC`,
+      [userUuid]
+    );
+    return res.rows.map(mapClubMembershipRow);
+  }
+
+  async listeClubMitglieder(
+    clubId: string
+  ): Promise<Array<ClubMitgliedschaft & { user: BenutzerKonto }>> {
+    const res = await this.db.query(
+      `SELECT m.*, u.username, u.display_name, u.email, u.is_sysadmin,
+              u.preferred_locale, u.preferred_theme, u.metadata AS user_metadata,
+              u.created_at AS user_created_at
+       FROM core.club_memberships m
+       JOIN core.users u ON u.uuid = m.user_uuid
+       WHERE m.club_id = $1
+       ORDER BY u.display_name ASC`,
+      [clubId]
+    );
+    return res.rows.map((r) => ({
+      ...mapClubMembershipRow(r),
+      user: mapUserRow({
+        uuid: r.user_uuid,
+        username: r.username,
+        display_name: r.display_name,
+        email: r.email,
+        password_hash: '',
+        is_sysadmin: r.is_sysadmin,
+        preferred_locale: r.preferred_locale,
+        preferred_theme: r.preferred_theme,
+        metadata: r.user_metadata,
+        created_at: r.user_created_at,
+      }).konto,
     }));
   }
 
-  async speichereMitgliedschaft(m: TeamMitgliedschaft): Promise<TeamMitgliedschaft> {
-    await this.db.query(
-      `INSERT INTO core.memberships (id, user_uuid, team_id, role, units, status, joined_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-       ON CONFLICT (user_uuid, team_id) DO UPDATE
-       SET role = EXCLUDED.role, units = EXCLUDED.units, status = EXCLUDED.status`,
-      [m.id, m.userUuid, m.teamId, m.rolle, JSON.stringify(m.units), m.status, m.beigetretenAm]
+  async speichereTeamMitgliedschaft(input: {
+    userUuid: string;
+    teamId: string;
+    rolle: TeamRolle;
+    groups?: string[];
+    status?: MitgliedschaftStatus;
+  }): Promise<TeamMitgliedschaft> {
+    const id = `tmem-${crypto.randomUUID()}`;
+    const bereinigteGroups = Array.from(
+      new Set((input.groups ?? []).map((g) => g.trim()).filter(Boolean))
     );
-    return m;
+    const res = await this.db.query(
+      `INSERT INTO core.team_memberships (id, user_uuid, team_id, role, groups, status)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+       ON CONFLICT (user_uuid, team_id)
+       DO UPDATE SET role = EXCLUDED.role, groups = EXCLUDED.groups, status = EXCLUDED.status
+       RETURNING *`,
+      [
+        id,
+        input.userUuid,
+        input.teamId,
+        input.rolle,
+        JSON.stringify(bereinigteGroups),
+        input.status ?? 'ACTIVE',
+      ]
+    );
+    return mapTeamMembershipRow(res.rows[0]);
   }
 
-  async loescheMitgliedschaft(mitgliedschaftId: string): Promise<void> {
-    await this.db.query(`DELETE FROM core.memberships WHERE id = $1`, [mitgliedschaftId]);
-  }
-
-  async setzeBenutzerMitgliedschaften(
+  async findeTeamMitgliedschaft(
     userUuid: string,
-    gewuenschte: Array<{
-      teamId: string;
-      rolle: TeamRolle;
-      units: SpielerUnit[];
-      status: 'AKTIV' | 'WARTET_AUF_FREIGABE';
-    }>
-  ): Promise<TeamMitgliedschaft[]> {
-    const heute = new Date().toISOString().slice(0, 10);
-    await this.db.transaction(async (tx) => {
-      const bestehendRes = await tx.query<{
-        id: string;
-        team_id: string;
-        joined_at: unknown;
-      }>(`SELECT id, team_id, joined_at FROM core.memberships WHERE user_uuid = $1`, [userUuid]);
-      const bestehendNachTeam = new Map(bestehendRes.rows.map((r) => [r.team_id, r]));
-      const zielTeamIds = new Set(gewuenschte.map((g) => g.teamId));
+    teamId: string
+  ): Promise<TeamMitgliedschaft | null> {
+    const res = await this.db.query(
+      `SELECT * FROM core.team_memberships WHERE user_uuid = $1 AND team_id = $2 LIMIT 1`,
+      [userUuid, teamId]
+    );
+    return res.rows[0] ? mapTeamMembershipRow(res.rows[0]) : null;
+  }
 
-      for (const alt of bestehendRes.rows) {
-        if (!zielTeamIds.has(alt.team_id)) {
-          await tx.query(`DELETE FROM core.memberships WHERE id = $1`, [alt.id]);
+  async listeTeamMitgliedschaftenFuerUser(userUuid: string): Promise<TeamMitgliedschaft[]> {
+    const res = await this.db.query(
+      `SELECT * FROM core.team_memberships WHERE user_uuid = $1 ORDER BY joined_at ASC`,
+      [userUuid]
+    );
+    return res.rows.map(mapTeamMembershipRow);
+  }
+
+  async listeTeamMitglieder(
+    teamId: string
+  ): Promise<Array<TeamMitgliedschaft & { user: BenutzerKonto }>> {
+    const res = await this.db.query(
+      `SELECT m.*, u.username, u.display_name, u.email, u.is_sysadmin,
+              u.preferred_locale, u.preferred_theme, u.metadata AS user_metadata,
+              u.created_at AS user_created_at
+       FROM core.team_memberships m
+       JOIN core.users u ON u.uuid = m.user_uuid
+       WHERE m.team_id = $1
+       ORDER BY u.display_name ASC`,
+      [teamId]
+    );
+    return res.rows.map((r) => ({
+      ...mapTeamMembershipRow(r),
+      user: mapUserRow({
+        uuid: r.user_uuid,
+        username: r.username,
+        display_name: r.display_name,
+        email: r.email,
+        password_hash: '',
+        is_sysadmin: r.is_sysadmin,
+        preferred_locale: r.preferred_locale,
+        preferred_theme: r.preferred_theme,
+        metadata: r.user_metadata,
+        created_at: r.user_created_at,
+      }).konto,
+    }));
+  }
+
+  /**
+   * Ermittelt die effektive Team-Berechtigung inklusive unveränderlicher
+   * Vereinsadmin -> Teamadmin Rollenkaskade (#23) sowie Archiv-Status (#25).
+   */
+  async ermittleEffektiveTeamBerechtigung(
+    userUuid: string,
+    teamId: string
+  ): Promise<EffektiveTeamBerechtigung | null> {
+    const team = await this.findeTeamNachId(teamId);
+    if (!team) return null;
+
+    const [clubM, teamM] = await Promise.all([
+      this.findeClubMitgliedschaft(userUuid, team.clubId),
+      this.findeTeamMitgliedschaft(userUuid, team.id),
+    ]);
+
+    const aufgeloest = ermittleEffektiveTeamRolle({
+      clubMitgliedschaft: clubM,
+      teamMitgliedschaft: teamM,
+    });
+
+    return {
+      clubId: team.clubId,
+      teamId: team.id,
+      clubRolle: aufgeloest.clubRolle,
+      effektiveTeamRolle: aufgeloest.effektiveTeamRolle,
+      istKaskadiertVonClubAdmin: aufgeloest.istKaskadiertVonClubAdmin,
+      groups: aufgeloest.groups,
+      teamStatus: team.status,
+      istLesemodus: team.status === 'ARCHIVED',
+    };
+  }
+
+  /**
+   * Liefert alle Clubs und Teams, auf die ein Benutzer Zugriff hat (inkl. Kaskade #23).
+   */
+  async ladeBenutzerKontext(userUuid: string): Promise<{
+    clubs: Array<ClubKontext & { clubRolle: ClubRolle }>;
+    teams: Array<
+      TeamKontext & {
+        effektiveTeamRolle: TeamRolle;
+        istKaskadiertVonClubAdmin: boolean;
+        groups: string[];
+      }
+    >;
+  }> {
+    const [clubMems, teamMems] = await Promise.all([
+      this.listeClubMitgliedschaftenFuerUser(userUuid),
+      this.listeTeamMitgliedschaftenFuerUser(userUuid),
+    ]);
+
+    const aktiveClubMems = clubMems.filter((m) => m.status === 'ACTIVE');
+    const aktiveTeamMap = new Map(
+      teamMems.filter((m) => m.status === 'ACTIVE').map((m) => [m.teamId, m])
+    );
+
+    const clubs: Array<ClubKontext & { clubRolle: ClubRolle }> = [];
+    const teams: Array<
+      TeamKontext & {
+        effektiveTeamRolle: TeamRolle;
+        istKaskadiertVonClubAdmin: boolean;
+        groups: string[];
+      }
+    > = [];
+    const geseheneTeams = new Set<string>();
+
+    for (const cm of aktiveClubMems) {
+      const club = await this.findeClubNachId(cm.clubId);
+      if (!club) continue;
+      clubs.push({ ...club, clubRolle: cm.rolle });
+
+      // Ein CLUB_ADMIN sieht automatisch alle Teams (auch archivierte) seines Clubs (#23, #25)
+      if (cm.rolle === 'CLUB_ADMIN') {
+        const clubTeams = await this.listeTeamsNachClub(club.id, { includeArchived: true });
+        for (const t of clubTeams) {
+          geseheneTeams.add(t.id);
+          const tm = aktiveTeamMap.get(t.id);
+          teams.push({
+            ...t,
+            effektiveTeamRolle: 'TEAM_ADMIN',
+            istKaskadiertVonClubAdmin: true,
+            groups: tm?.groups ?? [],
+          });
         }
       }
+    }
 
-      for (const eintrag of gewuenschte) {
-        const alt = bestehendNachTeam.get(eintrag.teamId);
-        const id = alt?.id ?? `mem-${crypto.randomUUID()}`;
-        const joinedAt = alt ? toIsoDate(alt.joined_at) : heute;
-        await tx.query(
-          `INSERT INTO core.memberships (id, user_uuid, team_id, role, units, status, joined_at)
-           VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-           ON CONFLICT (user_uuid, team_id) DO UPDATE
-           SET role = EXCLUDED.role, units = EXCLUDED.units, status = EXCLUDED.status`,
-          [
-            id,
-            userUuid,
-            eintrag.teamId,
-            eintrag.rolle,
-            JSON.stringify(eintrag.units),
-            eintrag.status,
-            joinedAt,
-          ]
-        );
-      }
-    });
+    for (const [teamId, tm] of aktiveTeamMap.entries()) {
+      if (geseheneTeams.has(teamId)) continue;
+      const team = await this.findeTeamNachId(teamId);
+      if (!team) continue;
+      geseheneTeams.add(team.id);
+      teams.push({
+        ...team,
+        effektiveTeamRolle: tm.rolle,
+        istKaskadiertVonClubAdmin: false,
+        groups: tm.groups,
+      });
+    }
 
-    const alle = await this.listeMitgliedschaften();
-    return alle.filter((m) => m.userUuid === userUuid);
+    return { clubs, teams };
   }
 
-  // --- Einladungen ---
+  // ---- Einladungen mit atomarem Club+Team-Beitritt (#26) ----
 
-  async listeEinladungen(teamId?: string): Promise<TeamEinladung[]> {
-    const sql = teamId
-      ? `SELECT id, team_id, type, target_email, role, units, token, path, expires_at, requires_approval, active, created_at
-         FROM core.invitations WHERE team_id = $1 ORDER BY created_at DESC`
-      : `SELECT id, team_id, type, target_email, role, units, token, path, expires_at, requires_approval, active, created_at
-         FROM core.invitations ORDER BY created_at DESC`;
-
-    const res = await this.db.query<{
-      id: string;
-      team_id: string;
-      type: TeamEinladung['typ'];
-      target_email: string | null;
-      role: TeamRolle;
-      units: unknown;
-      token: string;
-      path: string;
-      expires_at: unknown;
-      requires_approval: boolean;
-      active: boolean;
-      created_at: unknown;
-    }>(sql, teamId ? [teamId] : []);
-
-    return res.rows.map((e) => ({
-      id: e.id,
-      teamId: e.team_id,
-      typ: e.type,
-      ...(e.target_email ? { zielEmail: e.target_email } : {}),
-      rolle: e.role,
-      units: parseJsonWert<SpielerUnit[]>(e.units, ['OFFENSE']),
-      token: e.token,
-      pfad: e.path,
-      erstelltAm: toIsoDate(e.created_at),
-      gueltigBis: toIsoDate(e.expires_at),
-      bestaetigungErforderlich: Boolean(e.requires_approval),
-      aktiv: Boolean(e.active),
-    }));
-  }
-
-  async findeEinladungNachToken(token: string): Promise<TeamEinladung | null> {
-    const res = await this.db.query<{
-      id: string;
-      team_id: string;
-      type: TeamEinladung['typ'];
-      target_email: string | null;
-      role: TeamRolle;
-      units: unknown;
-      token: string;
-      path: string;
-      expires_at: unknown;
-      requires_approval: boolean;
-      active: boolean;
-      created_at: unknown;
-    }>(
-      `SELECT id, team_id, type, target_email, role, units, token, path, expires_at, requires_approval, active, created_at
-       FROM core.invitations WHERE token = $1 LIMIT 1`,
-      [token.trim()]
+  async erstelleEinladung(input: {
+    clubId: string;
+    teamId?: string | null;
+    clubRolle?: ClubRolle;
+    teamRolle?: TeamRolle;
+    groups?: string[];
+    zielEmail?: string;
+    bestaetigungErforderlich?: boolean;
+    gueltigBis: string;
+    tokenOverride?: string;
+  }): Promise<{ einladung: EinladungEintrag; token: string; pfad: string }> {
+    const id = `inv-${crypto.randomUUID()}`;
+    const token = input.tokenOverride?.trim() || crypto.randomBytes(20).toString('base64url');
+    const tokenHash = hashEinladungsToken(token);
+    const bereinigteGroups = Array.from(
+      new Set((input.groups ?? []).map((g) => g.trim()).filter(Boolean))
     );
-    const e = res.rows[0];
-    if (!e) return null;
+
+    const res = await this.db.query(
+      `INSERT INTO core.invitations (
+         id, token_hash, club_id, team_id, club_role, team_role,
+         groups, target_email, requires_approval, expires_at, active
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, TRUE)
+       RETURNING *`,
+      [
+        id,
+        tokenHash,
+        input.clubId,
+        input.teamId ?? null,
+        input.clubRolle ?? 'CLUB_MEMBER',
+        input.teamRolle ?? 'MEMBER',
+        JSON.stringify(bereinigteGroups),
+        input.zielEmail?.trim().toLowerCase() || null,
+        Boolean(input.bestaetigungErforderlich),
+        input.gueltigBis,
+      ]
+    );
+
     return {
-      id: e.id,
-      teamId: e.team_id,
-      typ: e.type,
-      ...(e.target_email ? { zielEmail: e.target_email } : {}),
-      rolle: e.role,
-      units: parseJsonWert<SpielerUnit[]>(e.units, ['OFFENSE']),
-      token: e.token,
-      pfad: e.path,
-      erstelltAm: toIsoDate(e.created_at),
-      gueltigBis: toIsoDate(e.expires_at),
-      bestaetigungErforderlich: Boolean(e.requires_approval),
-      aktiv: Boolean(e.active),
+      einladung: mapInvitationRow(res.rows[0]),
+      token,
+      pfad: `/invite/${encodeURIComponent(token)}`,
     };
   }
 
-  async erstelleEinladung(e: TeamEinladung): Promise<TeamEinladung> {
-    await this.db.query(
-      `INSERT INTO core.invitations (
-         id, team_id, type, target_email, role, units, token, path, expires_at, requires_approval, active, created_at
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12)`,
-      [
-        e.id,
-        e.teamId,
-        e.typ,
-        e.zielEmail ?? null,
-        e.rolle,
-        JSON.stringify(e.units),
-        e.token,
-        e.pfad,
-        e.gueltigBis,
-        e.bestaetigungErforderlich,
-        e.aktiv,
-        e.erstelltAm,
-      ]
+  async findeAktiveEinladungNachToken(token: string): Promise<EinladungEintrag | null> {
+    const tokenHash = hashEinladungsToken(token);
+    const res = await this.db.query(
+      `SELECT * FROM core.invitations
+       WHERE token_hash = $1 AND active = TRUE AND expires_at > NOW()
+       LIMIT 1`,
+      [tokenHash]
     );
-    return e;
+    return res.rows[0] ? mapInvitationRow(res.rows[0]) : null;
   }
 
-  async widerrufeEinladung(einladungId: string): Promise<void> {
-    await this.db.query(`UPDATE core.invitations SET active = FALSE WHERE id = $1`, [einladungId]);
+  async listeEinladungenNachClub(clubId: string): Promise<EinladungEintrag[]> {
+    const res = await this.db.query(
+      `SELECT * FROM core.invitations WHERE club_id = $1 ORDER BY created_at DESC`,
+      [clubId]
+    );
+    return res.rows.map(mapInvitationRow);
   }
 
-  // --- Plugins & Team-Freigaben ---
-
-  async registrierePlugin(
-    eintrag: PluginStoreEintrag,
-    globalAktiviert: boolean
-  ): Promise<void> {
-    await this.db.query(
-      `INSERT INTO core.installed_plugins (
-         plugin_id, manifest_json, source, release_tag, enabled_globally,
-         installed_version, install_mode
-       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, 'CATALOG')
-       ON CONFLICT (plugin_id) DO NOTHING`,
-      [
-        eintrag.manifest.id,
-        JSON.stringify(eintrag.manifest),
-        eintrag.quelle,
-        eintrag.releaseTag,
-        globalAktiviert,
-        eintrag.manifest.version,
-      ]
+  async deaktiviereEinladung(invitationId: string): Promise<boolean> {
+    const res = await this.db.query(
+      `UPDATE core.invitations SET active = FALSE WHERE id = $1`,
+      [invitationId]
     );
+    return res.rowCount > 0;
   }
 
-  async speicherePluginInstallation(params: {
-    manifest: PluginManifest;
-    source: string;
-    releaseTag: string;
-    enabledGlobally: boolean;
-    installMode: 'CATALOG' | 'RELEASE_BUNDLE' | 'OFFLINE_UPLOAD' | 'DEV_GIT';
-    packageSha256?: string | null;
-    devBranch?: string | null;
-  }): Promise<void> {
-    const bestehend = await this.findePluginStatus(params.manifest.id);
-    const previousVersion =
-      params.installMode === 'DEV_GIT'
-        ? null
-        : bestehend && bestehend.installedVersion !== params.manifest.version
-          ? bestehend.installedVersion
-          : bestehend?.previousVersion ?? null;
+  /**
+   * Atomarer Onboarding-Workflow (#26):
+   * Ein Nutzer, der einem Team-Link folgt, wird automatisch Mitglied im übergeordneten Club
+   * (ohne bestehende CLUB_ADMIN-Rolle herabzustufen) und erhält direkt die Team-Zuweisung.
+   */
+  async loeseEinladungFuerUserEin(params: {
+    userUuid: string;
+    einladung: EinladungEintrag;
+  }): Promise<{
+    clubMitgliedschaft: ClubMitgliedschaft;
+    teamMitgliedschaft: TeamMitgliedschaft | null;
+  }> {
+    const zielStatus: MitgliedschaftStatus = params.einladung.bestaetigungErforderlich
+      ? 'PENDING'
+      : 'ACTIVE';
 
-    await this.db.query(
-      `INSERT INTO core.installed_plugins (
-         plugin_id, manifest_json, source, release_tag, enabled_globally,
-         installed_version, previous_version, install_mode, package_sha256, dev_branch, last_error, installed_at
-       ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NOW())
-       ON CONFLICT (plugin_id) DO UPDATE SET
-         manifest_json = EXCLUDED.manifest_json,
-         source = EXCLUDED.source,
-         release_tag = EXCLUDED.release_tag,
-         installed_version = EXCLUDED.installed_version,
-         previous_version = EXCLUDED.previous_version,
-         install_mode = EXCLUDED.install_mode,
-         package_sha256 = EXCLUDED.package_sha256,
-         dev_branch = EXCLUDED.dev_branch,
-         last_error = NULL,
-         installed_at = NOW()`,
-      [
-        params.manifest.id,
-        JSON.stringify(params.manifest),
-        params.source,
-        params.releaseTag,
-        bestehend ? bestehend.enabledGlobally : params.enabledGlobally,
-        params.manifest.version,
-        previousVersion,
-        params.installMode,
-        params.packageSha256 ?? null,
-        params.devBranch ?? null,
-      ]
-    );
-  }
+    return this.db.transaction(async (tx) => {
+      const existingClub = await tx.query(
+        `SELECT * FROM core.club_memberships WHERE user_uuid = $1 AND club_id = $2 LIMIT 1`,
+        [params.userUuid, params.einladung.clubId]
+      );
 
-  async listeInstalliertePlugins(): Promise<
-    Array<{
-      manifest: PluginManifest;
-      enabledGlobally: boolean;
-      source: string;
-      releaseTag: string;
-      installedVersion: string;
-      previousVersion: string | null;
-      installMode: string;
-      packageSha256: string | null;
-      devBranch: string | null;
-      installedAt: string;
-      lastError: string | null;
-    }>
-  > {
-    const res = await this.db.query<{
-      manifest_json: unknown;
-      enabled_globally: boolean;
-      source: string;
-      release_tag: string;
-      installed_version: string;
-      previous_version: string | null;
-      install_mode: string;
-      package_sha256: string | null;
-      dev_branch: string | null;
-      installed_at: unknown;
-      last_error: string | null;
-    }>(
-      `SELECT manifest_json, enabled_globally, source, release_tag,
-              installed_version, previous_version, install_mode, package_sha256, dev_branch,
-              installed_at, last_error
-       FROM core.installed_plugins
-       ORDER BY installed_at ASC`
-    );
-    return res.rows.map((r) => {
-      const manifest = parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest);
+      let clubRow: Record<string, unknown>;
+      if (existingClub.rows[0]) {
+        const currentRole = existingClub.rows[0].role === 'CLUB_ADMIN' ? 'CLUB_ADMIN' : params.einladung.clubRolle;
+        const currentStatus =
+          existingClub.rows[0].status === 'ACTIVE' ? 'ACTIVE' : zielStatus;
+        const upd = await tx.query(
+          `UPDATE core.club_memberships SET role = $3, status = $4
+           WHERE user_uuid = $1 AND club_id = $2 RETURNING *`,
+          [params.userUuid, params.einladung.clubId, currentRole, currentStatus]
+        );
+        clubRow = upd.rows[0];
+      } else {
+        const ins = await tx.query(
+          `INSERT INTO core.club_memberships (id, user_uuid, club_id, role, status)
+           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [
+            `cmem-${crypto.randomUUID()}`,
+            params.userUuid,
+            params.einladung.clubId,
+            params.einladung.clubRolle,
+            zielStatus,
+          ]
+        );
+        clubRow = ins.rows[0];
+      }
+
+      let teamMitgliedschaft: TeamMitgliedschaft | null = null;
+      if (params.einladung.teamId) {
+        const teamIns = await tx.query(
+          `INSERT INTO core.team_memberships (id, user_uuid, team_id, role, groups, status)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+           ON CONFLICT (user_uuid, team_id)
+           DO UPDATE SET role = EXCLUDED.role, groups = EXCLUDED.groups, status = EXCLUDED.status
+           RETURNING *`,
+          [
+            `tmem-${crypto.randomUUID()}`,
+            params.userUuid,
+            params.einladung.teamId,
+            params.einladung.teamRolle,
+            JSON.stringify(params.einladung.groups),
+            zielStatus,
+          ]
+        );
+        teamMitgliedschaft = mapTeamMembershipRow(teamIns.rows[0]);
+      }
+
+      // E-Mail-gebundene Einmal-Einladungen sofort verbrauchen
+      if (params.einladung.zielEmail) {
+        await tx.query(`UPDATE core.invitations SET active = FALSE WHERE id = $1`, [
+          params.einladung.id,
+        ]);
+      }
+
       return {
-        manifest,
-        enabledGlobally: Boolean(r.enabled_globally),
-        source: r.source,
-        releaseTag: r.release_tag,
-        installedVersion: r.installed_version || manifest.version || '0.1.0',
-        previousVersion: r.previous_version ?? null,
-        installMode: r.install_mode || 'CATALOG',
-        packageSha256: r.package_sha256 ?? null,
-        devBranch: r.dev_branch ?? null,
-        installedAt:
-          r.installed_at instanceof Date
-            ? r.installed_at.toISOString()
-            : String(r.installed_at ?? ''),
-        lastError: r.last_error ?? null,
+        clubMitgliedschaft: mapClubMembershipRow(clubRow),
+        teamMitgliedschaft,
       };
     });
   }
 
-  async findePluginStatus(pluginId: string): Promise<{
+  // ---- Plugins & Scope-Module ----
+
+  async listeInstalliertePlugins(): Promise<InstalliertesPluginDatensatz[]> {
+    const res = await this.db.query(
+      `SELECT * FROM core.installed_plugins ORDER BY plugin_id ASC`
+    );
+    return res.rows.map(mapPluginRow);
+  }
+
+  async findePlugin(pluginId: PluginId): Promise<InstalliertesPluginDatensatz | null> {
+    const res = await this.db.query(
+      `SELECT * FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
+      [pluginId]
+    );
+    return res.rows[0] ? mapPluginRow(res.rows[0]) : null;
+  }
+
+  async speichereInstalliertesPlugin(input: {
     manifest: PluginManifest;
     enabledGlobally: boolean;
-    installedVersion: string;
-    previousVersion: string | null;
-    installMode: string;
-    source: string;
-    releaseTag: string;
-    installedAt: string;
-    lastError: string | null;
-  } | null> {
-    const res = await this.db.query<{
-      manifest_json: unknown;
-      enabled_globally: boolean;
-      installed_version: string;
-      previous_version: string | null;
-      install_mode: string;
-      source: string;
-      release_tag: string;
-      installed_at: unknown;
-      last_error: string | null;
-    }>(
-      `SELECT manifest_json, enabled_globally, installed_version, previous_version,
-              install_mode, source, release_tag, installed_at, last_error
-       FROM core.installed_plugins WHERE plugin_id = $1 LIMIT 1`,
-      [pluginId]
-    );
-    const r = res.rows[0];
-    if (!r) return null;
-    const manifest = parseJsonWert<PluginManifest>(r.manifest_json, {} as PluginManifest);
-    return {
-      manifest,
-      enabledGlobally: Boolean(r.enabled_globally),
-      installedVersion: r.installed_version || manifest.version || '0.1.0',
-      previousVersion: r.previous_version ?? null,
-      installMode: r.install_mode || 'CATALOG',
-      source: r.source,
-      releaseTag: r.release_tag,
-      installedAt:
-        r.installed_at instanceof Date
-          ? r.installed_at.toISOString()
-          : String(r.installed_at ?? ''),
-      lastError: r.last_error ?? null,
-    };
-  }
+    approvedCapabilities?: PrivilegiertePluginPermission[];
+    sourceUrl?: string | null;
+    sha256?: string | null;
+  }): Promise<InstalliertesPluginDatensatz> {
+    const vorhanden = await this.findePlugin(input.manifest.id);
+    const previousVersion =
+      vorhanden && vorhanden.version !== input.manifest.version
+        ? vorhanden.version
+        : vorhanden?.previousVersion ?? null;
+    const approved =
+      input.approvedCapabilities ?? vorhanden?.approvedCapabilities ?? [];
 
-  async rollbackPluginVersion(
-    pluginId: string,
-    manifest: PluginManifest,
-    zielVersion: string,
-    releaseTag: string
-  ): Promise<void> {
-    await this.db.query(
-      `UPDATE core.installed_plugins
-       SET manifest_json = $2::jsonb,
-           installed_version = $3,
-           release_tag = $4,
-           previous_version = NULL,
-           last_error = NULL,
-           installed_at = NOW()
-       WHERE plugin_id = $1`,
-      [pluginId, JSON.stringify(manifest), zielVersion, releaseTag]
-    );
-  }
-
-  async speicherePluginFehler(pluginId: string, fehler: string | null): Promise<void> {
-    await this.db.query(
-      `UPDATE core.installed_plugins SET last_error = $2 WHERE plugin_id = $1`,
-      [pluginId, fehler]
-    );
-  }
-
-  async entferneInstalliertesPlugin(pluginId: string): Promise<boolean> {
-    const res = await this.db.query<{ plugin_id: string }>(
-      `DELETE FROM core.installed_plugins WHERE plugin_id = $1 RETURNING plugin_id`,
-      [pluginId]
-    );
-    return res.rows.length > 0;
-  }
-
-  async setzePluginGlobalAktiv(pluginId: string, aktiv: boolean): Promise<boolean> {
-    const res = await this.db.query<{ plugin_id: string }>(
-      `UPDATE core.installed_plugins SET enabled_globally = $2 WHERE plugin_id = $1 RETURNING plugin_id`,
-      [pluginId, aktiv]
-    );
-    return res.rows.length > 0;
-  }
-
-  async istTeamModulAktiv(teamId: string, pluginId: PluginId): Promise<boolean> {
-    const res = await this.db.query<{ enabled: boolean }>(
-      `SELECT enabled FROM core.team_modules WHERE team_id = $1 AND plugin_id = $2 LIMIT 1`,
-      [teamId, pluginId]
-    );
-    return Boolean(res.rows[0]?.enabled);
-  }
-
-  async setzeTeamModulAktiv(teamId: string, pluginId: PluginId, aktiv: boolean): Promise<void> {
-    await this.db.query(
-      `INSERT INTO core.team_modules (team_id, plugin_id, enabled)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (team_id, plugin_id) DO UPDATE SET enabled = EXCLUDED.enabled`,
-      [teamId, pluginId, aktiv]
-    );
-  }
-
-  // --- System-Einstellungen (S3 & SMTP) ---
-
-  async holeSystemSetting<T>(key: string): Promise<T | null> {
-    const res = await this.db.query<{ value_json: unknown }>(
-      `SELECT value_json FROM core.system_settings WHERE key = $1 LIMIT 1`,
-      [key]
-    );
-    if (res.rows.length === 0) return null;
-    return parseJsonWert<T | null>(res.rows[0].value_json, null);
-  }
-
-  async speichereSystemSetting<T>(key: string, value: T): Promise<void> {
-    await this.db.query(
-      `INSERT INTO core.system_settings (key, value_json, updated_at)
-       VALUES ($1, $2::jsonb, NOW())
-       ON CONFLICT (key) DO UPDATE
-       SET value_json = EXCLUDED.value_json, updated_at = NOW()`,
-      [key, JSON.stringify(value)]
-    );
-  }
-
-  async holeStandardThemeRef(): Promise<string> {
-    const gespeicherte = await this.holeSystemSetting<{ themeRef?: unknown }>(
-      SYSTEM_THEME_SETTING_KEY
-    );
-    const parsed = parseThemeRef(gespeicherte?.themeRef);
-    if (!parsed) return STANDARD_THEME_REF;
-    return parsed.typ === 'core'
-      ? STANDARD_THEME_REF
-      : `${parsed.pluginId}:${parsed.themeId}`;
-  }
-
-  async speichereStandardThemeRef(themeRef: string): Promise<string> {
-    const parsed = parseThemeRef(themeRef);
-    const normalisiert = !parsed || parsed.typ === 'core'
-      ? STANDARD_THEME_REF
-      : `${parsed.pluginId}:${parsed.themeId}`;
-    await this.speichereSystemSetting(SYSTEM_THEME_SETTING_KEY, { themeRef: normalisiert });
-    return normalisiert;
-  }
-
-  // --- Benachrichtigungen (In-App-Standardkanal) ---
-
-  async erstelleNotification(params: {
-    userUuid: string;
-    teamId?: string;
-    sourcePluginId: string;
-    eventType: string;
-    title: string;
-    message: string;
-    linkPath?: string;
-    priority: 'info' | 'warning' | 'urgent';
-    metadata?: Record<string, unknown>;
-  }): Promise<{
-    id: string;
-    userUuid: string;
-    teamId?: string;
-    sourcePluginId: string;
-    eventType: string;
-    title: string;
-    message: string;
-    linkPath?: string;
-    priority: 'info' | 'warning' | 'urgent';
-    metadata: Record<string, unknown>;
-    readAt: string | null;
-    createdAt: string;
-  }> {
-    const id = `ntf-${crypto.randomUUID()}`;
-    const res = await this.db.query<{ created_at: unknown }>(
-      `INSERT INTO core.notifications (
-         id, user_uuid, team_id, source_plugin_id, event_type, title, message, link_path, priority, metadata_json
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
-       RETURNING created_at`,
+    const res = await this.db.query(
+      `INSERT INTO core.installed_plugins (
+         plugin_id, version, previous_version, manifest_json,
+         enabled_globally, approved_capabilities, source_url, sha256, installed_at, last_error
+       ) VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, NOW(), NULL)
+       ON CONFLICT (plugin_id) DO UPDATE SET
+         version = EXCLUDED.version,
+         previous_version = EXCLUDED.previous_version,
+         manifest_json = EXCLUDED.manifest_json,
+         enabled_globally = EXCLUDED.enabled_globally,
+         approved_capabilities = EXCLUDED.approved_capabilities,
+         source_url = EXCLUDED.source_url,
+         sha256 = EXCLUDED.sha256,
+         installed_at = NOW(),
+         last_error = NULL
+       RETURNING *`,
       [
-        id,
-        params.userUuid,
-        params.teamId ?? null,
-        params.sourcePluginId,
-        params.eventType,
-        params.title,
-        params.message,
-        params.linkPath ?? null,
-        params.priority,
-        JSON.stringify(params.metadata ?? {}),
+        input.manifest.id,
+        input.manifest.version,
+        previousVersion,
+        JSON.stringify(input.manifest),
+        input.enabledGlobally,
+        JSON.stringify(approved),
+        input.sourceUrl ?? null,
+        input.sha256 ?? null,
       ]
     );
-    const createdRaw = res.rows[0]?.created_at;
-    const createdAt =
-      createdRaw instanceof Date ? createdRaw.toISOString() : new Date().toISOString();
-    return {
-      id,
-      userUuid: params.userUuid,
-      ...(params.teamId ? { teamId: params.teamId } : {}),
-      sourcePluginId: params.sourcePluginId,
-      eventType: params.eventType,
-      title: params.title,
-      message: params.message,
-      ...(params.linkPath ? { linkPath: params.linkPath } : {}),
-      priority: params.priority,
-      metadata: params.metadata ?? {},
-      readAt: null,
-      createdAt,
-    };
+    return mapPluginRow(res.rows[0]);
   }
 
-  async listeNotificationsFuerBenutzer(
-    userUuid: string,
-    limit = 50
-  ): Promise<{
-    notifications: Array<{
-      id: string;
-      userUuid: string;
-      teamId?: string;
-      sourcePluginId: string;
-      eventType: string;
-      title: string;
-      message: string;
-      linkPath?: string;
-      priority: 'info' | 'warning' | 'urgent';
-      metadata: Record<string, unknown>;
-      readAt: string | null;
-      createdAt: string;
-    }>;
-    unreadCount: number;
-  }> {
-    const clampedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
-    const [rowsRes, unreadRes] = await Promise.all([
-      this.db.query<{
-        id: string;
-        user_uuid: string;
-        team_id: string | null;
-        source_plugin_id: string;
-        event_type: string;
-        title: string;
-        message: string;
-        link_path: string | null;
-        priority: 'info' | 'warning' | 'urgent';
-        metadata_json: unknown;
-        read_at: unknown;
-        created_at: unknown;
-      }>(
-        `SELECT id, user_uuid, team_id, source_plugin_id, event_type, title, message,
-                link_path, priority, metadata_json, read_at, created_at
-         FROM core.notifications
-         WHERE user_uuid = $1
-         ORDER BY created_at DESC
-         LIMIT $2`,
-        [userUuid, clampedLimit]
-      ),
-      this.db.query<{ anzahl: string | number }>(
-        `SELECT COUNT(*)::int AS anzahl
-         FROM core.notifications
-         WHERE user_uuid = $1 AND read_at IS NULL`,
-        [userUuid]
-      ),
-    ]);
+  async aktualisierePluginStatus(
+    pluginId: PluginId,
+    patch: {
+      enabledGlobally?: boolean;
+      approvedCapabilities?: PrivilegiertePluginPermission[];
+      lastError?: string | null;
+    }
+  ): Promise<InstalliertesPluginDatensatz | null> {
+    const vorhanden = await this.findePlugin(pluginId);
+    if (!vorhanden) return null;
 
-    return {
-      unreadCount: Number(unreadRes.rows[0]?.anzahl ?? 0),
-      notifications: rowsRes.rows.map((r) => ({
-        id: r.id,
-        userUuid: r.user_uuid,
-        ...(r.team_id ? { teamId: r.team_id } : {}),
-        sourcePluginId: r.source_plugin_id,
-        eventType: r.event_type,
-        title: r.title,
-        message: r.message,
-        ...(r.link_path ? { linkPath: r.link_path } : {}),
-        priority: r.priority,
-        metadata: parseJsonWert<Record<string, unknown>>(r.metadata_json, {}),
-        readAt:
-          r.read_at instanceof Date
-            ? r.read_at.toISOString()
-            : r.read_at
-              ? String(r.read_at)
-              : null,
-        createdAt:
-          r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
-      })),
-    };
+    const nextEnabled =
+      typeof patch.enabledGlobally === 'boolean'
+        ? patch.enabledGlobally
+        : vorhanden.enabledGlobally;
+    const nextApproved = patch.approvedCapabilities ?? vorhanden.approvedCapabilities;
+    const nextError = patch.lastError === undefined ? vorhanden.lastError : patch.lastError;
+
+    const res = await this.db.query(
+      `UPDATE core.installed_plugins
+       SET enabled_globally = $2,
+           approved_capabilities = $3::jsonb,
+           last_error = $4
+       WHERE plugin_id = $1
+       RETURNING *`,
+      [pluginId, nextEnabled, JSON.stringify(nextApproved), nextError]
+    );
+    return res.rows[0] ? mapPluginRow(res.rows[0]) : null;
   }
 
-  async markiereNotificationGelesen(userUuid: string, notificationId: string): Promise<boolean> {
-    const res = await this.db.query<{ id: string }>(
-      `UPDATE core.notifications
-       SET read_at = COALESCE(read_at, NOW())
-       WHERE id = $1 AND user_uuid = $2
-       RETURNING id`,
-      [notificationId, userUuid]
+  async loescheInstalliertesPlugin(pluginId: PluginId): Promise<boolean> {
+    const res = await this.db.query(
+      `DELETE FROM core.installed_plugins WHERE plugin_id = $1`,
+      [pluginId]
+    );
+    return res.rowCount > 0;
+  }
+
+  async setzeScopeModulAktiv(
+    scopeTyp: ScopeTyp,
+    scopeId: string,
+    pluginId: PluginId,
+    enabled: boolean
+  ): Promise<void> {
+    await this.db.query(
+      `INSERT INTO core.scope_modules (scope_type, scope_id, plugin_id, enabled)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (scope_type, scope_id, plugin_id)
+       DO UPDATE SET enabled = EXCLUDED.enabled`,
+      [scopeTyp, scopeId, pluginId, enabled]
+    );
+  }
+
+  async listeAktiveScopeModule(scopeTyp: ScopeTyp, scopeId: string): Promise<PluginId[]> {
+    const res = await this.db.query<{ plugin_id: string }>(
+      `SELECT sm.plugin_id
+       FROM core.scope_modules sm
+       JOIN core.installed_plugins ip ON ip.plugin_id = sm.plugin_id
+       WHERE sm.scope_type = $1 AND sm.scope_id = $2
+         AND sm.enabled = TRUE AND ip.enabled_globally = TRUE
+       ORDER BY sm.plugin_id ASC`,
+      [scopeTyp, scopeId]
+    );
+    return res.rows.map((r) => r.plugin_id);
+  }
+
+  async istScopeModulAktiv(
+    scopeTyp: ScopeTyp,
+    scopeId: string,
+    pluginId: PluginId
+  ): Promise<boolean> {
+    const res = await this.db.query(
+      `SELECT 1 FROM core.scope_modules
+       WHERE scope_type = $1 AND scope_id = $2 AND plugin_id = $3 AND enabled = TRUE
+       LIMIT 1`,
+      [scopeTyp, scopeId, pluginId]
     );
     return res.rows.length > 0;
+  }
+
+  // ---- System-Settings & In-App-Notifications ----
+
+  async holeSystemSetting<T = Record<string, unknown>>(key: string): Promise<T | null> {
+    const res = await this.db.query<{ value_json: unknown }>(
+      `SELECT value_json FROM core.system_settings WHERE setting_key = $1 LIMIT 1`,
+      [key]
+    );
+    if (!res.rows[0]) return null;
+    const raw = res.rows[0].value_json;
+    return (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
+  }
+
+  async speichereSystemSetting(key: string, wert: unknown): Promise<void> {
+    await this.db.query(
+      `INSERT INTO core.system_settings (setting_key, value_json, updated_at)
+       VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (setting_key) DO UPDATE SET
+         value_json = EXCLUDED.value_json,
+         updated_at = NOW()`,
+      [key, JSON.stringify(wert)]
+    );
+  }
+
+  async erstelleNotification(input: {
+    userUuid: string;
+    clubId?: string;
+    teamId?: string;
+    sourcePluginId: string;
+    eventType: string;
+    title: string;
+    message: string;
+    linkPath?: string;
+    priority?: NotificationPrioritaet;
+    metadata?: Record<string, unknown>;
+  }): Promise<NotificationEintrag> {
+    const id = `ntf-${crypto.randomUUID()}`;
+    const res = await this.db.query(
+      `INSERT INTO core.notifications (
+         id, user_uuid, club_id, team_id, source_plugin_id,
+         event_type, title, message, link_path, priority, metadata_json
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+       RETURNING *`,
+      [
+        id,
+        input.userUuid,
+        input.clubId ?? null,
+        input.teamId ?? null,
+        input.sourcePluginId,
+        input.eventType,
+        input.title,
+        input.message,
+        input.linkPath ?? null,
+        input.priority ?? 'info',
+        JSON.stringify(input.metadata ?? {}),
+      ]
+    );
+    return mapNotificationRow(res.rows[0]);
+  }
+
+  async listeNotificationsFuerUser(
+    userUuid: string,
+    optionen: { limit?: number; nurUngelesen?: boolean } = {}
+  ): Promise<NotificationEintrag[]> {
+    const limit = Math.max(1, Math.min(100, optionen.limit ?? 30));
+    const sql = optionen.nurUngelesen
+      ? `SELECT * FROM core.notifications WHERE user_uuid = $1 AND read_at IS NULL ORDER BY created_at DESC LIMIT $2`
+      : `SELECT * FROM core.notifications WHERE user_uuid = $1 ORDER BY created_at DESC LIMIT $2`;
+    const res = await this.db.query(sql, [userUuid, limit]);
+    return res.rows.map(mapNotificationRow);
+  }
+
+  async zaehleUngeleseneNotifications(userUuid: string): Promise<number> {
+    const res = await this.db.query<{ anzahl: string | number }>(
+      `SELECT COUNT(*)::int AS anzahl FROM core.notifications WHERE user_uuid = $1 AND read_at IS NULL`,
+      [userUuid]
+    );
+    return Number(res.rows[0]?.anzahl ?? 0);
+  }
+
+  async markiereNotificationGelesen(userUuid: string, id: string): Promise<boolean> {
+    const res = await this.db.query(
+      `UPDATE core.notifications SET read_at = NOW() WHERE id = $1 AND user_uuid = $2 AND read_at IS NULL`,
+      [id, userUuid]
+    );
+    return res.rowCount > 0;
   }
 
   async markiereAlleNotificationsGelesen(userUuid: string): Promise<number> {
-    const res = await this.db.query<{ id: string }>(
-      `UPDATE core.notifications
-       SET read_at = NOW()
-       WHERE user_uuid = $1 AND read_at IS NULL
-       RETURNING id`,
+    const res = await this.db.query(
+      `UPDATE core.notifications SET read_at = NOW() WHERE user_uuid = $1 AND read_at IS NULL`,
       [userUuid]
     );
-    return res.rows.length;
+    return res.rowCount;
   }
 }

@@ -1,19 +1,142 @@
 import type { UnterstuetzteSprache } from './i18n.ts';
 
-export type TeamRolle = 'TEAM_ADMIN' | 'COACH' | 'PLAYER';
-
-export type SpielerUnit = 'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS';
-
-/** Eindeutige Plugin-ID eines installierten Moduls (z. B. "video-analysis") */
 export type PluginId = string;
 
-export type CoreBereich =
-  | 'hub'
-  | 'settings-hub'
-  | 'modul'
-  | 'settings'
-  | 'team-settings'
-  | 'sysadmin';
+/** Rollen auf Vereinsebene (#23). Ein CLUB_ADMIN ist unveränderlich TEAM_ADMIN in allen Teams seines Vereins. */
+export type ClubRolle = 'CLUB_ADMIN' | 'CLUB_MEMBER';
+
+/** Rollen auf Teamebene (sportartneutral). */
+export type TeamRolle = 'TEAM_ADMIN' | 'STAFF' | 'MEMBER';
+
+export type MitgliedschaftStatus = 'ACTIVE' | 'PENDING' | 'SUSPENDED';
+
+/** Team-Lebenszyklus (#25): Archivierte Teams bleiben im Lesemodus erhalten. */
+export type TeamStatus = 'ACTIVE' | 'ARCHIVED';
+
+export type ScopeTyp = 'club' | 'team';
+
+export interface BenutzerKonto {
+  uuid: string;
+  benutzername: string;
+  vollerName: string;
+  email: string;
+  istSysadmin: boolean;
+  preferredLocale: UnterstuetzteSprache;
+  preferredTheme?: string;
+  metadata: Record<string, unknown>;
+  erstelltAm: string;
+}
+
+/** Speicherstatus eines Vereins-Speicherpools (#21, #22, #24). */
+export interface ClubSpeicherStatus {
+  nodeId: string;
+  quotaBytes: number | null;
+  usedBytes: number;
+  softLimitPercent: number;
+  auslastungProzent: number | null;
+  softLimitErreicht: boolean;
+  hardLimitErreicht: boolean;
+}
+
+export interface ClubKontext {
+  id: string;
+  slug: string;
+  name: string;
+  speicher: ClubSpeicherStatus;
+  metadata: Record<string, unknown>;
+  erstelltAm: string;
+}
+
+export interface TeamKontext {
+  id: string;
+  clubId: string;
+  slug: string;
+  name: string;
+  status: TeamStatus;
+  akzentFarbe: string;
+  metadata: Record<string, unknown>;
+  erstelltAm: string;
+}
+
+export interface ClubMitgliedschaft {
+  id: string;
+  userUuid: string;
+  clubId: string;
+  rolle: ClubRolle;
+  status: MitgliedschaftStatus;
+  beigetretenAm: string;
+}
+
+export interface TeamMitgliedschaft {
+  id: string;
+  userUuid: string;
+  teamId: string;
+  rolle: TeamRolle;
+  /** Frei konfigurierbare Gruppen-/Tag-Slugs (z. B. "offense", "torhueter", "u19-kader"). */
+  groups: string[];
+  status: MitgliedschaftStatus;
+  beigetretenAm: string;
+}
+
+export interface EffektiveTeamBerechtigung {
+  clubId: string;
+  teamId: string;
+  clubRolle: ClubRolle | null;
+  effektiveTeamRolle: TeamRolle | null;
+  istKaskadiertVonClubAdmin: boolean;
+  groups: string[];
+  teamStatus: TeamStatus;
+  istLesemodus: boolean;
+}
+
+export interface EinladungEintrag {
+  id: string;
+  clubId: string;
+  teamId: string | null;
+  clubRolle: ClubRolle;
+  teamRolle: TeamRolle;
+  groups: string[];
+  zielEmail?: string;
+  bestaetigungErforderlich: boolean;
+  gueltigBis: string;
+  aktiv: boolean;
+  erstelltAm: string;
+}
+
+export interface OeffentlicheEinladungInfo {
+  id: string;
+  clubId: string;
+  clubName: string;
+  teamId: string | null;
+  teamName: string | null;
+  clubRolle: ClubRolle;
+  teamRolle: TeamRolle;
+  groups: string[];
+  zielEmail?: string;
+  bestaetigungErforderlich: boolean;
+  gueltigBis: string;
+}
+
+export type NotificationPrioritaet = 'info' | 'warning' | 'urgent';
+
+export interface NotificationEintrag {
+  id: string;
+  userUuid: string;
+  clubId?: string;
+  teamId?: string;
+  sourcePluginId: string;
+  eventType: string;
+  title: string;
+  message: string;
+  linkPath?: string;
+  priority: NotificationPrioritaet;
+  metadata: Record<string, unknown>;
+  readAt?: string;
+  createdAt: string;
+}
+
+/** Verbindliche Top-Level-Bereiche der 4-Ebenen-Navigation (#23). */
+export type CoreBereich = 'hub' | 'modul' | 'account' | 'club-admin' | 'system-admin';
 
 export type AppRouteModus =
   | { art: 'app' }
@@ -22,167 +145,107 @@ export type AppRouteModus =
   | { art: 'share'; token: string };
 
 /**
- * Angemeldetes Benutzerkonto (echte Berechtigungen).
- * Ein Konto kann mehrere Rollen gleichzeitig besitzen (z. B. Sysadmin + Team Admin).
+ * Berechnet die Speicherpool-Auslastung eines Clubs (#24).
  */
-export interface BenutzerProfil {
-  id: string;
-  userUuid: string;
-  label: string;
-  teamRolle: TeamRolle | null;
-  istSysadmin: boolean;
-}
+export function berechneClubSpeicherStatus(params: {
+  nodeId: string;
+  quotaBytes: number | null;
+  usedBytes: number;
+  softLimitPercent: number;
+}): ClubSpeicherStatus {
+  const usedBytes = Math.max(0, Math.floor(params.usedBytes || 0));
+  const quotaBytes =
+    typeof params.quotaBytes === 'number' && Number.isFinite(params.quotaBytes) && params.quotaBytes > 0
+      ? Math.floor(params.quotaBytes)
+      : null;
+  const softLimitPercent =
+    Number.isFinite(params.softLimitPercent) && params.softLimitPercent >= 50 && params.softLimitPercent <= 99
+      ? Math.floor(params.softLimitPercent)
+      : 90;
 
-export interface ProfilCustomFeld {
-  key: string;
-  label: string;
-  typ: 'text' | 'number' | 'select';
-  pflicht?: boolean;
-  optionen?: string[];
+  if (quotaBytes === null) {
+    return {
+      nodeId: params.nodeId || 'default',
+      quotaBytes: null,
+      usedBytes,
+      softLimitPercent,
+      auslastungProzent: null,
+      softLimitErreicht: false,
+      hardLimitErreicht: false,
+    };
+  }
+
+  const prozent = Math.min(100, Math.round((usedBytes / quotaBytes) * 1000) / 10);
+  return {
+    nodeId: params.nodeId || 'default',
+    quotaBytes,
+    usedBytes,
+    softLimitPercent,
+    auslastungProzent: prozent,
+    softLimitErreicht: prozent >= softLimitPercent,
+    hardLimitErreicht: usedBytes >= quotaBytes,
+  };
 }
 
 /**
- * Globales Benutzerkonto (unabhängig von einzelnen Teams – vorbereitet für späteren Server-/Team-Umzug).
+ * Setzt die unveränderliche Rollenkaskade (#23) durch:
+ * Ein aktiver CLUB_ADMIN ist automatisch TEAM_ADMIN in jedem Team seines Clubs.
  */
-export interface BenutzerKonto {
-  uuid: string;
-  benutzername: string;
-  vollerName: string;
-  email: string;
-  telefon?: string;
-  trikotNummer?: string;
-  position?: string;
-  istSysadmin: boolean;
-  erstelltAm: string;
-  preferredLocale?: UnterstuetzteSprache;
-  preferredTheme?: string;
-  customProfilWerte: Record<string, string>;
+export function ermittleEffektiveTeamRolle(params: {
+  clubMitgliedschaft: ClubMitgliedschaft | null;
+  teamMitgliedschaft: TeamMitgliedschaft | null;
+}): {
+  clubRolle: ClubRolle | null;
+  effektiveTeamRolle: TeamRolle | null;
+  istKaskadiertVonClubAdmin: boolean;
+  groups: string[];
+} {
+  const clubAktiv =
+    params.clubMitgliedschaft?.status === 'ACTIVE' ? params.clubMitgliedschaft : null;
+  const teamAktiv =
+    params.teamMitgliedschaft?.status === 'ACTIVE' ? params.teamMitgliedschaft : null;
+
+  if (clubAktiv?.rolle === 'CLUB_ADMIN') {
+    return {
+      clubRolle: 'CLUB_ADMIN',
+      effektiveTeamRolle: 'TEAM_ADMIN',
+      istKaskadiertVonClubAdmin: true,
+      groups: teamAktiv?.groups ? [...teamAktiv.groups] : [],
+    };
+  }
+
+  return {
+    clubRolle: clubAktiv?.rolle ?? null,
+    effektiveTeamRolle: teamAktiv?.rolle ?? null,
+    istKaskadiertVonClubAdmin: false,
+    groups: teamAktiv?.groups ? [...teamAktiv.groups] : [],
+  };
 }
 
-/**
- * Team-Mitgliedschaft (trennt Benutzerkonto von der Team-Zugehörigkeit).
- */
-export interface TeamMitgliedschaft {
-  id: string;
-  userUuid: string;
-  teamId: string;
-  rolle: TeamRolle;
-  units: SpielerUnit[];
-  status: 'AKTIV' | 'WARTET_AUF_FREIGABE';
-  beigetretenAm: string;
+export function holeTeamRollenLabel(rolle: TeamRolle, locale: UnterstuetzteSprache = 'de'): string {
+  if (locale === 'en') {
+    switch (rolle) {
+      case 'TEAM_ADMIN':
+        return 'Team Admin';
+      case 'STAFF':
+        return 'Staff / Coach';
+      case 'MEMBER':
+        return 'Member';
+    }
+  }
+  switch (rolle) {
+    case 'TEAM_ADMIN':
+      return 'Team-Admin';
+    case 'STAFF':
+      return 'Trainer / Staff';
+    case 'MEMBER':
+      return 'Mitglied';
+  }
 }
 
-export interface TeamEinladung {
-  id: string;
-  teamId: string;
-  typ: 'EMAIL' | 'TEAM_LINK';
-  zielEmail?: string;
-  rolle: TeamRolle;
-  units: SpielerUnit[];
-  token: string;
-  pfad: string;
-  erstelltAm: string;
-  gueltigBis: string;
-  bestaetigungErforderlich: boolean;
-  aktiv: boolean;
+export function holeClubRollenLabel(rolle: ClubRolle, locale: UnterstuetzteSprache = 'de'): string {
+  if (locale === 'en') {
+    return rolle === 'CLUB_ADMIN' ? 'Club Admin' : 'Club Member';
+  }
+  return rolle === 'CLUB_ADMIN' ? 'Vereinsadmin' : 'Vereinsmitglied';
 }
-
-export interface S3Konfiguration {
-  endpoint: string;
-  region: string;
-  bucket: string;
-  accessKey: string;
-  forcePathStyle: boolean;
-  cleanupRetentionDays?: number;
-  hatSecretKey?: boolean;
-  konfiguriert?: boolean;
-}
-
-export interface SmtpKonfiguration {
-  host: string;
-  port: number;
-  absender: string;
-  benutzer: string;
-  tlsAktiv: boolean;
-  hatPasswort?: boolean;
-  konfiguriert?: boolean;
-}
-
-export interface TeamKontext {
-  id: string;
-  name: string;
-  kurzname: string;
-  /** Aktuelle Saison des dauerhaft bestehenden Teams (alte Saisons bleiben abrufbar) */
-  aktiveSaison: string;
-  saisons: string[];
-  primaerFarbe?: string;
-  aktivierteModule: PluginId[];
-  customProfilFelder: ProfilCustomFeld[];
-}
-
-export const TEAM_ROLLEN_LABELS: Record<TeamRolle, string> = {
-  TEAM_ADMIN: 'Team Admin',
-  COACH: 'Coach',
-  PLAYER: 'Spieler',
-};
-
-export const TEAM_ROLLEN_LABELS_I18N: Record<UnterstuetzteSprache, Record<TeamRolle, string>> = {
-  de: TEAM_ROLLEN_LABELS,
-  en: {
-    TEAM_ADMIN: 'Team Admin',
-    COACH: 'Coach',
-    PLAYER: 'Player',
-  },
-};
-
-export const SPIELER_UNIT_LABELS: Record<SpielerUnit, string> = {
-  OFFENSE: 'Offense',
-  DEFENSE: 'Defense',
-  SPECIAL_TEAMS: 'Special Teams',
-};
-
-export const SPIELER_UNIT_LABELS_I18N: Record<UnterstuetzteSprache, Record<SpielerUnit, string>> = {
-  de: SPIELER_UNIT_LABELS,
-  en: SPIELER_UNIT_LABELS,
-};
-
-export function holeRollenLabel(rolle: TeamRolle, locale?: string): string {
-  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
-  return TEAM_ROLLEN_LABELS_I18N[code][rolle];
-}
-
-export function holeUnitLabel(unit: SpielerUnit, locale?: string): string {
-  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
-  return SPIELER_UNIT_LABELS_I18N[code][unit];
-}
-
-export const DEMO_PROFILE: BenutzerProfil[] = [
-  {
-    id: 'profil-teamadmin-sysadmin',
-    userUuid: 'usr-0001-headcoach',
-    label: 'Team Admin + Sysadmin',
-    teamRolle: 'TEAM_ADMIN',
-    istSysadmin: true,
-  },
-  {
-    id: 'profil-coach',
-    userUuid: 'usr-0002-oc',
-    label: 'Coach',
-    teamRolle: 'COACH',
-    istSysadmin: false,
-  },
-  {
-    id: 'profil-player',
-    userUuid: 'usr-0003-wr',
-    label: 'Spieler',
-    teamRolle: 'PLAYER',
-    istSysadmin: false,
-  },
-  {
-    id: 'profil-only-sysadmin',
-    userUuid: 'usr-0004-sysop',
-    label: 'Nur Sysadmin',
-    teamRolle: null,
-    istSysadmin: true,
-  },
-];

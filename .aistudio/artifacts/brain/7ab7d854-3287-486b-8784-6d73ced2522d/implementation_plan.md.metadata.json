@@ -1,6 +1,6 @@
 {
-  "summary": "Implementierungsplan für die offenen DEV-Issues #16 (Browser-History mit sprechenden Pfaden), #17 (zuverlässiges Git-Pull-Update & Live-Reload für Dev-Plugins) und #18 (Public-Share S3 Read-Only-Signierung & userUnits im Plugin-SDK v1.0) inklusive Kompatibilitätsschutz für bestehende Plugins.",
-  "updatedAt": "2026-11-26T10:34:16.193965014Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Überarbeiteter Architektur- und Umsetzungsplan für SidelineOS-core v0.2.0 inkl. vollständigem Abgleich aller offenen GitHub-Issues (#21–#26): zwingende Club-Hierarchie mit Rollenkaskade, getrennte Admin-Ebenen (/admin/system vs. /admin/club), Team-Archivierung im Read-Only-Modus, getrennte Club-/Team-Mitgliedschaften, geteilter Vereins-Speicherpool (90 %/100 %) mit Quota-API sowie Multi-Storage-Routing.",
+  "updatedAt":  "2026-11-28T16:28:52.331056186Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

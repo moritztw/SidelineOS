@@ -7,14 +7,13 @@ import type {
   NotificationPrioritaet,
   PluginNotificationChannelInfo,
 } from '../../sdk/plugin.ts';
-import type { BenutzerKonto, TeamKontext } from '../../shared/types.ts';
+import type { BenutzerKonto } from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import type {
   NotificationDispatcherBridge,
   PluginBackendHost,
 } from '../plugins/backendHost.ts';
-import type { SmtpService } from './smtpService.ts';
 
 function normalisierePrioritaet(raw: unknown): NotificationPrioritaet {
   if (raw === 'warning' || raw === 'urgent') return raw;
@@ -32,19 +31,19 @@ function validiereLinkPath(raw: unknown): string | undefined {
 }
 
 /**
- * Zentraler Core-Notification-Dispatcher:
- * Stellt In-App + SMTP bereit und delegiert Zustellwege dynamisch an geladene Channel-Plugins.
+ * Schlanker Core-Notification-Dispatcher (v0.2.0):
+ * - In-App-Posteingang im Core.
+ * - Alle externen Kanäle (inkl. SMTP via `SidelineOS-channel-smtp`) laufen einheitlich
+ *   über `notifications:channel`-Plugins ohne Core-Sonderwege.
  */
 export class NotificationService implements NotificationDispatcherBridge {
   constructor(
     private readonly repo: CoreRepository,
     private readonly config: CoreServerConfig,
-    private readonly pluginHost: PluginBackendHost,
-    private readonly smtpService?: SmtpService
+    private readonly pluginHost: PluginBackendHost
   ) {}
 
-  async listeKanaeleFuerTeam(teamId?: string): Promise<PluginNotificationChannelInfo[]> {
-    const smtpKonfig = this.smtpService ? await this.smtpService.holeMaskierteKonfig() : null;
+  async listeKanaele(kontext?: { clubId?: string; teamId?: string }): Promise<PluginNotificationChannelInfo[]> {
     const kanaele: PluginNotificationChannelInfo[] = [
       {
         id: 'in-app',
@@ -53,29 +52,24 @@ export class NotificationService implements NotificationDispatcherBridge {
         providerPluginId: 'core',
         aktiv: true,
       },
-      {
-        id: 'smtp',
-        label: 'E-Mail (SMTP)',
-        description: 'Versendet Benachrichtigungen über den konfigurierten Core-SMTP-Server.',
-        providerPluginId: 'core',
-        aktiv: Boolean(smtpKonfig?.konfiguriert),
-      },
     ];
 
-    const channelPlugins = this.pluginHost.listeNotificationChannelPlugins();
-    for (const plugin of channelPlugins) {
-      const status = await this.repo.findePluginStatus(plugin.manifest.id);
+    for (const plugin of this.pluginHost.listeNotificationChannelPlugins()) {
+      const status = await this.repo.findePlugin(plugin.manifest.id);
       if (!status?.enabledGlobally) continue;
-      const teamAktiv = teamId
-        ? await this.repo.istTeamModulAktiv(teamId, plugin.manifest.id)
-        : true;
+      let scopeAktiv = true;
+      if (kontext?.teamId && plugin.manifest.navigation.scopes.includes('team')) {
+        scopeAktiv = await this.repo.istScopeModulAktiv('team', kontext.teamId, plugin.manifest.id);
+      } else if (kontext?.clubId && plugin.manifest.navigation.scopes.includes('club')) {
+        scopeAktiv = await this.repo.istScopeModulAktiv('club', kontext.clubId, plugin.manifest.id);
+      }
       for (const ch of plugin.notificationChannels ?? []) {
         kanaele.push({
           id: ch.id,
           label: ch.label,
           ...(ch.description ? { description: ch.description } : {}),
           providerPluginId: plugin.manifest.id,
-          aktiv: teamAktiv,
+          aktiv: scopeAktiv,
         });
       }
     }
@@ -83,21 +77,10 @@ export class NotificationService implements NotificationDispatcherBridge {
     return kanaele;
   }
 
-  async dispatchFuerPlugin(params: {
-    sourcePluginId: string;
-    team: TeamKontext;
-    payload: NotificationPayload;
-  }): Promise<NotificationDispatchErgebnis> {
-    return this.dispatch({
-      sourcePluginId: params.sourcePluginId,
-      team: params.team,
-      payload: params.payload,
-    });
-  }
-
   async dispatch(params: {
     sourcePluginId: string;
-    team?: TeamKontext;
+    clubId?: string;
+    teamId?: string;
     payload: NotificationPayload;
   }): Promise<NotificationDispatchErgebnis> {
     const title = typeof params.payload.title === 'string' ? params.payload.title.trim() : '';
@@ -127,7 +110,8 @@ export class NotificationService implements NotificationDispatcherBridge {
         : {};
 
     const zielBenutzer = await this.loeseEmpfaengerAuf(
-      params.team?.id,
+      params.clubId,
+      params.teamId,
       params.payload.recipientUserUuids
     );
 
@@ -135,32 +119,32 @@ export class NotificationService implements NotificationDispatcherBridge {
       uuid: u.uuid,
       vollerName: u.vollerName,
       benutzername: u.benutzername,
+      email: u.email,
       preferredLocale: u.preferredLocale ?? this.config.defaultLocale,
     }));
 
-    const requestedChannels = Array.isArray(params.payload.channels)
+    const requested = Array.isArray(params.payload.channels)
       ? params.payload.channels
           .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
           .map((c) => c.trim())
       : null;
 
-    const hatExpliziteKanaele = Boolean(requestedChannels && requestedChannels.length > 0);
-    const sollKanal = (channelId: string, nurExplizit = false): boolean => {
-      if (hatExpliziteKanaele) {
-        return requestedChannels!.includes(channelId);
-      }
-      return !nurExplizit;
+    const hatExplizit = Boolean(requested && requested.length > 0);
+    const sollKanal = (channelId: string, explicitOnly = false): boolean => {
+      if (hatExplizit) return requested!.includes(channelId);
+      return !explicitOnly;
     };
 
     const notificationIds: string[] = [];
     const channelResults: NotificationChannelErgebnis[] = [];
 
-    // 1. Core Standard-Kanal: In-App
+    // 1. Core In-App-Posteingang
     if (sollKanal('in-app', false)) {
       for (const user of zielBenutzer) {
         const gespeichert = await this.repo.erstelleNotification({
           userUuid: user.uuid,
-          teamId: params.team?.id,
+          clubId: params.clubId,
+          teamId: params.teamId,
           sourcePluginId: params.sourcePluginId,
           eventType,
           title,
@@ -179,56 +163,7 @@ export class NotificationService implements NotificationDispatcherBridge {
       });
     }
 
-    // 2. Core SMTP-Kanal (nur wenn explizit über channels: ['smtp'] angefordert)
-    if (sollKanal('smtp', true)) {
-      if (!this.smtpService) {
-        channelResults.push({
-          channelId: 'smtp',
-          providerPluginId: 'core',
-          status: 'skipped',
-          delivered: 0,
-          error: 'SMTP-Service ist nicht initialisiert.',
-        });
-      } else {
-        const konfig = await this.smtpService.holeMaskierteKonfig();
-        if (!konfig.konfiguriert) {
-          channelResults.push({
-            channelId: 'smtp',
-            providerPluginId: 'core',
-            status: 'skipped',
-            delivered: 0,
-            error: 'SMTP ist auf dieser Instanz nicht konfiguriert.',
-          });
-        } else {
-          let zugestellt = 0;
-          let letzterFehler: string | undefined;
-          const basisUrl = this.config.appUrl.replace(/\/+$/, '');
-          const linkZeile = linkPath ? `\n\nLink: ${basisUrl}${linkPath}` : '';
-          for (const user of zielBenutzer) {
-            if (!user.email) continue;
-            const res = await this.smtpService.sendeTextMail({
-              empfaenger: user.email,
-              betreff: `${this.config.brandName} · ${title}`,
-              text: `${message}${linkZeile}`,
-            });
-            if (res.gesendet) {
-              zugestellt += 1;
-            } else if (res.fehler) {
-              letzterFehler = res.fehler;
-            }
-          }
-          channelResults.push({
-            channelId: 'smtp',
-            providerPluginId: 'core',
-            status: zugestellt > 0 || zielBenutzer.length === 0 ? 'sent' : 'failed',
-            delivered: zugestellt,
-            ...(letzterFehler && zugestellt === 0 ? { error: letzterFehler } : {}),
-          });
-        }
-      }
-    }
-
-    // 3. Dynamisch nachgelieferte Notification-Channel-Plugins
+    // 2. Externe Channel-Plugins (z. B. SidelineOS-channel-smtp, Push, Webhook)
     const dispatchEvent: NotificationDispatchEvent = {
       eventType,
       title,
@@ -236,33 +171,28 @@ export class NotificationService implements NotificationDispatcherBridge {
       ...(linkPath ? { linkPath } : {}),
       priority,
       sourcePluginId: params.sourcePluginId,
-      ...(params.team ? { teamId: params.team.id, teamName: params.team.name } : {}),
+      ...(params.clubId ? { clubId: params.clubId } : {}),
+      ...(params.teamId ? { teamId: params.teamId } : {}),
       recipients: empfaengerInfos,
       metadata,
       createdAt: new Date().toISOString(),
     };
 
-    const channelPlugins = this.pluginHost.listeNotificationChannelPlugins();
-    for (const plugin of channelPlugins) {
-      const status = await this.repo.findePluginStatus(plugin.manifest.id);
+    for (const plugin of this.pluginHost.listeNotificationChannelPlugins()) {
+      const status = await this.repo.findePlugin(plugin.manifest.id);
       if (!status?.enabledGlobally) continue;
-      if (params.team) {
-        const teamAktiv = await this.repo.istTeamModulAktiv(params.team.id, plugin.manifest.id);
-        if (!teamAktiv) continue;
-      }
 
-      for (const channel of plugin.notificationChannels ?? []) {
-        if (!sollKanal(channel.id, false)) continue;
+      for (const ch of plugin.notificationChannels ?? []) {
+        if (!sollKanal(ch.id, Boolean(ch.explicitOnly))) continue;
         try {
           const ergebnis = await plugin.deliverNotification!(dispatchEvent, {
             pluginId: plugin.manifest.id,
             manifest: plugin.manifest,
-            channelId: channel.id,
+            channelId: ch.id,
             db: this.pluginHost.erstelleDbScope(plugin.manifest.id),
-            ...(params.team ? { team: params.team } : {}),
           });
           channelResults.push({
-            channelId: channel.id,
+            channelId: ch.id,
             providerPluginId: plugin.manifest.id,
             status: ergebnis.error ? 'failed' : 'sent',
             delivered: Math.max(0, Number(ergebnis.delivered) || 0),
@@ -270,7 +200,7 @@ export class NotificationService implements NotificationDispatcherBridge {
           });
         } catch (err) {
           channelResults.push({
-            channelId: channel.id,
+            channelId: ch.id,
             providerPluginId: plugin.manifest.id,
             status: 'failed',
             delivered: 0,
@@ -288,6 +218,7 @@ export class NotificationService implements NotificationDispatcherBridge {
   }
 
   private async loeseEmpfaengerAuf(
+    clubId: string | undefined,
     teamId: string | undefined,
     requestedUuids?: string[]
   ): Promise<BenutzerKonto[]> {
@@ -295,21 +226,21 @@ export class NotificationService implements NotificationDispatcherBridge {
       ? new Set(requestedUuids.filter((u): u is string => typeof u === 'string' && u.trim().length > 0))
       : null;
 
-    const alleBenutzer = await this.repo.listeBenutzer();
-
     if (teamId) {
-      const mitgliedschaften = await this.repo.listeMitgliedschaften(teamId);
-      const aktiveTeamUser = new Set(
-        mitgliedschaften.filter((m) => m.status === 'AKTIV').map((m) => m.userUuid)
-      );
-      return alleBenutzer.filter(
-        (u) => aktiveTeamUser.has(u.uuid) && (!angefordert || angefordert.has(u.uuid))
-      );
+      const mitglieder = await this.repo.listeTeamMitglieder(teamId);
+      const aktive = mitglieder.filter((m) => m.status === 'ACTIVE').map((m) => m.user);
+      return angefordert ? aktive.filter((u) => angefordert.has(u.uuid)) : aktive;
     }
 
-    if (angefordert && angefordert.size > 0) {
-      return alleBenutzer.filter((u) => angefordert.has(u.uuid));
+    if (clubId) {
+      const mitglieder = await this.repo.listeClubMitglieder(clubId);
+      const aktive = mitglieder.filter((m) => m.status === 'ACTIVE').map((m) => m.user);
+      return angefordert ? aktive.filter((u) => angefordert.has(u.uuid)) : aktive;
     }
-    return alleBenutzer;
+
+    const alle = await this.repo.listeBenutzer();
+    return angefordert && angefordert.size > 0
+      ? alle.filter((u) => angefordert.has(u.uuid))
+      : alle;
   }
 }

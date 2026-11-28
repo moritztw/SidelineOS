@@ -2,137 +2,109 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import type { CoreServerConfig } from './config.ts';
 import type { CoreDatabaseClient } from './db/client.ts';
 import { CoreRepository } from './db/coreRepository.ts';
+import { StorageBroker } from './gateway/storageBroker.ts';
 import { PluginBackendHost } from './plugins/backendHost.ts';
 import { PluginRuntimeLoader } from './plugins/runtimeLoader.ts';
 import { erstelleAuthRouter } from './routes/auth.ts';
-import { erstelleNotificationRouter } from './routes/notifications.ts';
+import { erstelleNotificationsRouter } from './routes/notifications.ts';
 import { erstellePluginGatewayRouter } from './routes/pluginGateway.ts';
 import { erstellePluginRuntimeRouter } from './routes/pluginRuntime.ts';
-import { erstelleSysadminRouter } from './routes/sysadmin.ts';
-import { erstelleTeamRouter } from './routes/teams.ts';
+import { erstelleSystemAdminRouter } from './routes/systemAdmin.ts';
+import { MinimalArchiveInstaller } from './runtime/archiveInstaller.ts';
 import { NotificationService } from './services/notificationService.ts';
-import { PluginInstallerService } from './services/pluginInstaller.ts';
-import { S3BrokerService } from './services/s3Broker.ts';
-import { S3CleanupService } from './services/s3CleanupService.ts';
-import { SmtpService } from './services/smtpService.ts';
 
-export interface CreateCoreAppOptionen {
-  db: CoreDatabaseClient;
-  config: CoreServerConfig;
-  pluginHost?: PluginBackendHost;
-  s3Broker?: S3BrokerService;
-  s3Cleanup?: S3CleanupService;
-  smtpService?: SmtpService;
-  pluginInstaller?: PluginInstallerService;
-  runtimeLoader?: PluginRuntimeLoader;
-  notificationService?: NotificationService;
+export interface CoreAppBundle {
+  app: Express;
+  repo: CoreRepository;
+  storageBroker: StorageBroker;
+  notificationService: NotificationService;
+  pluginHost: PluginBackendHost;
+  runtimeLoader: PluginRuntimeLoader;
+  archiveInstaller: MinimalArchiveInstaller;
 }
 
 /**
- * Erstellt die reine Core-Express-App ohne Vite/HTTP-Server-Bindung
- * (ideal für schnelle API-Integrationstests sowie dev/prod-Wrapper in `server.ts`).
+ * Erstellt die schlanke Micro-Kernel-Express-App von SidelineOS-core v0.2.0.
  */
-export function erstelleCoreApp(optionen: CreateCoreAppOptionen): {
-  app: Express;
-  repo: CoreRepository;
-  pluginHost: PluginBackendHost;
-  runtimeLoader: PluginRuntimeLoader;
-  s3Broker: S3BrokerService;
-  s3Cleanup: S3CleanupService;
-  smtpService: SmtpService;
-  pluginInstaller: PluginInstallerService;
-  notificationService: NotificationService;
-} {
-  const { db, config } = optionen;
-  const repo = new CoreRepository(db);
-  const s3Broker = optionen.s3Broker ?? new S3BrokerService(repo, config);
-  const s3Cleanup = optionen.s3Cleanup ?? new S3CleanupService(db, s3Broker);
-  const smtpService = optionen.smtpService ?? new SmtpService(repo, config);
-  const pluginInstaller =
-    optionen.pluginInstaller ?? new PluginInstallerService(db, repo, config);
-  const pluginHost = optionen.pluginHost ?? new PluginBackendHost(db, s3Broker, s3Cleanup);
-  const notificationService =
-    optionen.notificationService ??
-    new NotificationService(repo, config, pluginHost, smtpService);
-  pluginHost.setzeNotificationBridge(notificationService);
-  const runtimeLoader =
-    optionen.runtimeLoader ?? new PluginRuntimeLoader(repo, config, pluginHost);
-
+export function erstelleCoreApp(params: {
+  db: CoreDatabaseClient;
+  config: CoreServerConfig;
+  fetchFn?: typeof fetch;
+}): CoreAppBundle {
+  const { db, config } = params;
   const app = express();
-  app.set('trust proxy', 1);
+  app.set('trust proxy', true);
   app.disable('x-powered-by');
+  app.use(express.json({ limit: '55mb' }));
 
-  const jsonStandard = express.json({ limit: '2mb' });
-  const jsonUpload = express.json({ limit: '35mb' });
-  app.use((req, res, next) => {
-    if (req.path === '/api/v1/sysadmin/plugins/install-upload') {
-      jsonUpload(req, res, next);
-      return;
-    }
-    jsonStandard(req, res, next);
-  });
+  const repo = new CoreRepository(db);
+  const storageBroker = new StorageBroker(repo, config);
+  const pluginHost = new PluginBackendHost(db, repo, storageBroker);
+  const notificationService = new NotificationService(repo, config, pluginHost);
+  const runtimeLoader = new PluginRuntimeLoader(repo, config, pluginHost);
+  const archiveInstaller = new MinimalArchiveInstaller(
+    repo,
+    config,
+    runtimeLoader,
+    params.fetchFn ?? fetch
+  );
 
-  app.get('/api/v1/health', (_req, res) => {
-    res.status(200).json({
-      status: 'ok',
-      service: 'sidelineos-core',
-      version: config.coreVersion,
-      db: db.dialekt,
-      plugins: pluginHost.listeRegistrierteIds(),
+  pluginHost.setzeNotificationBridge(notificationService);
+  pluginHost.setzeArchiveInstaller(archiveInstaller);
+
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      ok: true,
+      service: config.coreName,
+      coreVersion: config.coreVersion,
+      sdkVersion: config.supportedSdkVersion,
+      dbDialekt: db.dialekt,
+      storageProviderAktiv: storageBroker.holeProviderInfo().konfiguriert,
     });
   });
 
-  app.use('/api/v1/auth', erstelleAuthRouter(repo, config));
-  app.use('/api/v1/teams', erstelleTeamRouter(repo, config, smtpService));
-  app.use('/api/v1/notifications', erstelleNotificationRouter(repo, config, notificationService));
+  app.use('/api/v2/auth', erstelleAuthRouter(repo, config));
+  app.use('/api/v2/notifications', erstelleNotificationsRouter(repo, config));
   app.use(
-    '/api/v1/sysadmin',
-    erstelleSysadminRouter(repo, config, {
-      s3Broker,
-      s3Cleanup,
-      smtpService,
-      pluginInstaller,
+    '/api/v2/admin/system',
+    erstelleSystemAdminRouter({
+      db,
+      repo,
+      config,
+      storageBroker,
       runtimeLoader,
+      archiveInstaller,
     })
   );
+  app.use('/api/v2/plugins/runtime', erstellePluginRuntimeRouter(repo, config, runtimeLoader));
 
-  app.use('/api/v1/plugins/runtime', erstellePluginRuntimeRouter(repo, config, runtimeLoader));
-
-  const { protectedRouter, publicRouter } = erstellePluginGatewayRouter(
+  const { protectedRouter, publicRouter } = erstellePluginGatewayRouter({
     repo,
     config,
     pluginHost,
-    s3Broker,
-    s3Cleanup,
-    notificationService
-  );
-  app.use('/api/v1/plugins', protectedRouter);
-  app.use('/api/v1/public/plugins', publicRouter);
+    storageBroker,
+    notificationService,
+  });
+  app.use('/api/v2/plugins', protectedRouter);
+  app.use('/api/v2/public/plugins', publicRouter);
 
-  // Unbekannte API-Pfade sauber als JSON beantworten statt SPA-HTML auszuliefern
-  app.all('/api/*', (_req, res) => {
+  app.use('/api', (_req, res) => {
     res.status(404).json({ fehler: 'API-Endpunkt nicht gefunden.' });
   });
 
-  // Zentraler Fehler-Handler ohne Stacktrace-Leak
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    if (err instanceof SyntaxError && 'status' in err && (err as { status?: number }).status === 400) {
-      res.status(400).json({ fehler: 'Ungültiges JSON-Format in der Anfrage.' });
-      return;
-    }
+    const nachricht = err instanceof Error ? err.message : 'Interner Serverfehler.';
     console.error('[SidelineOS-Core] Unerwarteter API-Fehler:', err);
-    res.status(500).json({ fehler: 'Interner Serverfehler.' });
+    res.status(500).json({ fehler: nachricht });
   });
 
   return {
     app,
     repo,
+    storageBroker,
+    notificationService,
     pluginHost,
     runtimeLoader,
-    s3Broker,
-    s3Cleanup,
-    smtpService,
-    pluginInstaller,
-    notificationService,
+    archiveInstaller,
   };
 }

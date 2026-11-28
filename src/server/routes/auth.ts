@@ -1,12 +1,9 @@
-import crypto from 'node:crypto';
 import { Router } from 'express';
-import { pruefeEinladungsToken } from '../../core/authService.ts';
-import { istUnterstuetzteSprache, normalisiereSprache } from '../../shared/i18n.ts';
-import type { BenutzerKonto, TeamMitgliedschaft } from '../../shared/types.ts';
+import { normalisiereSprache } from '../../shared/i18n.ts';
+import { STANDARD_THEME_REF } from '../../shared/theme.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import {
-  extrahiereSessionToken,
   loescheSessionCookie,
   requireAuth,
   setzeSessionCookie,
@@ -17,75 +14,123 @@ import {
   hashSessionToken,
   pruefePasswort,
 } from '../security.ts';
-import { validiereThemeAuswahlFuerInstanz } from '../services/themeService.ts';
+import {
+  listeOeffentlichePluginThemes,
+  validiereThemeAuswahlFuerInstanz,
+} from '../services/themeService.ts';
 
-const MIN_PASSWORT_LAENGE = 10;
-
-async function ladeUserKontext(repo: CoreRepository, userUuid: string) {
-  const [alleMitgliedschaften, alleTeams] = await Promise.all([
-    repo.listeMitgliedschaften(),
-    repo.listeTeams(),
-  ]);
-  const memberships = alleMitgliedschaften.filter((m) => m.userUuid === userUuid);
-  const aktiveTeamIds = new Set(
-    memberships.filter((m) => m.status === 'AKTIV').map((m) => m.teamId)
-  );
-  const teams = alleTeams.filter((t) => aktiveTeamIds.has(t.id));
-  return { memberships, teams };
+async function ladeInstanzTheme(repo: CoreRepository): Promise<string> {
+  const setting = await repo.holeSystemSetting<{ defaultTheme?: string }>('appearance');
+  return setting?.defaultTheme?.trim() || STANDARD_THEME_REF;
 }
 
 export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfig): Router {
   const router = Router();
   const auth = requireAuth(repo, config);
 
-  router.post('/login', async (req, res, next) => {
+  // Zeigt dem Login-Screen an, ob eine leere Instanz erstmalig per Sysadmin-Formular eingerichtet werden muss
+  router.get('/bootstrap-status', async (_req, res, next) => {
     try {
-      const kennung = typeof req.body?.kennung === 'string' ? req.body.kennung.trim() : '';
-      const passwort = typeof req.body?.passwort === 'string' ? req.body.passwort : '';
-
-      if (!kennung || !passwort) {
-        res.status(400).json({
-          fehler: 'Bitte Benutzername oder E-Mail sowie Passwort eingeben.',
-        });
-        return;
-      }
-
-      const treffer = await repo.findeBenutzerMitHashNachKennung(kennung);
-      if (!treffer || !pruefePasswort(passwort, treffer.passwordHash)) {
-        res.status(401).json({ fehler: 'Anmeldedaten ungültig. Bitte Eingabe prüfen.' });
-        return;
-      }
-
-      const rawToken = generiereSessionToken();
-      const tokenHash = hashSessionToken(rawToken, config.sessionSecret);
-      await repo.erstelleSession(treffer.konto.uuid, tokenHash, config.sessionTtlStunden);
-      setzeSessionCookie(res, req, config, rawToken);
-
-      const [{ memberships, teams }, instanceDefaultTheme] = await Promise.all([
-        ladeUserKontext(repo, treffer.konto.uuid),
-        repo.holeStandardThemeRef(),
+      const anzahlBenutzer = await repo.zaehleBenutzer();
+      const [instanzTheme, pluginThemes] = await Promise.all([
+        ladeInstanzTheme(repo),
+        listeOeffentlichePluginThemes(repo),
       ]);
-      res.status(200).json({
-        user: treffer.konto,
-        memberships,
-        teams,
-        instanceDefaultTheme,
-        token: rawToken,
+      res.json({
+        ersteinrichtungOffen: anzahlBenutzer === 0 && !config.initialSysadmin,
+        coreVersion: config.coreVersion,
+        sdkVersion: config.supportedSdkVersion,
+        defaultLocale: config.defaultLocale,
+        instanzTheme,
+        pluginThemes,
       });
     } catch (err) {
       next(err);
     }
   });
 
-  router.post('/logout', async (req, res, next) => {
+  // Einmalige Erst-Sysadmin-Anlage (gesperrt, sobald >= 1 Benutzer existiert oder ENV gesetzt ist)
+  router.post('/bootstrap-admin', async (req, res, next) => {
     try {
-      const gefunden = extrahiereSessionToken(req);
-      if (gefunden) {
-        const tokenHash = hashSessionToken(gefunden.token, config.sessionSecret);
-        await repo.loescheSession(tokenHash);
+      if (config.initialSysadmin || (await repo.zaehleBenutzer()) > 0) {
+        res.status(409).json({ fehler: 'Die Instanz wurde bereits eingerichtet.' });
+        return;
       }
+
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const benutzername = String(body.benutzername ?? '').trim().toLowerCase();
+      const vollerName = String(body.vollerName ?? '').trim();
+      const email = String(body.email ?? '').trim().toLowerCase();
+      const passwort = String(body.passwort ?? '');
+
+      if (!/^[a-z0-9._-]{3,40}$/.test(benutzername)) {
+        res.status(400).json({ fehler: 'Benutzername muss 3–40 Zeichen (a-z, 0-9, . _ -) enthalten.' });
+        return;
+      }
+      if (!vollerName || !email.includes('@') || passwort.length < 8) {
+        res.status(400).json({ fehler: 'Name, gültige E-Mail und Passwort (mind. 8 Zeichen) erforderlich.' });
+        return;
+      }
+
+      const admin = await repo.erstelleBenutzer(
+        {
+          benutzername,
+          vollerName,
+          email,
+          istSysadmin: true,
+          preferredLocale: config.defaultLocale,
+        },
+        hashPasswort(passwort)
+      );
+
+      const token = generiereSessionToken();
+      const expiresAt = new Date(Date.now() + config.sessionTtlStunden * 3600 * 1000).toISOString();
+      await repo.erstelleSession(hashSessionToken(token, config.sessionSecret), admin.uuid, expiresAt);
+      setzeSessionCookie(res, req, config, token);
+
+      res.status(201).json({ user: admin, token });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/login', async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const kennung = String(body.kennung ?? body.username ?? '').trim();
+      const passwort = String(body.passwort ?? body.password ?? '');
+
+      if (!kennung || !passwort) {
+        res.status(400).json({ fehler: 'Benutzername/E-Mail und Passwort erforderlich.' });
+        return;
+      }
+
+      const treffer = await repo.findeBenutzerNachLogin(kennung);
+      if (!treffer || !pruefePasswort(passwort, treffer.passwordHash)) {
+        res.status(401).json({ fehler: 'Anmeldedaten ungültig.' });
+        return;
+      }
+
+      const token = generiereSessionToken();
+      const expiresAt = new Date(Date.now() + config.sessionTtlStunden * 3600 * 1000).toISOString();
+      await repo.erstelleSession(
+        hashSessionToken(token, config.sessionSecret),
+        treffer.konto.uuid,
+        expiresAt
+      );
+      setzeSessionCookie(res, req, config, token);
+
+      res.json({ user: treffer.konto, token });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/logout', auth, async (req, res, next) => {
+    try {
+      await repo.loescheSession(req.coreAuth!.tokenHash);
       loescheSessionCookie(res, req, config);
-      res.status(200).json({ ok: true });
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }
@@ -94,11 +139,34 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
   router.get('/me', auth, async (req, res, next) => {
     try {
       const user = req.coreAuth!.user;
-      const [{ memberships, teams }, instanceDefaultTheme] = await Promise.all([
-        ladeUserKontext(repo, user.uuid),
-        repo.holeStandardThemeRef(),
+      const [kontext, instanzTheme, pluginThemes, ungeleseneNotifications] = await Promise.all([
+        repo.ladeBenutzerKontext(user.uuid),
+        ladeInstanzTheme(repo),
+        listeOeffentlichePluginThemes(repo),
+        repo.zaehleUngeleseneNotifications(user.uuid),
       ]);
-      res.status(200).json({ user, memberships, teams, instanceDefaultTheme });
+
+      const clubModuleMap: Record<string, string[]> = {};
+      for (const c of kontext.clubs) {
+        clubModuleMap[c.id] = await repo.listeAktiveScopeModule('club', c.id);
+      }
+      const teamModuleMap: Record<string, string[]> = {};
+      for (const t of kontext.teams) {
+        teamModuleMap[t.id] = await repo.listeAktiveScopeModule('team', t.id);
+      }
+
+      res.json({
+        user,
+        clubs: kontext.clubs,
+        teams: kontext.teams,
+        scopeModules: {
+          clubs: clubModuleMap,
+          teams: teamModuleMap,
+        },
+        instanzTheme,
+        pluginThemes,
+        ungeleseneNotifications,
+      });
     } catch (err) {
       next(err);
     }
@@ -106,143 +174,95 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
 
   router.patch('/me', auth, async (req, res, next) => {
     try {
-      const aktuell = req.coreAuth!.user;
-      const body = req.body ?? {};
-
-      const neuerUsername =
-        typeof body.benutzername === 'string' && body.benutzername.trim()
-          ? body.benutzername.trim().toLowerCase()
-          : aktuell.benutzername;
-      const neueEmail =
-        typeof body.email === 'string' && body.email.trim()
-          ? body.email.trim().toLowerCase()
-          : aktuell.email;
-      const neuerName =
-        typeof body.vollerName === 'string' && body.vollerName.trim()
-          ? body.vollerName.trim()
-          : aktuell.vollerName;
-
-      const konflikt = await repo.existiertEmailOderBenutzername(
-        neueEmail,
-        neuerUsername,
-        aktuell.uuid
-      );
-      if (konflikt) {
-        res.status(409).json({
-          fehler: 'E-Mail oder Benutzername wird bereits von einem anderen Konto verwendet.',
-        });
-        return;
-      }
-
-      if (typeof body.neuesPasswort === 'string' && body.neuesPasswort.length > 0) {
-        const alt = typeof body.altesPasswort === 'string' ? body.altesPasswort : '';
-        const mitHash = await repo.findeBenutzerNachUuid(aktuell.uuid);
-        if (!mitHash || !pruefePasswort(alt, mitHash.passwordHash)) {
-          res.status(403).json({ fehler: 'Aktuelles Passwort ist nicht korrekt.' });
-          return;
-        }
-        if (body.neuesPasswort.length < MIN_PASSWORT_LAENGE) {
-          res.status(400).json({
-            fehler: `Das neue Passwort muss mindestens ${MIN_PASSWORT_LAENGE} Zeichen lang sein.`,
-          });
-          return;
-        }
-        await repo.aktualisierePasswortHash(aktuell.uuid, hashPasswort(body.neuesPasswort));
-      }
-
-      const customProfilWerte =
-        body.customProfilWerte && typeof body.customProfilWerte === 'object'
-          ? Object.fromEntries(
-              Object.entries(body.customProfilWerte as Record<string, unknown>).map(([k, v]) => [
-                k,
-                String(v ?? ''),
-              ])
-            )
-          : aktuell.customProfilWerte;
-
-      let naechsteSprache = aktuell.preferredLocale ?? config.defaultLocale;
-      if (body.preferredLocale !== undefined) {
-        if (!istUnterstuetzteSprache(body.preferredLocale)) {
-          res.status(400).json({
-            fehler: 'Nicht unterstützte Sprache. Erlaubt sind "de" und "en".',
-          });
-          return;
-        }
-        naechsteSprache = body.preferredLocale;
-      }
-
-      let naechstesTheme = aktuell.preferredTheme;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      let themePatch: string | null | undefined = undefined;
       if (body.preferredTheme !== undefined) {
-        const pruefung = await validiereThemeAuswahlFuerInstanz(repo, body.preferredTheme, {
+        const check = await validiereThemeAuswahlFuerInstanz(repo, body.preferredTheme, {
           erlaubeLeer: true,
         });
-        if (!pruefung.ok) {
-          res.status(pruefung.status).json({ fehler: pruefung.fehler });
+        if (!check.ok) {
+          res.status(check.status).json({ fehler: check.fehler });
           return;
         }
-        naechstesTheme = pruefung.themeRef;
+        themePatch = check.themeRef ?? null;
       }
 
-      const aktualisiert = await repo.aktualisiereBenutzer({
-        ...aktuell,
-        benutzername: neuerUsername,
-        email: neueEmail,
-        vollerName: neuerName,
-        telefon: typeof body.telefon === 'string' ? body.telefon.trim() : aktuell.telefon,
-        trikotNummer:
-          typeof body.trikotNummer === 'string' ? body.trikotNummer.trim() : aktuell.trikotNummer,
-        position: typeof body.position === 'string' ? body.position.trim() : aktuell.position,
-        preferredLocale: naechsteSprache,
-        preferredTheme: naechstesTheme,
-        customProfilWerte,
+      const aktualisiert = await repo.aktualisiereBenutzer(req.coreAuth!.user.uuid, {
+        vollerName: typeof body.vollerName === 'string' ? body.vollerName : undefined,
+        email: typeof body.email === 'string' ? body.email : undefined,
+        preferredLocale:
+          typeof body.preferredLocale === 'string'
+            ? normalisiereSprache(body.preferredLocale, req.coreAuth!.user.preferredLocale)
+            : undefined,
+        preferredTheme: themePatch,
+        metadata:
+          body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+            ? (body.metadata as Record<string, unknown>)
+            : undefined,
       });
 
-      res.status(200).json({ user: aktualisiert });
+      res.json({ user: aktualisiert });
     } catch (err) {
       next(err);
     }
   });
 
+  router.post('/change-password', auth, async (req, res, next) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const altesPasswort = String(body.altesPasswort ?? '');
+      const neuesPasswort = String(body.neuesPasswort ?? '');
+
+      if (neuesPasswort.length < 8) {
+        res.status(400).json({ fehler: 'Das neue Passwort muss mindestens 8 Zeichen lang sein.' });
+        return;
+      }
+
+      const mitHash = await repo.findeBenutzerNachUuid(req.coreAuth!.user.uuid);
+      if (!mitHash || !pruefePasswort(altesPasswort, mitHash.passwordHash)) {
+        res.status(400).json({ fehler: 'Aktuelles Passwort ist nicht korrekt.' });
+        return;
+      }
+
+      await repo.aktualisiereBenutzer(mitHash.konto.uuid, {
+        passwordHash: hashPasswort(neuesPasswort),
+      });
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Öffentliche Einladungs-Prüfung (#26)
   router.get('/invite/:token', async (req, res, next) => {
     try {
       const token = String(req.params.token ?? '').trim();
-      const einladung = await repo.findeEinladungNachToken(token);
-      const pruefung = pruefeEinladungsToken(einladung ? [einladung] : [], token);
-
-      if (!pruefung.ok || !pruefung.einladung) {
-        const httpStatus = pruefung.status === 'NOT_FOUND' ? 404 : 410;
-        res.status(httpStatus).json({
-          fehler: pruefung.fehler,
-          status: pruefung.status,
-        });
+      const einladung = await repo.findeAktiveEinladungNachToken(token);
+      if (!einladung) {
+        res.status(404).json({ fehler: 'Einladungslink ist ungültig oder abgelaufen.' });
         return;
       }
 
-      const team = await repo.findeTeamNachId(pruefung.einladung.teamId);
-      if (!team) {
-        res.status(404).json({ fehler: 'Zugehöriges Team nicht gefunden.' });
+      const club = await repo.findeClubNachId(einladung.clubId);
+      if (!club) {
+        res.status(404).json({ fehler: 'Zugehöriger Verein existiert nicht mehr.' });
         return;
       }
+      const team = einladung.teamId ? await repo.findeTeamNachId(einladung.teamId) : null;
 
-      res.status(200).json({
-        status: 'VALID',
-        invitation: {
-          id: pruefung.einladung.id,
-          teamId: pruefung.einladung.teamId,
-          typ: pruefung.einladung.typ,
-          ...(pruefung.einladung.zielEmail ? { zielEmail: pruefung.einladung.zielEmail } : {}),
-          rolle: pruefung.einladung.rolle,
-          units: pruefung.einladung.units,
-          gueltigBis: pruefung.einladung.gueltigBis,
-          bestaetigungErforderlich: pruefung.einladung.bestaetigungErforderlich,
-        },
-        team: {
-          id: team.id,
-          name: team.name,
-          kurzname: team.kurzname,
-          aktiveSaison: team.aktiveSaison,
-          primaerFarbe: team.primaerFarbe,
-          customProfilFelder: team.customProfilFelder,
+      res.json({
+        einladung: {
+          id: einladung.id,
+          clubId: club.id,
+          clubName: club.name,
+          teamId: team?.id ?? null,
+          teamName: team?.name ?? null,
+          clubRolle: einladung.clubRolle,
+          teamRolle: einladung.teamRolle,
+          groups: einladung.groups,
+          zielEmail: einladung.zielEmail,
+          bestaetigungErforderlich: einladung.bestaetigungErforderlich,
+          gueltigBis: einladung.gueltigBis,
         },
       });
     } catch (err) {
@@ -250,136 +270,70 @@ export function erstelleAuthRouter(repo: CoreRepository, config: CoreServerConfi
     }
   });
 
+  // Atomare Einlösung: neuer Benutzer ODER bestehendes Konto -> Club + Team in einer Transaktion (#26)
   router.post('/invite/:token/accept', async (req, res, next) => {
     try {
       const token = String(req.params.token ?? '').trim();
-      const einladung = await repo.findeEinladungNachToken(token);
-      const pruefung = pruefeEinladungsToken(einladung ? [einladung] : [], token);
-
-      if (!pruefung.ok || !pruefung.einladung) {
-        const httpStatus = pruefung.status === 'NOT_FOUND' ? 404 : 410;
-        res.status(httpStatus).json({ fehler: pruefung.fehler, status: pruefung.status });
+      const einladung = await repo.findeAktiveEinladungNachToken(token);
+      if (!einladung) {
+        res.status(404).json({ fehler: 'Einladungslink ist ungültig oder abgelaufen.' });
         return;
       }
 
-      const team = await repo.findeTeamNachId(pruefung.einladung.teamId);
-      if (!team) {
-        res.status(404).json({ fehler: 'Zugehöriges Team nicht gefunden.' });
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const benutzername = String(body.benutzername ?? '').trim().toLowerCase();
+      const vollerName = String(body.vollerName ?? '').trim();
+      const email = String(body.email ?? einladung.zielEmail ?? '').trim().toLowerCase();
+      const passwort = String(body.passwort ?? '');
+
+      if (!/^[a-z0-9._-]{3,40}$/.test(benutzername)) {
+        res.status(400).json({ fehler: 'Benutzername muss 3–40 Zeichen enthalten.' });
+        return;
+      }
+      if (!vollerName || !email.includes('@') || passwort.length < 8) {
+        res.status(400).json({ fehler: 'Name, gültige E-Mail und Passwort (mind. 8 Zeichen) erforderlich.' });
+        return;
+      }
+      if (einladung.zielEmail && einladung.zielEmail !== email) {
+        res.status(403).json({ fehler: 'Diese Einladung ist an eine andere E-Mail-Adresse gebunden.' });
         return;
       }
 
-      const body = req.body ?? {};
-      const modus = body.modus === 'bestehend' ? 'bestehend' : 'neu';
-      let konto: BenutzerKonto;
-
-      if (modus === 'bestehend') {
-        const kennung = typeof body.kennung === 'string' ? body.kennung.trim() : '';
-        const passwort = typeof body.passwort === 'string' ? body.passwort : '';
-        const treffer = await repo.findeBenutzerMitHashNachKennung(kennung);
-        if (!treffer || !pruefePasswort(passwort, treffer.passwordHash)) {
-          res.status(401).json({ fehler: 'Bestehende Anmeldedaten ungültig.' });
-          return;
-        }
-        konto = treffer.konto;
-      } else {
-        const vollerName = typeof body.vollerName === 'string' ? body.vollerName.trim() : '';
-        const benutzername =
-          typeof body.benutzername === 'string' ? body.benutzername.trim().toLowerCase() : '';
-        const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
-        const passwort = typeof body.passwort === 'string' ? body.passwort : '';
-
-        if (!vollerName || !benutzername || !email) {
-          res.status(400).json({ fehler: 'Name, Benutzername und E-Mail sind erforderlich.' });
-          return;
-        }
-        if (passwort.length < MIN_PASSWORT_LAENGE) {
-          res.status(400).json({
-            fehler: `Das Passwort muss mindestens ${MIN_PASSWORT_LAENGE} Zeichen lang sein.`,
-          });
-          return;
-        }
-
-        const konflikt = await repo.existiertEmailOderBenutzername(email, benutzername);
-        if (konflikt) {
-          res.status(409).json({
-            fehler: 'E-Mail oder Benutzername ist bereits vergeben. Bitte mit bestehendem Konto anmelden.',
-          });
-          return;
-        }
-
-        const customProfilWerte =
-          body.customProfilWerte && typeof body.customProfilWerte === 'object'
-            ? Object.fromEntries(
-                Object.entries(body.customProfilWerte as Record<string, unknown>).map(([k, v]) => [
-                  k,
-                  String(v ?? ''),
-                ])
-              )
-            : {};
-
-        const gewaehlteSprache = normalisiereSprache(body.preferredLocale, config.defaultLocale);
-
-        konto = await repo.erstelleBenutzer(
-          {
-            uuid: `usr-${crypto.randomUUID()}`,
-            benutzername,
-            vollerName,
-            email,
-            telefon: typeof body.telefon === 'string' ? body.telefon.trim() : undefined,
-            trikotNummer:
-              typeof body.trikotNummer === 'string' ? body.trikotNummer.trim() : undefined,
-            position: typeof body.position === 'string' ? body.position.trim() : undefined,
-            istSysadmin: false,
-            erstelltAm: new Date().toISOString().slice(0, 10),
-            preferredLocale: gewaehlteSprache,
-            customProfilWerte,
-          },
-          hashPasswort(passwort)
-        );
-      }
-
-      const teamMitgliedschaften = await repo.listeMitgliedschaften(team.id);
-      if (teamMitgliedschaften.some((m) => m.userUuid === konto.uuid)) {
-        res.status(409).json({ fehler: 'Dieses Konto ist bereits Mitglied dieses Teams.' });
+      const existiert = await repo.findeBenutzerNachLogin(benutzername) || await repo.findeBenutzerNachLogin(email);
+      if (existiert) {
+        res.status(409).json({ fehler: 'Benutzername oder E-Mail ist bereits vergeben.' });
         return;
       }
 
-      const gueltigeUnits = new Set(['OFFENSE', 'DEFENSE', 'SPECIAL_TEAMS']);
-      const gewaehlteUnits = Array.isArray(body.units)
-        ? body.units.filter((u: unknown): u is 'OFFENSE' | 'DEFENSE' | 'SPECIAL_TEAMS' =>
-            typeof u === 'string' && gueltigeUnits.has(u)
-          )
-        : [];
-      const finalUnits = gewaehlteUnits.length > 0 ? gewaehlteUnits : pruefung.einladung.units;
+      const benutzer = await repo.erstelleBenutzer(
+        {
+          benutzername,
+          vollerName,
+          email,
+          preferredLocale: config.defaultLocale,
+        },
+        hashPasswort(passwort)
+      );
 
-      const status: TeamMitgliedschaft['status'] = pruefung.einladung.bestaetigungErforderlich
-        ? 'WARTET_AUF_FREIGABE'
-        : 'AKTIV';
-
-      const mitgliedschaft = await repo.speichereMitgliedschaft({
-        id: `mem-${crypto.randomUUID()}`,
-        userUuid: konto.uuid,
-        teamId: team.id,
-        rolle: pruefung.einladung.rolle,
-        units: finalUnits,
-        status,
-        beigetretenAm: new Date().toISOString().slice(0, 10),
+      const zuweisung = await repo.loeseEinladungFuerUserEin({
+        userUuid: benutzer.uuid,
+        einladung,
       });
 
-      let sessionToken: string | undefined;
-      if (status === 'AKTIV') {
-        sessionToken = generiereSessionToken();
-        const tokenHash = hashSessionToken(sessionToken, config.sessionSecret);
-        await repo.erstelleSession(konto.uuid, tokenHash, config.sessionTtlStunden);
-        setzeSessionCookie(res, req, config, sessionToken);
-      }
+      const sessionToken = generiereSessionToken();
+      const expiresAt = new Date(Date.now() + config.sessionTtlStunden * 3600 * 1000).toISOString();
+      await repo.erstelleSession(
+        hashSessionToken(sessionToken, config.sessionSecret),
+        benutzer.uuid,
+        expiresAt
+      );
+      setzeSessionCookie(res, req, config, sessionToken);
 
       res.status(201).json({
-        status,
-        user: konto,
-        membership: mitgliedschaft,
-        team,
-        ...(sessionToken ? { token: sessionToken } : {}),
+        user: benutzer,
+        token: sessionToken,
+        clubMitgliedschaft: zuweisung.clubMitgliedschaft,
+        teamMitgliedschaft: zuweisung.teamMitgliedschaft,
       });
     } catch (err) {
       next(err);

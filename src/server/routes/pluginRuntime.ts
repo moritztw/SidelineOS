@@ -184,12 +184,15 @@ export function erstellePluginRuntimeRouter(
 
   router.get('/themes', async (_req, res, next) => {
     try {
-      const [instanceDefaultTheme, plugins] = await Promise.all([
-        repo.holeStandardThemeRef(),
+      const [appearance, plugins] = await Promise.all([
+        repo.holeSystemSetting<{ defaultTheme?: string }>('appearance'),
         listeOeffentlichePluginThemes(repo),
       ]);
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-      res.status(200).json({ instanceDefaultTheme, plugins });
+      res.status(200).json({
+        instanceDefaultTheme: appearance?.defaultTheme?.trim() || 'core:default',
+        plugins,
+      });
     } catch (err) {
       next(err);
     }
@@ -206,8 +209,8 @@ export function erstellePluginRuntimeRouter(
         return;
       }
 
-      const status = await repo.findePluginStatus(pluginId);
-      if (!status || !status.enabledGlobally || status.installedVersion !== version) {
+      const status = await repo.findePlugin(pluginId);
+      if (!status || !status.enabledGlobally || status.version !== version) {
         res.status(404).json({ fehler: 'Plugin-Bundle nicht gefunden oder deaktiviert.' });
         return;
       }

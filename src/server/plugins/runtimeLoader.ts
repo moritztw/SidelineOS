@@ -30,8 +30,7 @@ const CLIENT_CSS_KANDIDATEN = ['dist/client.css', 'dist/style.css', 'dist/index.
 
 async function existiertDatei(pfad: string): Promise<boolean> {
   try {
-    const stat = await fs.stat(pfad);
-    return stat.isFile();
+    return (await fs.stat(pfad)).isFile();
   } catch {
     return false;
   }
@@ -48,17 +47,13 @@ function istGueltigesPluginBackendObjekt(
     typeof obj.handleRequest === 'function' ||
     typeof obj.handlePublicRequest === 'function' ||
     typeof obj.deliverNotification === 'function' ||
-    Array.isArray(obj.migrations) ||
-    typeof obj.listExportableItems === 'function' ||
-    typeof obj.exportScope === 'function' ||
-    typeof obj.importScope === 'function'
+    Boolean(obj.storageProvider) ||
+    Array.isArray(obj.migrations)
   );
 }
 
 /**
- * Lädt installierte externe Plugins dynamisch aus `PLUGIN_DATA_DIR`:
- * - Server-Backend-Module in den `PluginBackendHost` (beim Boot + live nach Store-Aktionen)
- * - Client-ESM-Bundle-Metadaten für Browser-Runtime-Lader
+ * Lädt installierte externe Plugins dynamisch aus `PLUGIN_DATA_DIR` (SDK v2.0).
  */
 export class PluginRuntimeLoader {
   constructor(
@@ -110,24 +105,14 @@ export class PluginRuntimeLoader {
       }
     }
 
-    return {
-      basisDir,
-      distDir,
-      serverEntryPfad,
-      clientEntryRel,
-      cssRel,
-    };
+    return { basisDir, distDir, serverEntryPfad, clientEntryRel, cssRel };
   }
 
   async ladeBackendPlugin(pluginId: string, version: string): Promise<boolean> {
-    // Vor jedem Live-Reload zuerst den alten Backend-Handler entladen, damit bei Fehlern
-    // kein veralteter Stand still im Arbeitsspeicher verbleibt.
     this.entladeBackendPlugin(pluginId);
 
     const info = await this.pruefeBundleDateien(pluginId, version);
-    if (!info?.serverEntryPfad) {
-      return false;
-    }
+    if (!info?.serverEntryPfad) return false;
 
     const entryDateiname = path.basename(info.serverEntryPfad);
     const istExpliziterServerEntry =
@@ -138,14 +123,11 @@ export class PluginRuntimeLoader {
     try {
       geladen = (await import(modulUrl)) as Record<string, unknown>;
     } catch (err) {
-      if (istExpliziterServerEntry) {
-        throw err;
-      }
+      if (istExpliziterServerEntry) throw err;
       return false;
     }
 
     const kandidat = geladen.backendPlugin ?? geladen.default;
-
     if (!istGueltigesPluginBackendObjekt(kandidat, pluginId)) {
       if (istExpliziterServerEntry) {
         throw new Error(
@@ -155,7 +137,11 @@ export class PluginRuntimeLoader {
       return false;
     }
 
-    await this.pluginHost.registriereBackendPlugin(kandidat);
+    const datensatz = await this.repo.findePlugin(pluginId);
+    await this.pluginHost.registriereBackendPlugin(
+      kandidat,
+      datensatz?.approvedCapabilities ?? []
+    );
     return true;
   }
 
@@ -173,22 +159,22 @@ export class PluginRuntimeLoader {
 
     for (const eintrag of installierte) {
       if (!eintrag.enabledGlobally) continue;
-      const pluginId = eintrag.manifest.id;
+      if (
+        eintrag.manifest.permissions.includes('dev:git-install') &&
+        !this.config.allowDevPlugins
+      ) {
+        continue;
+      }
       try {
-        const ok = await this.ladeBackendPlugin(pluginId, eintrag.installedVersion);
-        if (ok) {
-          geladen.push(pluginId);
-        }
+        const ok = await this.ladeBackendPlugin(eintrag.pluginId, eintrag.version);
+        if (ok) geladen.push(eintrag.pluginId);
         if (eintrag.lastError) {
-          await this.repo.speicherePluginFehler(pluginId, null).catch(() => undefined);
+          await this.repo.aktualisierePluginStatus(eintrag.pluginId, { lastError: null });
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        fehler.push({ pluginId, fehler: msg });
-        await this.repo.speicherePluginFehler(pluginId, msg).catch(() => undefined);
-        console.warn(
-          `[SidelineOS-Core] Backend-Plugin "${pluginId}" konnte nicht dynamisch geladen werden: ${msg}`
-        );
+        fehler.push({ pluginId: eintrag.pluginId, fehler: msg });
+        await this.repo.aktualisierePluginStatus(eintrag.pluginId, { lastError: msg });
       }
     }
 
@@ -203,10 +189,10 @@ export class PluginRuntimeLoader {
     bundles: RuntimePluginClientEintrag[];
   }> {
     const installierte = await this.repo.listeInstalliertePlugins();
-    const installedPluginIds = installierte.map((p) => p.manifest.id);
+    const installedPluginIds = installierte.map((p) => p.pluginId);
     const enabledPluginIds = installierte
       .filter((p) => p.enabledGlobally)
-      .map((p) => p.manifest.id);
+      .map((p) => p.pluginId);
 
     const bundles: RuntimePluginClientEintrag[] = [];
     for (const eintrag of installierte) {
@@ -218,29 +204,21 @@ export class PluginRuntimeLoader {
         continue;
       }
 
-      const info = await this.pruefeBundleDateien(
-        eintrag.manifest.id,
-        eintrag.installedVersion
-      );
+      const info = await this.pruefeBundleDateien(eintrag.pluginId, eintrag.version);
       if (!info?.clientEntryRel) continue;
 
-      const baseUrl = `/api/v1/plugins/runtime/bundles/${encodeURIComponent(
-        eintrag.manifest.id
-      )}/${encodeURIComponent(eintrag.installedVersion)}`;
+      const baseUrl = `/api/v2/plugins/runtime/bundles/${encodeURIComponent(
+        eintrag.pluginId
+      )}/${encodeURIComponent(eintrag.version)}`;
 
       const clientStat = await fs
         .stat(path.join(info.distDir, info.clientEntryRel))
         .catch(() => null);
-      const installedMs = eintrag.installedAt ? Date.parse(eintrag.installedAt) : 0;
-      const busterTeile = [
-        Number.isFinite(installedMs) && installedMs > 0 ? String(installedMs) : '',
-        clientStat ? String(Math.trunc(clientStat.mtimeMs)) : '',
-      ].filter(Boolean);
-      const cacheBuster = busterTeile.length > 0 ? busterTeile.join('-') : String(Date.now());
+      const cacheBuster = clientStat ? String(Math.trunc(clientStat.mtimeMs)) : String(Date.now());
 
       bundles.push({
-        pluginId: eintrag.manifest.id,
-        version: eintrag.installedVersion,
+        pluginId: eintrag.pluginId,
+        version: eintrag.version,
         manifest: eintrag.manifest,
         clientUrl: `${baseUrl}/${info.clientEntryRel}`,
         ...(info.cssRel ? { cssUrl: `${baseUrl}/${info.cssRel}` } : {}),
@@ -248,10 +226,6 @@ export class PluginRuntimeLoader {
       });
     }
 
-    return {
-      installedPluginIds,
-      enabledPluginIds,
-      bundles,
-    };
+    return { installedPluginIds, enabledPluginIds, bundles };
   }
 }

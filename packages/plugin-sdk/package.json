@@ -1,7 +1,7 @@
 {
   "name": "@sidelineos/plugin-sdk",
-  "version": "1.0.0",
-  "description": "Offizielles SDK und Typverträge für externe SidelineOS-Plugins",
+  "version": "2.0.0",
+  "description": "Offizielles SDK v2.0 und Typverträge für externe SidelineOS-Plugins",
   "license": "AGPL-3.0-only",
   "type": "module",
   "main": "./dist/sdk/plugin.js",

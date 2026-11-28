@@ -1,5 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
-import type { BenutzerKonto, TeamMitgliedschaft, TeamRolle } from '../../shared/types.ts';
+import type {
+  BenutzerKonto,
+  ClubRolle,
+  EffektiveTeamBerechtigung,
+  TeamRolle,
+} from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
 import { hashSessionToken } from '../security.ts';
@@ -16,14 +21,11 @@ declare global {
   namespace Express {
     interface Request {
       coreAuth?: CoreAuthKontext;
-      coreMembership?: TeamMitgliedschaft;
+      coreTeamAccess?: EffektiveTeamBerechtigung;
     }
   }
 }
 
-/**
- * Parst Cookies ohne zusätzliche npm-Abhängigkeit (KISS).
- */
 export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   if (!cookieHeader) return {};
   const ergebnis: Record<string, string> = {};
@@ -42,25 +44,16 @@ export function parseCookies(cookieHeader: string | undefined): Record<string, s
   return ergebnis;
 }
 
-/**
- * Extrahiert das Rohtoken bevorzugt aus Authorization-Bearer (CLI/Native/Iframe)
- * oder aus dem HttpOnly-Session-Cookie (Browser-Standard).
- */
 export function extrahiereSessionToken(req: Request): { token: string; viaCookie: boolean } | null {
   const authHeader = req.headers.authorization;
   if (typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
     const bearer = authHeader.slice(7).trim();
-    if (bearer) {
-      return { token: bearer, viaCookie: false };
-    }
+    if (bearer) return { token: bearer, viaCookie: false };
   }
 
   const cookies = parseCookies(req.headers.cookie);
   const cookieToken = cookies[SESSION_COOKIE_NAME]?.trim();
-  if (cookieToken) {
-    return { token: cookieToken, viaCookie: true };
-  }
-
+  if (cookieToken) return { token: cookieToken, viaCookie: true };
   return null;
 }
 
@@ -95,12 +88,7 @@ export function loescheSessionCookie(
   req: Request,
   config: CoreServerConfig
 ): void {
-  const teile = [
-    `${SESSION_COOKIE_NAME}=`,
-    'Path=/',
-    'HttpOnly',
-    'Max-Age=0',
-  ];
+  const teile = [`${SESSION_COOKIE_NAME}=`, 'Path=/', 'HttpOnly', 'Max-Age=0'];
   if (istHttpsAnfrage(config, req)) {
     teile.push('Secure', 'SameSite=None', 'Partitioned');
   } else {
@@ -111,18 +99,14 @@ export function loescheSessionCookie(
 
 function pruefeCookieCsrf(req: Request): boolean {
   const method = req.method.toUpperCase();
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
-    return true;
-  }
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
 
   const origin = req.headers.origin;
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').toLowerCase();
   if (typeof origin === 'string' && origin.trim() !== '') {
     try {
       const originHost = new URL(origin).host.toLowerCase();
-      if (host && originHost !== host) {
-        return false;
-      }
+      if (host && originHost !== host) return false;
     } catch {
       return false;
     }
@@ -132,7 +116,6 @@ function pruefeCookieCsrf(req: Request): boolean {
   if (fetchSite === 'cross-site' && !req.headers['x-requested-with']) {
     return false;
   }
-
   return true;
 }
 
@@ -144,7 +127,6 @@ export function requireAuth(repo: CoreRepository, config: CoreServerConfig) {
         res.status(401).json({ fehler: 'Anmeldung erforderlich.' });
         return;
       }
-
       if (gefunden.viaCookie && !pruefeCookieCsrf(req)) {
         res.status(403).json({ fehler: 'Origin-Prüfung fehlgeschlagen.' });
         return;
@@ -185,6 +167,34 @@ export function requireSysadmin() {
   };
 }
 
+export function requireClubRolle(repo: CoreRepository, erlaubteRollen: readonly ClubRolle[]) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const user = req.coreAuth?.user;
+      if (!user) {
+        res.status(401).json({ fehler: 'Anmeldung erforderlich.' });
+        return;
+      }
+      const clubId = String(req.params.clubId ?? '').trim();
+      if (!clubId) {
+        res.status(400).json({ fehler: 'Club-ID fehlt.' });
+        return;
+      }
+      const cm = await repo.findeClubMitgliedschaft(user.uuid, clubId);
+      if (!cm || cm.status !== 'ACTIVE' || !erlaubteRollen.includes(cm.rolle)) {
+        res.status(403).json({ fehler: 'Keine ausreichende Berechtigung für diesen Verein.' });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+/**
+ * Erzwingt Team-Berechtigung inklusive unveränderlicher CLUB_ADMIN -> TEAM_ADMIN Kaskade (#23).
+ */
 export function requireTeamRolle(repo: CoreRepository, erlaubteRollen: readonly TeamRolle[]) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -193,24 +203,21 @@ export function requireTeamRolle(repo: CoreRepository, erlaubteRollen: readonly 
         res.status(401).json({ fehler: 'Anmeldung erforderlich.' });
         return;
       }
-
       const teamId = String(req.params.teamId ?? '').trim();
       if (!teamId) {
         res.status(400).json({ fehler: 'Team-ID fehlt.' });
         return;
       }
-
-      const mitgliedschaften = await repo.listeMitgliedschaften(teamId);
-      const aktiv = mitgliedschaften.find(
-        (m) => m.userUuid === user.uuid && m.status === 'AKTIV'
-      );
-
-      if (!aktiv || !erlaubteRollen.includes(aktiv.rolle)) {
+      const zugriff = await repo.ermittleEffektiveTeamBerechtigung(user.uuid, teamId);
+      if (
+        !zugriff ||
+        !zugriff.effektiveTeamRolle ||
+        !erlaubteRollen.includes(zugriff.effektiveTeamRolle)
+      ) {
         res.status(403).json({ fehler: 'Keine ausreichende Berechtigung für dieses Team.' });
         return;
       }
-
-      req.coreMembership = aktiv;
+      req.coreTeamAccess = zugriff;
       next();
     } catch (err) {
       next(err);

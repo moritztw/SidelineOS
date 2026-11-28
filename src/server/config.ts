@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { SIDELINE_SDK_VERSION, type PluginSdkVersion } from '../sdk/plugin.ts';
 import { holeAktuelleBrandKonfig } from '../shared/brand.ts';
 import { normalisiereSprache, type UnterstuetzteSprache } from '../shared/i18n.ts';
 
@@ -8,9 +9,9 @@ export const PACKAGE_CORE_VERSION = (() => {
     const pkg = JSON.parse(
       fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
     ) as { version?: string };
-    return pkg.version?.trim() || '0.1.0';
+    return pkg.version?.trim() || '0.2.0';
   } catch {
-    return '0.1.0';
+    return '0.2.0';
   }
 })();
 
@@ -30,31 +31,12 @@ export interface CoreServerConfig {
     username: string;
     password: string;
   };
-  s3: {
-    endpoint: string;
-    region: string;
-    bucket: string;
-    accessKey: string;
-    secretKey: string;
-    forcePathStyle: boolean;
-    cleanupRetentionDays: number;
-    maxUploadBytes: number;
-  };
-  smtp: {
-    host: string;
-    port: number;
-    benutzer: string;
-    passwort: string;
-    absender: string;
-    tlsAktiv: boolean;
-  };
   coreVersion: string;
-  supportedSdkVersion: '1.0';
+  supportedSdkVersion: PluginSdkVersion;
   pluginDataDir: string;
-  devAllowGitInstall: boolean;
-  disableUpdateCheck: boolean;
-  coreGithubRepo: string;
-  githubApiBaseUrl: string;
+  coreBootstrapPlugins: string[];
+  maxUploadBytes: number;
+  allowDevPlugins: boolean;
 }
 
 function parseBool(wert: string | undefined, fallback: boolean): boolean {
@@ -65,10 +47,20 @@ function parseBool(wert: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function parseListe(wert: string | undefined): string[] {
+  if (!wert) return [];
+  return wert
+    .split(',')
+    .map((e) => e.trim())
+    .filter(Boolean);
+}
+
 /**
- * Parst und validiert alle Core-Umgebungsvariablen (ohne Browser-Wizard).
+ * Parst und validiert alle schlanken Core-v0.2.0-Umgebungsvariablen.
  */
-export function loadCoreConfig(env: Record<string, string | undefined> = process.env): CoreServerConfig {
+export function loadCoreConfig(
+  env: Record<string, string | undefined> = process.env
+): CoreServerConfig {
   const nodeEnv = env.NODE_ENV?.trim() || 'development';
   const port = Number(env.PORT) > 0 ? Number(env.PORT) : 3000;
   const appUrl = env.APP_URL?.trim() || `http://localhost:${port}`;
@@ -78,11 +70,13 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
   const pgliteDataDir = env.PGLITE_DATA_DIR?.trim() || undefined;
 
   const rawSecret = env.SESSION_SECRET?.trim();
-  const sessionSecret = rawSecret && rawSecret.length >= 16
-    ? rawSecret
-    : crypto.randomBytes(32).toString('hex');
+  const sessionSecret =
+    rawSecret && rawSecret.length >= 16
+      ? rawSecret
+      : crypto.randomBytes(32).toString('hex');
 
-  const sessionTtlStunden = Number(env.SESSION_TTL_HOURS) > 0 ? Number(env.SESSION_TTL_HOURS) : 24 * 7;
+  const sessionTtlStunden =
+    Number(env.SESSION_TTL_HOURS) > 0 ? Number(env.SESSION_TTL_HOURS) : 24 * 7;
 
   const sysEmail = env.INITIAL_SYSADMIN_EMAIL?.trim();
   const sysUser = env.INITIAL_SYSADMIN_USERNAME?.trim();
@@ -97,21 +91,8 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
         }
       : undefined;
 
-  const rawS3Access = env.S3_ACCESS_KEY?.trim() || '';
-  const rawS3Secret = env.S3_SECRET_KEY?.trim() || '';
-  const s3AccessKey = rawS3Access === 'YOUR_S3_ACCESS_KEY' ? '' : rawS3Access;
-  const s3SecretKey = rawS3Secret === 'YOUR_S3_SECRET_KEY' ? '' : rawS3Secret;
-  const s3Retention = Number(env.S3_CLEANUP_RETENTION_DAYS);
-  const s3MaxUploadRaw = Number(env.S3_MAX_UPLOAD_BYTES);
-  const defaultMaxUploadBytes = 5 * 1024 * 1024 * 1024; // 5 GiB Standardlimit für Multipart-Uploads
-
-  const rawSmtpHost = env.SMTP_HOST?.trim() || '';
-  const rawSmtpPass = env.SMTP_PASSWORD?.trim() || '';
-  const smtpHost = rawSmtpHost === 'smtp.example.org' ? '' : rawSmtpHost;
-  const smtpPass = rawSmtpPass === 'YOUR_SMTP_PASSWORD' ? '' : rawSmtpPass;
-  const smtpPort = Number(env.SMTP_PORT);
-
-  const devAllowGitInstall = parseBool(env.DEV_ALLOW_GIT_INSTALL, false);
+  const rawMaxUpload = Number(env.MAX_UPLOAD_BYTES);
+  const defaultMaxUploadBytes = 5 * 1024 * 1024 * 1024; // 5 GiB
 
   return {
     nodeEnv,
@@ -125,36 +106,14 @@ export function loadCoreConfig(env: Record<string, string | undefined> = process
     sessionSecret,
     sessionTtlStunden,
     initialSysadmin,
-    s3: {
-      endpoint: env.S3_ENDPOINT?.trim() || '',
-      region: env.S3_REGION?.trim() || 'eu-central-1',
-      bucket: env.S3_BUCKET?.trim() || '',
-      accessKey: s3AccessKey,
-      secretKey: s3SecretKey,
-      forcePathStyle: parseBool(env.S3_FORCE_PATH_STYLE, true),
-      cleanupRetentionDays: s3Retention > 0 ? Math.min(s3Retention, 365) : 14,
-      maxUploadBytes:
-        s3MaxUploadRaw > 0 && Number.isFinite(s3MaxUploadRaw)
-          ? Math.floor(s3MaxUploadRaw)
-          : defaultMaxUploadBytes,
-    },
-    smtp: {
-      host: smtpHost,
-      port: smtpPort > 0 && smtpPort <= 65535 ? smtpPort : 587,
-      benutzer: env.SMTP_USER?.trim() || '',
-      passwort: smtpPass,
-      absender: env.SMTP_FROM?.trim() || `${brandKonfig.produktName} <noreply@sidelineos.local>`,
-      tlsAktiv: parseBool(env.SMTP_TLS, true),
-    },
     coreVersion: env.CORE_VERSION?.trim() || PACKAGE_CORE_VERSION,
-    supportedSdkVersion: '1.0',
+    supportedSdkVersion: SIDELINE_SDK_VERSION,
     pluginDataDir: env.PLUGIN_DATA_DIR?.trim() || '.sidelineos-data/plugins',
-    devAllowGitInstall,
-    disableUpdateCheck: parseBool(env.DISABLE_UPDATE_CHECK, false),
-    coreGithubRepo: env.CORE_GITHUB_REPO?.trim() || 'moritztw/SidelineOS-core',
-    githubApiBaseUrl: (env.GITHUB_API_BASE_URL?.trim() || 'https://api.github.com').replace(
-      /\/+$/,
-      ''
-    ),
+    coreBootstrapPlugins: parseListe(env.CORE_BOOTSTRAP_PLUGINS),
+    maxUploadBytes:
+      rawMaxUpload > 0 && Number.isFinite(rawMaxUpload)
+        ? Math.floor(rawMaxUpload)
+        : defaultMaxUploadBytes,
+    allowDevPlugins: parseBool(env.ALLOW_DEV_PLUGINS, false),
   };
 }

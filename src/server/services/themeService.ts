@@ -12,10 +12,6 @@ export interface PublicThemePluginInfo {
   themes: PluginThemePreset[];
 }
 
-/**
- * Liefert alle bereinigten Theme-Presets global aktivierter Plugins,
- * die ihre Presets im Manifest (`manifest.themes`) deklarieren.
- */
 export async function listeOeffentlichePluginThemes(
   repo: CoreRepository
 ): Promise<PublicThemePluginInfo[]> {
@@ -27,7 +23,7 @@ export async function listeOeffentlichePluginThemes(
     const bereinigt = bereinigePluginThemePresets(eintrag.manifest.themes);
     if (bereinigt.length === 0) continue;
     ergebnis.push({
-      pluginId: eintrag.manifest.id,
+      pluginId: eintrag.pluginId,
       pluginName: eintrag.manifest.name,
       themes: bereinigt,
     });
@@ -36,10 +32,6 @@ export async function listeOeffentlichePluginThemes(
   return ergebnis;
 }
 
-/**
- * Validiert eine vom Benutzer oder Sysadmin gewählte Theme-Referenz gegen installierte
- * und global aktivierte Plugins.
- */
 export async function validiereThemeAuswahlFuerInstanz(
   repo: CoreRepository,
   rawThemeRef: unknown,
@@ -74,7 +66,7 @@ export async function validiereThemeAuswahlFuerInstanz(
     return { ok: true, themeRef: STANDARD_THEME_REF };
   }
 
-  const pluginStatus = await repo.findePluginStatus(parsed.pluginId);
+  const pluginStatus = await repo.findePlugin(parsed.pluginId);
   if (!pluginStatus) {
     return {
       ok: false,

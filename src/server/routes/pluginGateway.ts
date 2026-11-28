@@ -1,56 +1,240 @@
 import { Router, type Request, type Response } from 'express';
 import type {
   PluginPublicKontext,
-  PluginPublicS3ReadScope,
-  PluginPublicSignedDownloadFn,
-  PluginPublicSignedDownloadParams,
-  S3MultipartPartRef,
+  StorageMultipartPartRef,
 } from '../../sdk/plugin.ts';
+import type { ClubKontext, TeamKontext } from '../../shared/types.ts';
 import type { CoreServerConfig } from '../config.ts';
 import type { CoreRepository } from '../db/coreRepository.ts';
+import { StoragePolicyError, type StorageBroker } from '../gateway/storageBroker.ts';
 import { requireAuth } from '../middleware/auth.ts';
 import type { PluginBackendHost } from '../plugins/backendHost.ts';
 import type { NotificationService } from '../services/notificationService.ts';
-import {
-  ermittleTeamPluginPrefix,
-  type S3BrokerService,
-} from '../services/s3Broker.ts';
-import type { S3CleanupService } from '../services/s3CleanupService.ts';
 
 function normalisiereSubPfad(rawParam: unknown): string {
   const teil = typeof rawParam === 'string' ? rawParam.replace(/^\/+/, '') : '';
   return teil ? `/${teil}` : '/';
 }
 
+function istSchreibMethode(method: string): boolean {
+  const m = method.toUpperCase();
+  return m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS';
+}
+
+function sendeStorageFehler(res: Response, err: unknown, fallback: string): void {
+  if (err instanceof StoragePolicyError) {
+    res.status(err.status).json({ fehler: err.message, code: err.code });
+    return;
+  }
+  res.status(400).json({ fehler: err instanceof Error ? err.message : fallback });
+}
+
 /**
- * Zentrales Plugin-Gateway des SidelineOS-Core:
- * Erzwingt Auth, globale + teambezogene Plugin-Aktivierung, aktive Team-Mitgliedschaft,
- * Core-S3-Broker-Presigning sowie isolierten PostgreSQL-Schema-Scope (`plugin_<slug>`).
+ * Zentrales Plugin-Gateway (SDK v2.0):
+ * - Erzwingt Auth, globale + Scope-Freischaltung, CLUB_ADMIN-Kaskade (#23),
+ *   Archiv-Lesemodus (#25), Vereins-Speicherpool-Hard-Limit (#24) und Multi-Node-Routing (#22).
  */
-export function erstellePluginGatewayRouter(
-  repo: CoreRepository,
-  config: CoreServerConfig,
-  pluginHost: PluginBackendHost,
-  s3Broker?: S3BrokerService,
-  s3Cleanup?: S3CleanupService,
-  notificationService?: NotificationService
-): { protectedRouter: Router; publicRouter: Router } {
+export function erstellePluginGatewayRouter(params: {
+  repo: CoreRepository;
+  config: CoreServerConfig;
+  pluginHost: PluginBackendHost;
+  storageBroker: StorageBroker;
+  notificationService: NotificationService;
+}): { protectedRouter: Router; publicRouter: Router } {
+  const { repo, config, pluginHost, storageBroker, notificationService } = params;
   const protectedRouter = Router();
   const publicRouter = Router();
   const auth = requireAuth(repo, config);
 
-  const handleProtected = async (req: Request, res: Response) => {
+  async function handleStorageSubRoute(params: {
+    req: Request;
+    res: Response;
+    subPfad: string;
+    club: ClubKontext;
+    team: TeamKontext | null;
+    pluginId: string;
+    darfSchreiben: boolean;
+  }): Promise<boolean> {
+    const { req, res, subPfad, club, team, pluginId, darfSchreiben } = params;
+    if (!subPfad.startsWith('/_storage/')) return false;
+
+    const status = await repo.findePlugin(pluginId);
+    const plugin = pluginHost.holePlugin(pluginId);
+    const manifest = plugin?.manifest ?? status?.manifest;
+    if (!manifest) return false;
+
+    const hatRecht = team
+      ? manifest.permissions.includes('storage:team-rw')
+      : manifest.permissions.includes('storage:club-rw');
+    if (!hatRecht) {
+      res.status(403).json({ fehler: `Plugin "${pluginId}" besitzt keine Storage-Berechtigung.` });
+      return true;
+    }
+
+    const scope = storageBroker.erstellePluginScope({ club, team, manifest });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const objectPath = typeof body.objectPath === 'string' ? body.objectPath : '';
+    const expiresInSeconds =
+      typeof body.expiresInSeconds === 'number' ? body.expiresInSeconds : undefined;
+
+    try {
+      if (req.method === 'POST' && subPfad === '/_storage/presign-download') {
+        const result = await scope.getSignedDownloadUrl({ objectPath, expiresInSeconds });
+        res.json(result);
+        return true;
+      }
+
+      if (!darfSchreiben) {
+        res.status(403).json({ fehler: 'Keine Schreibberechtigung für Storage-Operationen.' });
+        return true;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_storage/presign-upload') {
+        const result = await scope.getSignedUploadUrl({
+          objectPath,
+          contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
+          fileSizeBytes: typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined,
+          expiresInSeconds,
+        });
+        res.json(result);
+        return true;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_storage/multipart/init') {
+        const result = await scope.initiateMultipartUpload({
+          objectPath,
+          contentType: typeof body.contentType === 'string' ? body.contentType : undefined,
+          fileSizeBytes: typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined,
+        });
+        res.json(result);
+        return true;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_storage/multipart/sign-part') {
+        const result = await scope.getSignedMultipartPartUrl({
+          objectPath,
+          uploadId: typeof body.uploadId === 'string' ? body.uploadId : '',
+          partNumber: typeof body.partNumber === 'number' ? body.partNumber : 0,
+          expiresInSeconds,
+        });
+        res.json(result);
+        return true;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_storage/multipart/complete') {
+        const result = await scope.completeMultipartUpload({
+          objectPath,
+          uploadId: typeof body.uploadId === 'string' ? body.uploadId : '',
+          parts: Array.isArray(body.parts) ? (body.parts as StorageMultipartPartRef[]) : [],
+        });
+        res.json(result);
+        return true;
+      }
+
+      if (req.method === 'POST' && subPfad === '/_storage/multipart/abort') {
+        await scope.abortMultipartUpload({
+          objectPath,
+          uploadId: typeof body.uploadId === 'string' ? body.uploadId : '',
+        });
+        res.json({ ok: true });
+        return true;
+      }
+
+      if (req.method === 'DELETE' && subPfad === '/_storage/object') {
+        const estimatedBytes =
+          typeof body.estimatedBytes === 'number' ? body.estimatedBytes : undefined;
+        await scope.deleteObject(objectPath, estimatedBytes);
+        res.json({ ok: true });
+        return true;
+      }
+
+      res.status(404).json({ fehler: 'Unbekannter Core-Storage-Endpunkt.' });
+      return true;
+    } catch (err) {
+      sendeStorageFehler(res, err, 'Storage-Anfrage fehlgeschlagen.');
+      return true;
+    }
+  }
+
+  async function handleNotificationSubRoute(params: {
+    req: Request;
+    res: Response;
+    subPfad: string;
+    pluginId: string;
+    clubId?: string;
+    teamId?: string;
+  }): Promise<boolean> {
+    const { req, res, subPfad, pluginId, clubId, teamId } = params;
+    if (!subPfad.startsWith('/_notifications/')) return false;
+
+    const status = await repo.findePlugin(pluginId);
+    if (!status) return false;
+
+    if (req.method === 'GET' && subPfad === '/_notifications/channels') {
+      const channels = await notificationService.listeKanaele({ clubId, teamId });
+      res.json({ channels });
+      return true;
+    }
+
+    if (req.method === 'POST' && subPfad === '/_notifications/send') {
+      if (!status.manifest.permissions.includes('notifications:send')) {
+        res.status(403).json({
+          fehler: `Plugin "${pluginId}" besitzt keine Berechtigung ("notifications:send").`,
+        });
+        return true;
+      }
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      try {
+        const ergebnis = await notificationService.dispatch({
+          sourcePluginId: pluginId,
+          clubId,
+          teamId,
+          payload: {
+            eventType: typeof body.eventType === 'string' ? body.eventType : 'plugin.event',
+            title: typeof body.title === 'string' ? body.title : '',
+            message: typeof body.message === 'string' ? body.message : '',
+            linkPath: typeof body.linkPath === 'string' ? body.linkPath : undefined,
+            priority:
+              body.priority === 'warning' || body.priority === 'urgent' ? body.priority : 'info',
+            recipientUserUuids: Array.isArray(body.recipientUserUuids)
+              ? (body.recipientUserUuids as unknown[]).filter(
+                  (u): u is string => typeof u === 'string'
+                )
+              : undefined,
+            channels: Array.isArray(body.channels)
+              ? (body.channels as unknown[]).filter((c): c is string => typeof c === 'string')
+              : undefined,
+            metadata:
+              body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+                ? (body.metadata as Record<string, unknown>)
+                : undefined,
+          },
+        });
+        res.json(ergebnis);
+      } catch (err) {
+        res.status(400).json({
+          fehler: err instanceof Error ? err.message : 'Notification fehlgeschlagen.',
+        });
+      }
+      return true;
+    }
+
+    res.status(404).json({ fehler: 'Unbekannter Notification-Endpunkt.' });
+    return true;
+  }
+
+  // ---- 1. Team-Scope: /api/v2/plugins/:pluginId/teams/:teamId/* ----
+  const handleTeamScope = async (req: Request, res: Response) => {
     const pluginId = String(req.params.pluginId ?? '').trim();
     const teamId = String(req.params.teamId ?? '').trim();
     const subPfad = normalisiereSubPfad(req.params[0]);
 
-    const plugin = pluginHost.holePlugin(pluginId);
-    const pluginStatus = await repo.findePluginStatus(pluginId);
-    if (!pluginStatus) {
+    const status = await repo.findePlugin(pluginId);
+    if (!status) {
       res.status(404).json({ fehler: `Plugin "${pluginId}" ist nicht registriert.` });
       return;
     }
-    if (!pluginStatus.enabledGlobally) {
+    if (!status.enabledGlobally) {
       res.status(403).json({ fehler: `Plugin "${pluginId}" ist global deaktiviert.` });
       return;
     }
@@ -60,368 +244,271 @@ export function erstellePluginGatewayRouter(
       res.status(404).json({ fehler: 'Team nicht gefunden.' });
       return;
     }
+    const club = await repo.findeClubNachId(team.clubId);
+    if (!club) {
+      res.status(404).json({ fehler: 'Verein nicht gefunden.' });
+      return;
+    }
 
-    const mitgliedschaften = await repo.listeMitgliedschaften(teamId);
-    const aktiv = mitgliedschaften.find(
-      (m) => m.userUuid === req.coreAuth!.user.uuid && m.status === 'AKTIV'
-    );
-    if (!aktiv) {
+    const berechtigung = await repo.ermittleEffektiveTeamBerechtigung(req.coreAuth!.user.uuid, teamId);
+    if (!berechtigung?.effektiveTeamRolle) {
       res.status(403).json({ fehler: 'Keine aktive Mitgliedschaft in diesem Team.' });
       return;
     }
 
-    const modulAktiv = await repo.istTeamModulAktiv(teamId, pluginId);
-    if (!modulAktiv) {
-      res.status(403).json({
-        fehler: `Modul "${pluginId}" ist für dieses Team nicht freigeschaltet.`,
+    const aktiv =
+      (await repo.istScopeModulAktiv('team', teamId, pluginId)) ||
+      (await repo.istScopeModulAktiv('club', club.id, pluginId));
+    if (!aktiv) {
+      res.status(403).json({ fehler: `Modul "${pluginId}" ist für dieses Team nicht freigeschaltet.` });
+      return;
+    }
+
+    // #25: Serverseitige Schreibsperre für archivierte Teams (Downloads über /_storage/presign-download bleiben erlaubt)
+    const istDownloadRoute = req.method === 'POST' && subPfad === '/_storage/presign-download';
+    if (team.status === 'ARCHIVED' && istSchreibMethode(req.method) && !istDownloadRoute) {
+      res.status(409).json({
+        fehler: 'Dieses Team ist archiviert und befindet sich im Lesemodus.',
+        code: 'TEAM_ARCHIVED_READ_ONLY',
       });
       return;
     }
 
-    // Core-S3-Broker für alle installierten Plugins mit Manifest-Berechtigung `s3:team-rw`
-    if (subPfad.startsWith('/_s3/')) {
-      if (!s3Broker) {
-        res.status(503).json({ fehler: 'S3-Broker ist auf dieser Instanz nicht initialisiert.' });
-        return;
-      }
-      const manifest = plugin?.manifest ?? pluginStatus.manifest;
-      if (!manifest.permissions.includes('s3:team-rw')) {
-        res.status(403).json({
-          fehler: `Plugin "${pluginId}" besitzt keine S3-Berechtigung ("s3:team-rw").`,
-        });
-        return;
-      }
+    const darfStorageSchreiben =
+      berechtigung.effektiveTeamRolle === 'TEAM_ADMIN' ||
+      berechtigung.effektiveTeamRolle === 'STAFF';
 
-      const body = (req.body ?? {}) as Record<string, unknown>;
-      const objectPath = typeof body.objectPath === 'string' ? body.objectPath : '';
-      const expiresInSeconds =
-        typeof body.expiresInSeconds === 'number' ? body.expiresInSeconds : undefined;
-
-      if (req.method === 'POST' && subPfad === '/_s3/presign-upload') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen S3-Uploads anfordern.' });
-          return;
-        }
-        try {
-          const contentType =
-            typeof body.contentType === 'string' ? body.contentType.trim() : undefined;
-          const fileSizeBytes =
-            typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined;
-          const signiert = await s3Broker.erzeugePresignedUploadUrl({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            contentType,
-            fileSizeBytes,
-            expiresInSeconds,
-          });
-          res.status(200).json(signiert);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Presigned Upload-URL fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/multipart/init') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen S3-Uploads starten.' });
-          return;
-        }
-        try {
-          const contentType =
-            typeof body.contentType === 'string' ? body.contentType.trim() : undefined;
-          const fileSizeBytes =
-            typeof body.fileSizeBytes === 'number' ? body.fileSizeBytes : undefined;
-          const gestarted = await s3Broker.starteMultipartUpload({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            contentType,
-            fileSizeBytes,
-          });
-          res.status(200).json(gestarted);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Multipart-Upload konnte nicht gestartet werden.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/multipart/sign-part') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Parts signieren.' });
-          return;
-        }
-        try {
-          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
-          const partNumber = typeof body.partNumber === 'number' ? body.partNumber : 0;
-          const signiert = await s3Broker.erzeugeMultipartPartUploadUrl({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            uploadId,
-            partNumber,
-            expiresInSeconds,
-          });
-          res.status(200).json(signiert);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Multipart-Part-URL fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/multipart/complete') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Uploads abschließen.' });
-          return;
-        }
-        try {
-          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
-          const parts = Array.isArray(body.parts) ? (body.parts as S3MultipartPartRef[]) : [];
-          const fertig = await s3Broker.schliesseMultipartUploadAb({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            uploadId,
-            parts,
-          });
-          res.status(200).json(fertig);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Multipart-Abschluss fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/multipart/abort') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen Multipart-Uploads abbrechen.' });
-          return;
-        }
-        try {
-          const uploadId = typeof body.uploadId === 'string' ? body.uploadId : '';
-          await s3Broker.brecheMultipartUploadAb({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            uploadId,
-          });
-          res.status(200).json({ ok: true });
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Multipart-Abbruch fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/presign-download') {
-        try {
-          const signiert = await s3Broker.erzeugePresignedDownloadUrl({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-            expiresInSeconds,
-          });
-          res.status(200).json(signiert);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Presigned Download-URL fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'DELETE' && subPfad === '/_s3/object') {
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({ fehler: 'Nur Coaches oder Team Admins dürfen S3-Objekte löschen.' });
-          return;
-        }
-        try {
-          await s3Broker.loescheObjekt({
-            teamId,
-            pluginId,
-            manifest,
-            objectPath,
-          });
-          res.status(200).json({ ok: true });
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'S3-Objekt konnte nicht gelöscht werden.',
-          });
-        }
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_s3/cleanup-queue') {
-        if (!s3Cleanup) {
-          res.status(503).json({ fehler: 'S3-Cleanup-Queue ist nicht initialisiert.' });
-          return;
-        }
-        if (!manifest.permissions.includes('s3:cleanup-queue')) {
-          res.status(403).json({
-            fehler: `Plugin "${pluginId}" besitzt keine Berechtigung ("s3:cleanup-queue").`,
-          });
-          return;
-        }
-        if (aktiv.rolle !== 'TEAM_ADMIN' && aktiv.rolle !== 'COACH') {
-          res.status(403).json({
-            fehler: 'Nur Coaches oder Team Admins dürfen S3-Cleanup-Einträge melden.',
-          });
-          return;
-        }
-        const objectPaths = Array.isArray(body.objectPaths)
-          ? (body.objectPaths as unknown[]).filter((p): p is string => typeof p === 'string')
-          : [];
-        const reason = typeof body.reason === 'string' ? body.reason : undefined;
-        const sizeBytesPerObject =
-          typeof body.sizeBytesPerObject === 'number' ? body.sizeBytesPerObject : undefined;
-        try {
-          const ergebnis = await s3Cleanup.reiheVerwaisteObjekteEin({
-            teamId,
-            pluginId,
-            manifest,
-            objectPaths,
-            reason,
-            sizeBytesPerObject,
-          });
-          res.status(200).json(ergebnis);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Cleanup-Eintrag fehlgeschlagen.',
-          });
-        }
-        return;
-      }
-
-      res.status(404).json({ fehler: 'Unbekannter Core-S3-Broker-Endpunkt.' });
+    if (
+      await handleStorageSubRoute({
+        req,
+        res,
+        subPfad,
+        club,
+        team,
+        pluginId,
+        darfSchreiben: darfStorageSchreiben,
+      })
+    ) {
       return;
     }
 
-    // Core-Notification-Gateway für Plugins (`notifications:send`)
-    if (subPfad.startsWith('/_notifications/')) {
-      if (!notificationService) {
-        res.status(503).json({ fehler: 'Notification-Service ist auf dieser Instanz nicht initialisiert.' });
-        return;
-      }
-      const manifest = plugin?.manifest ?? pluginStatus.manifest;
-
-      if (req.method === 'GET' && subPfad === '/_notifications/channels') {
-        const channels = await notificationService.listeKanaeleFuerTeam(teamId);
-        res.status(200).json({ channels });
-        return;
-      }
-
-      if (req.method === 'POST' && subPfad === '/_notifications/send') {
-        if (!manifest.permissions.includes('notifications:send')) {
-          res.status(403).json({
-            fehler: `Plugin "${pluginId}" besitzt keine Berechtigung ("notifications:send").`,
-          });
-          return;
-        }
-        const body = (req.body ?? {}) as Record<string, unknown>;
-        try {
-          const ergebnis = await notificationService.dispatchFuerPlugin({
-            sourcePluginId: pluginId,
-            team,
-            payload: {
-              eventType: typeof body.eventType === 'string' ? body.eventType : 'plugin.event',
-              title: typeof body.title === 'string' ? body.title : '',
-              message: typeof body.message === 'string' ? body.message : '',
-              linkPath: typeof body.linkPath === 'string' ? body.linkPath : undefined,
-              priority:
-                body.priority === 'warning' || body.priority === 'urgent' ? body.priority : 'info',
-              recipientUserUuids: Array.isArray(body.recipientUserUuids)
-                ? (body.recipientUserUuids as unknown[]).filter(
-                    (u): u is string => typeof u === 'string'
-                  )
-                : undefined,
-              channels: Array.isArray(body.channels)
-                ? (body.channels as unknown[]).filter((c): c is string => typeof c === 'string')
-                : undefined,
-              metadata:
-                body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
-                  ? (body.metadata as Record<string, unknown>)
-                  : undefined,
-            },
-          });
-          res.status(200).json(ergebnis);
-        } catch (err) {
-          res.status(400).json({
-            fehler: err instanceof Error ? err.message : 'Notification konnte nicht versendet werden.',
-          });
-        }
-        return;
-      }
-
-      res.status(404).json({ fehler: 'Unbekannter Core-Notification-Endpunkt.' });
+    if (
+      await handleNotificationSubRoute({
+        req,
+        res,
+        subPfad,
+        pluginId,
+        clubId: club.id,
+        teamId: team.id,
+      })
+    ) {
       return;
     }
 
-    if (!plugin || !plugin.handleRequest) {
-      res.status(501).json({ fehler: 'Plugin stellt keinen geschützten Backend-Handler bereit.' });
+    const plugin = pluginHost.holePlugin(pluginId);
+    if (!plugin?.handleRequest) {
+      res.status(501).json({ fehler: 'Plugin stellt keinen Backend-Handler bereit.' });
       return;
     }
 
     const ctx = pluginHost.erstelleKontext({
       plugin,
+      approvedCapabilities: status.approvedCapabilities,
       user: req.coreAuth!.user,
+      club,
       team,
-      teamRolle: aktiv.rolle,
-      userUnits: aktiv.units,
+      clubRolle: berechtigung.clubRolle,
+      effektiveTeamRolle: berechtigung.effektiveTeamRolle,
+      userGroups: berechtigung.groups,
     });
 
     const ergebnis = await plugin.handleRequest(
       {
         method: req.method,
         path: subPfad,
-        params: { pluginId, teamId },
+        scope: 'team',
+        params: { pluginId, teamId, clubId: club.id },
         query: req.query as Record<string, unknown>,
         body: req.body,
       },
       ctx
     );
+    res.status(ergebnis.status).json(ergebnis.body);
+  };
 
+  // ---- 2. Club-Scope: /api/v2/plugins/:pluginId/clubs/:clubId/* ----
+  const handleClubScope = async (req: Request, res: Response) => {
+    const pluginId = String(req.params.pluginId ?? '').trim();
+    const clubId = String(req.params.clubId ?? '').trim();
+    const subPfad = normalisiereSubPfad(req.params[0]);
+
+    const status = await repo.findePlugin(pluginId);
+    if (!status || !status.enabledGlobally) {
+      res.status(status ? 403 : 404).json({ fehler: `Plugin "${pluginId}" ist nicht aktiv.` });
+      return;
+    }
+
+    const club = await repo.findeClubNachId(clubId);
+    if (!club) {
+      res.status(404).json({ fehler: 'Verein nicht gefunden.' });
+      return;
+    }
+
+    const cm = await repo.findeClubMitgliedschaft(req.coreAuth!.user.uuid, clubId);
+    if (!cm || cm.status !== 'ACTIVE') {
+      res.status(403).json({ fehler: 'Keine aktive Mitgliedschaft in diesem Verein.' });
+      return;
+    }
+
+    const istSystemPanel = status.manifest.navigation.surface === 'system';
+    const aktiv = istSystemPanel || (await repo.istScopeModulAktiv('club', clubId, pluginId));
+    if (!aktiv) {
+      res.status(403).json({ fehler: `Modul "${pluginId}" ist für diesen Verein nicht freigeschaltet.` });
+      return;
+    }
+
+    if (
+      await handleStorageSubRoute({
+        req,
+        res,
+        subPfad,
+        club,
+        team: null,
+        pluginId,
+        darfSchreiben: cm.rolle === 'CLUB_ADMIN',
+      })
+    ) {
+      return;
+    }
+
+    if (
+      await handleNotificationSubRoute({
+        req,
+        res,
+        subPfad,
+        pluginId,
+        clubId: club.id,
+      })
+    ) {
+      return;
+    }
+
+    const plugin = pluginHost.holePlugin(pluginId);
+    if (!plugin?.handleRequest) {
+      res.status(501).json({ fehler: 'Plugin stellt keinen Club-Backend-Handler bereit.' });
+      return;
+    }
+
+    const ctx = pluginHost.erstelleKontext({
+      plugin,
+      approvedCapabilities: status.approvedCapabilities,
+      user: req.coreAuth!.user,
+      club,
+      team: null,
+      clubRolle: cm.rolle,
+      effektiveTeamRolle: cm.rolle === 'CLUB_ADMIN' ? 'TEAM_ADMIN' : null,
+      userGroups: [],
+    });
+
+    const ergebnis = await plugin.handleRequest(
+      {
+        method: req.method,
+        path: subPfad,
+        scope: 'club',
+        params: { pluginId, clubId },
+        query: req.query as Record<string, unknown>,
+        body: req.body,
+      },
+      ctx
+    );
+    res.status(ergebnis.status).json(ergebnis.body);
+  };
+
+  // ---- 3. System-Scope: /api/v2/plugins/:pluginId/system/* (nur Sysadmin) ----
+  const handleSystemScope = async (req: Request, res: Response) => {
+    if (!req.coreAuth!.user.istSysadmin) {
+      res.status(403).json({ fehler: 'Sysadmin-Berechtigung erforderlich.' });
+      return;
+    }
+    const pluginId = String(req.params.pluginId ?? '').trim();
+    const subPfad = normalisiereSubPfad(req.params[0]);
+
+    const status = await repo.findePlugin(pluginId);
+    if (!status || !status.enabledGlobally) {
+      res.status(status ? 403 : 404).json({ fehler: `Plugin "${pluginId}" ist nicht aktiv.` });
+      return;
+    }
+    if (
+      status.manifest.permissions.includes('dev:git-install') &&
+      !config.allowDevPlugins
+    ) {
+      res.status(403).json({ fehler: 'Dev-Plugins sind auf dieser Instanz gesperrt (ALLOW_DEV_PLUGINS=false).' });
+      return;
+    }
+
+    const plugin = pluginHost.holePlugin(pluginId);
+    if (!plugin?.handleRequest) {
+      res.status(501).json({ fehler: 'Plugin stellt keinen System-Backend-Handler bereit.' });
+      return;
+    }
+
+    const ctx = pluginHost.erstelleKontext({
+      plugin,
+      approvedCapabilities: status.approvedCapabilities,
+      user: req.coreAuth!.user,
+      club: null,
+      team: null,
+      clubRolle: null,
+      effektiveTeamRolle: null,
+      userGroups: [],
+    });
+
+    const ergebnis = await plugin.handleRequest(
+      {
+        method: req.method,
+        path: subPfad,
+        scope: 'system',
+        params: { pluginId },
+        query: req.query as Record<string, unknown>,
+        body: req.body,
+      },
+      ctx
+    );
     res.status(ergebnis.status).json(ergebnis.body);
   };
 
   protectedRouter.all('/:pluginId/teams/:teamId', auth, (req, res, next) => {
-    handleProtected(req, res).catch(next);
+    handleTeamScope(req, res).catch(next);
   });
   protectedRouter.all('/:pluginId/teams/:teamId/*', auth, (req, res, next) => {
-    handleProtected(req, res).catch(next);
+    handleTeamScope(req, res).catch(next);
+  });
+  protectedRouter.all('/:pluginId/clubs/:clubId', auth, (req, res, next) => {
+    handleClubScope(req, res).catch(next);
+  });
+  protectedRouter.all('/:pluginId/clubs/:clubId/*', auth, (req, res, next) => {
+    handleClubScope(req, res).catch(next);
+  });
+  protectedRouter.all('/:pluginId/system', auth, (req, res, next) => {
+    handleSystemScope(req, res).catch(next);
+  });
+  protectedRouter.all('/:pluginId/system/*', auth, (req, res, next) => {
+    handleSystemScope(req, res).catch(next);
   });
 
+  // ---- 4. Öffentliche Share-Links: /api/v2/public/plugins/:pluginId/* ----
   const handlePublic = async (req: Request, res: Response) => {
     const pluginId = String(req.params.pluginId ?? '').trim();
     const subPfad = normalisiereSubPfad(req.params[0]);
 
+    const status = await repo.findePlugin(pluginId);
     const plugin = pluginHost.holePlugin(pluginId);
-    const pluginStatus = await repo.findePluginStatus(pluginId);
-    if (!pluginStatus || !plugin) {
-      res.status(404).json({ fehler: `Plugin "${pluginId}" ist nicht registriert.` });
+    if (!status || !plugin) {
+      res.status(404).json({ fehler: `Plugin "${pluginId}" nicht gefunden.` });
       return;
     }
-    if (!pluginStatus.enabledGlobally) {
-      res.status(403).json({ fehler: `Plugin "${pluginId}" ist global deaktiviert.` });
-      return;
-    }
-    if (!plugin.manifest.permissions.includes('share:public-links')) {
-      res.status(403).json({
-        fehler: `Plugin "${pluginId}" besitzt keine Berechtigung für öffentliche Share-Links.`,
-      });
+    if (!status.enabledGlobally || !plugin.manifest.permissions.includes('share:public-links')) {
+      res.status(403).json({ fehler: 'Öffentliche Share-Links sind für dieses Plugin nicht erlaubt.' });
       return;
     }
     if (!plugin.handlePublicRequest) {
@@ -430,79 +517,25 @@ export function erstellePluginGatewayRouter(
     }
 
     const dbScope = pluginHost.erstelleDbScope(pluginId);
-
-    const hatPublicS3Leserecht =
-      Boolean(s3Broker) && plugin.manifest.permissions.includes('s3:team-rw');
-
-    const signiereOeffentlichenTeamDownload = async (
-      teamIdRaw: string,
-      objectPath: string,
-      expiresInSeconds?: number
-    ): Promise<{ url: string; key: string; expiresIn: number }> => {
-      if (!s3Broker || !hatPublicS3Leserecht) {
-        throw new Error(
-          `Plugin "${pluginId}" besitzt keine Berechtigung für öffentliche S3-Downloads.`
-        );
-      }
-      const cleanTeamId = typeof teamIdRaw === 'string' ? teamIdRaw.trim() : '';
-      if (!cleanTeamId || !/^[a-zA-Z0-9_-]+$/.test(cleanTeamId)) {
-        throw new Error('Ungültige Team-ID für öffentlichen S3-Download.');
-      }
-      const zielTeam = await repo.findeTeamNachId(cleanTeamId);
-      if (!zielTeam) {
-        throw new Error('Ziel-Team für öffentlichen S3-Download existiert nicht.');
-      }
-      const modulFuerTeamAktiv = await repo.istTeamModulAktiv(cleanTeamId, pluginId);
-      if (!modulFuerTeamAktiv) {
-        throw new Error(
-          `Modul "${pluginId}" ist für Team "${cleanTeamId}" nicht freigeschaltet.`
-        );
-      }
-      const gekappteAblaufzeit =
-        typeof expiresInSeconds === 'number' && Number.isFinite(expiresInSeconds)
-          ? Math.max(60, Math.min(3600, Math.floor(expiresInSeconds)))
-          : 900;
-
-      return s3Broker.erzeugePresignedDownloadUrl({
-        teamId: cleanTeamId,
-        pluginId,
-        manifest: plugin.manifest,
-        objectPath,
-        expiresInSeconds: gekappteAblaufzeit,
-      });
-    };
-
-    const getSignedDownloadUrlForTeam: PluginPublicSignedDownloadFn = (
-      arg1: PluginPublicSignedDownloadParams | string,
-      objectPathArg?: string,
-      expiresInArg?: number
-    ) => {
-      if (typeof arg1 === 'object' && arg1 !== null) {
-        return signiereOeffentlichenTeamDownload(
-          arg1.teamId,
-          arg1.objectPath,
-          arg1.expiresInSeconds
-        );
-      }
-      return signiereOeffentlichenTeamDownload(arg1, objectPathArg ?? '', expiresInArg);
-    };
-
-    const createTeamS3ReadScope = (teamId: string): PluginPublicS3ReadScope => {
-      const prefix = ermittleTeamPluginPrefix(teamId, pluginId, plugin.manifest.s3Prefix);
-      return {
-        prefix,
-        getSignedDownloadUrl: ({ objectPath, expiresInSeconds }) =>
-          signiereOeffentlichenTeamDownload(teamId, objectPath, expiresInSeconds),
-      };
-    };
+    const hatStorageLeserecht = plugin.manifest.permissions.includes('storage:team-rw');
 
     const publicCtx: PluginPublicKontext = {
       pluginId,
       manifest: plugin.manifest,
-      ...(hatPublicS3Leserecht
+      ...(hatStorageLeserecht
         ? {
-            createTeamS3ReadScope,
-            getSignedDownloadUrlForTeam,
+            getSignedDownloadUrlForTeam: async ({ teamId, objectPath, expiresInSeconds }) => {
+              const team = await repo.findeTeamNachId(teamId);
+              if (!team) throw new Error('Ziel-Team nicht gefunden.');
+              const club = await repo.findeClubNachId(team.clubId);
+              if (!club) throw new Error('Ziel-Verein nicht gefunden.');
+              const scope = storageBroker.erstellePluginScope({
+                club,
+                team,
+                manifest: plugin.manifest,
+              });
+              return scope.getSignedDownloadUrl({ objectPath, expiresInSeconds });
+            },
           }
         : {}),
     };
@@ -517,7 +550,6 @@ export function erstellePluginGatewayRouter(
       dbScope,
       publicCtx
     );
-
     res.status(ergebnis.status).json(ergebnis.body);
   };
 

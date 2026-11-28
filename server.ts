@@ -15,10 +15,23 @@ async function startServer() {
   const db = await erstelleDatenbankClient(config);
   const bootstrap = await bootstrapCoreInstance(db, config);
 
-  const { app, runtimeLoader } = erstelleCoreApp({ db, config });
+  const { app, runtimeLoader, archiveInstaller } = erstelleCoreApp({ db, config });
+
+  if (config.coreBootstrapPlugins.length > 0) {
+    const envPlugins = await archiveInstaller.bootstrapAusEnv();
+    if (envPlugins.installiert.length > 0) {
+      console.log(
+        `[SidelineOS-Core] ENV-Bootstrap-Plugins installiert: ${envPlugins.installiert.join(', ')}`
+      );
+    }
+    for (const f of envPlugins.fehler) {
+      console.warn(`[SidelineOS-Core] ENV-Bootstrap fehlgeschlagen (${f.quelle}): ${f.fehler}`);
+    }
+  }
+
   const runtimeStart = await runtimeLoader.ladeAlleInstalliertenBackendPlugins();
   if (runtimeStart.geladen.length > 0) {
-    console.log(`[SidelineOS-Core] Dynamische Plugins geladen: ${runtimeStart.geladen.join(', ')}`);
+    console.log(`[SidelineOS-Core] Plugins geladen: ${runtimeStart.geladen.join(', ')}`);
   }
 
   if (config.nodeEnv !== 'production') {
@@ -43,7 +56,7 @@ async function startServer() {
 
   const server = app.listen(config.port, '0.0.0.0', () => {
     console.log(
-      `[SidelineOS-Core] Server aktiv auf Port ${config.port} (DB: ${db.dialekt}, Benutzer: ${bootstrap.anzahlBenutzer})`
+      `[SidelineOS-Core v${config.coreVersion}] aktiv auf Port ${config.port} (SDK ${config.supportedSdkVersion}, DB: ${db.dialekt}, Benutzer: ${bootstrap.anzahlBenutzer})`
     );
   });
 

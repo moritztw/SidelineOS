@@ -1,214 +1,192 @@
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType } from 'react';
 import type { UnterstuetzteSprache } from '../shared/i18n.ts';
-import type {
-  AppRouteModus,
-  BenutzerKonto,
-  CoreBereich,
-  PluginId,
-  S3Konfiguration,
-  SpielerUnit,
-  TeamKontext,
-  TeamRolle,
-} from '../shared/types.ts';
-
-export type {
-  AppRouteModus,
-  BenutzerKonto,
-  CoreBereich,
-  PluginId,
-  S3Konfiguration,
-  SpielerUnit,
-  TeamKontext,
-  TeamRolle,
-} from '../shared/types.ts';
-
-export type {
-  SprachPaket,
-  SprachWoerterbuecher,
-  UnterstuetzteSprache,
-} from '../shared/i18n.ts';
-
-export type { BrandKonfiguration } from '../shared/brand.ts';
-export { holeAktuelleBrandKonfig, teileWortmarke } from '../shared/brand.ts';
-export { createPluginTranslator, uebersetzeSchluessel } from '../shared/i18n.ts';
 import type { PluginThemePreset } from '../shared/theme.ts';
+import type {
+  BenutzerKonto,
+  ClubKontext,
+  ClubMitgliedschaft,
+  ClubRolle,
+  ClubSpeicherStatus,
+  EinladungEintrag,
+  NotificationPrioritaet,
+  PluginId,
+  ScopeTyp,
+  TeamKontext,
+  TeamMitgliedschaft,
+  TeamRolle,
+  TeamStatus,
+} from '../shared/types.ts';
+
+export type { PluginThemePreset } from '../shared/theme.ts';
 export type {
-  AufgeloestesThemeErgebnis,
-  GeparsteThemeRef,
-  PluginThemePreset,
-  SidelineCssToken,
-  SidelineCssTokenDefinition,
-  TeamAkzentTokens,
-  VerfuegbaresThemeEintrag,
-} from '../shared/theme.ts';
-export {
-  CORE_STANDARD_THEME_PRESET,
-  SIDELINE_CSS_TOKENS,
-  SIDELINE_STANDARD_THEME_TOKENS,
-  STANDARD_THEME_REF,
-  bauePluginThemeRef,
-  berechneRelativeLuminanz,
-  bereinigePluginThemePresets,
-  ermittleHoverAkzentFarbe,
-  ermittleKontrastTextFarbe,
-  ermittleTeamAkzentTokens,
-  loeseAktivesThemeAuf,
-  normalisiereHexFarbe,
-  parseThemeRef,
-  sammleVerfuegbareThemes,
-  validiereThemeSlug,
-  validiereThemeTokenWert,
-} from '../shared/theme.ts';
+  BenutzerKonto,
+  ClubKontext,
+  ClubMitgliedschaft,
+  ClubRolle,
+  ClubSpeicherStatus,
+  EinladungEintrag,
+  NotificationPrioritaet,
+  PluginId,
+  ScopeTyp,
+  TeamKontext,
+  TeamMitgliedschaft,
+  TeamRolle,
+  TeamStatus,
+} from '../shared/types.ts';
+
+export const SIDELINE_SDK_VERSION = '2.0' as const;
+export type PluginSdkVersion = typeof SIDELINE_SDK_VERSION;
+
+export type PluginIconName =
+  | 'film'
+  | 'book-open'
+  | 'clipboard-check'
+  | 'layers'
+  | 'puzzle'
+  | 'users'
+  | 'hard-drive'
+  | 'mail'
+  | 'store'
+  | 'git-branch'
+  | 'shield';
+
+/** Standard-Berechtigungen (sofort mit Installation verfügbar). */
+export type StandardPluginPermission =
+  | 'db:plugin-schema'
+  | 'storage:team-rw'
+  | 'storage:club-rw'
+  | 'notifications:send'
+  | 'notifications:channel'
+  | 'share:public-links'
+  | 'theme:presets'
+  | 'ui:account-panel'
+  | 'ui:club-panel'
+  | 'ui:system-panel';
 
 /**
- * Granulare Berechtigungen, die ein externes Plugin in seinem `plugin.manifest.json`
- * anfordern muss. Der SidelineOS-Core erzwingt diese Grenzen serverseitig.
+ * Privilegierte System-Capabilities (erfordern explizite Sysadmin-Freigabe).
+ * Kein Plugin erhält jemals direkten SQL-Zugriff auf das Schema `core`.
  */
-export type PluginPermission =
-  | 'team:read'
-  | 'team:roster-read'
-  | 's3:team-rw'
-  | 's3:cleanup-queue'
-  | 'db:plugin-tables'
-  | 'share:public-links'
-  | 'notifications:send'
-  | 'notifications:channel';
+export type PrivilegiertePluginPermission =
+  | 'storage:provider'
+  | 'core:org-manage'
+  | 'core:users-manage'
+  | 'core:plugins-manage'
+  | 'core:storage-quota-manage'
+  | 'core:storage-nodes-manage'
+  | 'dev:git-install';
 
-export type PluginIconName = 'film' | 'book-open' | 'clipboard-check' | 'layers' | 'puzzle';
+export type PluginPermission = StandardPluginPermission | PrivilegiertePluginPermission;
 
-export interface PluginSettingsAnker {
-  id: string;
-  label: string;
-  badge?: number;
+export const PRIVILEGIERTE_CAPABILITIES: readonly PrivilegiertePluginPermission[] = [
+  'storage:provider',
+  'core:org-manage',
+  'core:users-manage',
+  'core:plugins-manage',
+  'core:storage-quota-manage',
+  'core:storage-nodes-manage',
+  'dev:git-install',
+];
+
+export function istPrivilegierteCapability(
+  permission: PluginPermission
+): permission is PrivilegiertePluginPermission {
+  return (PRIVILEGIERTE_CAPABILITIES as readonly string[]).includes(permission);
 }
 
-/**
- * Deklaratives Manifest jedes externen SidelineOS-Plugins (`plugin.manifest.json`).
- * Kann ohne Laden von JavaScript-Code im Plugin-Store und in den Core-Einstellungen gelesen werden.
- */
+// ============================================================================
+// Verbindlicher 4-Ebenen-Navigations- & Menü-Vertrag (SDK v2.0)
+// ============================================================================
+
+export type PluginSurfaceTyp = 'app' | 'headless' | 'system';
+export type PluginScopeEbene = 'club' | 'team' | 'global';
+export type SettingsPanelZiel = 'account' | 'club' | 'system';
+
+/** Ebene-2-Eintrag in der einheitlichen linken Kontext-Sidebar. */
+export interface PluginSidebarItem {
+  id: string;
+  label: string;
+  routeSegment: string;
+  requiredClubRoles?: ClubRolle[];
+  requiredTeamRoles?: TeamRolle[];
+  badgeKey?: string;
+}
+
+/** Max. 3 Gruppen pro Plugin in der Kontext-Sidebar. */
+export interface PluginSidebarGroup {
+  id: string;
+  label: string;
+  items: PluginSidebarItem[];
+}
+
+/** Registrierung eines Panels in /settings/account/*, /admin/club/* oder /admin/system/*. */
+export interface PluginSettingsPanelDef {
+  id: string;
+  target: SettingsPanelZiel;
+  group: string;
+  label: string;
+  routeSegment: string;
+  requiredClubRoles?: ClubRolle[];
+  requiredTeamRoles?: TeamRolle[];
+}
+
+export interface PluginNavigationManifest {
+  /** 'app' = Kachel auf Start-Hub; 'headless'/'system' = kein Hub-Eintrag. */
+  surface: PluginSurfaceTyp;
+  /** Auf welcher Ebene das Plugin aktiviert und geöffnet wird. */
+  scopes: PluginScopeEbene[];
+  /** Ebene-2-Navigation in der einheitlichen Kontext-Sidebar (echte URL-Routen). */
+  sidebarGroups?: PluginSidebarGroup[];
+  /** Panels für Konto-, Vereins- oder System-Administration. */
+  settingsPanels?: PluginSettingsPanelDef[];
+}
+
 export interface PluginManifest {
   id: PluginId;
   name: string;
   kurzbeschreibung: string;
-  /** Basisversion im Paket (wird bei GitHub-Release vom Tag bzw. bei Dev-Git als <branch>-<commit> überschrieben) */
   version: string;
-  /** SDK-Schnittstellen-Version (Major.Minor, aktuell "1.0") */
-  sdkVersion: '1.0' | (string & {});
-  /** Minimale kompatible Core-SemVer-Version (optional, z. B. "0.1.0-alpha.1") */
-  minCoreVersion?: string;
-  /** Maximale kompatible Core-SemVer-Version (optional, z. B. "0.99.99") */
-  maxCoreVersion?: string;
-  autor: string;
-  repositoryUrl: string;
+  sdkVersion: PluginSdkVersion;
+  minCoreVersion: string;
   icon: PluginIconName;
-  status: 'AKTIV' | 'VORSCHAU';
-  standardAktiviert: boolean;
-  /** Blendet die Kachel auf der Hub-Startseite aus (z. B. für Headless- oder reine Theme-Plugins) */
-  hideHubTile?: boolean;
   permissions: PluginPermission[];
-  /** Isoliertes Datenbank-Präfix für Tabellen dieses Plugins (z. B. "mod_video_") */
-  dbPrefix: string;
-  /** Isolierter S3-Schlüssel-Präfix pro Team (z. B. "plugins/video-analysis/") */
-  s3Prefix?: string;
-  /** Kategorien, die das Plugin in die zentralen Core-Einstellungen einhängt */
-  settingsAnker: {
-    user?: PluginSettingsAnker[];
-    team?: PluginSettingsAnker[];
-    sysadmin?: PluginSettingsAnker[];
-  };
-  /** Optionale Theme-Presets, die dieses Plugin im Core-Theme-Auswahlmenü bereitstellt */
+  navigation: PluginNavigationManifest;
+  storagePrefix?: string;
+  repositoryUrl?: string;
+  author?: string;
   themes?: PluginThemePreset[];
 }
 
-export interface PluginTab {
-  id: string;
-  label: string;
-}
+// ============================================================================
+// Virtueller Storage-Broker & Multi-Node Storage-Provider (#21, #22, #24)
+// ============================================================================
 
-/**
- * Laufzeit-Kontext, den der SidelineOS-Core an die Hauptansicht eines Plugins übergibt.
- */
-export interface PluginLaufzeitKontext {
-  team: TeamKontext;
-  aktiveTeamAnsicht: TeamRolle;
-  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers im aktiven Team */
-  userUnits?: SpielerUnit[];
-  gewaehlteSaison: string;
-  benutzer: BenutzerKonto;
-  locale: string;
-  aktuellerTab: string;
-  onTabWechseln: (tabId: string) => void;
-  onTeamSettingsOeffnen: () => void;
-  onZurueckZurStartseite: () => void;
-  onPublicShareOeffnen?: (token: string) => void;
-}
-
-/**
- * Kontext für vom Plugin bereitgestellte Einstellungs-Panels (Persönlich / Team / Sysadmin).
- */
-export interface PluginSettingsKontext {
-  team: TeamKontext;
-  benutzer: BenutzerKonto;
-  aktiveTeamAnsicht: TeamRolle | null;
-  s3Konfig: S3Konfiguration;
-  locale: string;
-}
-
-/**
- * Laufzeit-Kontext für dauerhaft gemountete `SidelinePlugin.Provider`-Komponenten.
- * Ermöglicht Headless- und Theme-Plugins den Zugriff auf Team-, Rollen- und Bereichs-Kontext.
- */
-export interface PluginProviderKontext {
-  pluginId: PluginId;
-  team: TeamKontext | null;
-  aktiveTeamAnsicht: TeamRolle | null;
-  gewaehlteSaison: string | null;
-  benutzer: BenutzerKonto | null;
-  locale: string;
-  bereich: CoreBereich;
-  routeArt: AppRouteModus['art'];
-  istGlobalAktiv: boolean;
-  istFuerAktivesTeamAktiv: boolean;
-}
-
-export interface PluginProviderProps {
-  children: ReactNode;
-  ctx?: PluginProviderKontext;
-}
-
-/**
- * Isolierter Datenbank-Zugriff für ein externes Plugin (`plugin_<slug>`-Schema).
- * Der Core injiziert diese Schnittstelle, damit Plugins keine Core-Tabellen oder fremde Plugins sehen.
- */
-export interface PluginDbScope {
-  readonly schemaName: string;
-  query<T = Record<string, unknown>>(
-    sql: string,
-    params?: unknown[]
-  ): Promise<{ rows: T[]; rowCount: number }>;
-}
-
-/**
- * Isolierter S3-Zugriff für ein externes Plugin innerhalb seines Team-Präfixes
- * (`teams/<teamId>/<s3Prefix>`). Der Core prüft Rechte und signiert Presigned URLs.
- */
-export interface S3MultipartPartRef {
+export interface StorageMultipartPartRef {
   partNumber: number;
   etag: string;
 }
 
-export interface PluginS3Scope {
+export interface StoragePresignUploadParams {
+  objectPath: string;
+  contentType?: string;
+  fileSizeBytes?: number;
+  expiresInSeconds?: number;
+}
+
+export interface StoragePresignDownloadParams {
+  objectPath: string;
+  expiresInSeconds?: number;
+}
+
+/** Speicherort-agnostischer Scope für Fach-Plugins (Core erzwingt Präfix, Archiv- & Quota-Regeln). */
+export interface PluginStorageScope {
   readonly prefix: string;
-  getSignedUploadUrl(params: {
-    objectPath: string;
-    contentType?: string;
-    fileSizeBytes?: number;
-    expiresInSeconds?: number;
-  }): Promise<{ url: string; key: string; expiresIn: number }>;
-  getSignedDownloadUrl(params: {
-    objectPath: string;
-    expiresInSeconds?: number;
-  }): Promise<{ url: string; key: string; expiresIn: number }>;
+  getSignedUploadUrl(
+    params: StoragePresignUploadParams
+  ): Promise<{ url: string; key: string; expiresIn: number }>;
+  getSignedDownloadUrl(
+    params: StoragePresignDownloadParams
+  ): Promise<{ url: string; key: string; expiresIn: number }>;
   initiateMultipartUpload(params: {
     objectPath: string;
     contentType?: string;
@@ -223,54 +201,67 @@ export interface PluginS3Scope {
   completeMultipartUpload(params: {
     objectPath: string;
     uploadId: string;
-    parts: S3MultipartPartRef[];
+    parts: StorageMultipartPartRef[];
   }): Promise<{ key: string; etag?: string; location?: string }>;
   abortMultipartUpload(params: { objectPath: string; uploadId: string }): Promise<void>;
-  deleteObject(objectPath: string): Promise<void>;
+  deleteObject(objectPath: string, estimatedBytes?: number): Promise<void>;
 }
 
 /**
- * Isolierter S3-Cleanup-Queue-Zugriff für ein externes Plugin (`s3:cleanup-queue`).
- * Das Plugin meldet lediglich verwaiste Objektpfade aus seinem eigenen Team-Präfix.
+ * Provider-Interface für ein `storage:provider`-Plugin (z. B. `SidelineOS-storage-s3`).
+ * Unterstützt virtuelles Multi-Node-Routing über `nodeId` (#22).
  */
-export interface PluginCleanupQueueScope {
-  enqueueOrphanedObjects(objectPaths: string[], reason?: string): Promise<{ queued: number }>;
+export interface StorageProviderAdapter {
+  readonly providerId: string;
+  readonly label: string;
+  presignUpload(params: {
+    nodeId: string;
+    key: string;
+    contentType?: string;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+  presignDownload(params: {
+    nodeId: string;
+    key: string;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; key: string; expiresIn: number }>;
+  initiateMultipartUpload(params: {
+    nodeId: string;
+    key: string;
+    contentType?: string;
+  }): Promise<{ uploadId: string; key: string }>;
+  presignMultipartPart(params: {
+    nodeId: string;
+    key: string;
+    uploadId: string;
+    partNumber: number;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; key: string; partNumber: number; expiresIn: number }>;
+  completeMultipartUpload(params: {
+    nodeId: string;
+    key: string;
+    uploadId: string;
+    parts: StorageMultipartPartRef[];
+  }): Promise<{ key: string; etag?: string; location?: string }>;
+  abortMultipartUpload(params: {
+    nodeId: string;
+    key: string;
+    uploadId: string;
+  }): Promise<void>;
+  deleteObject(params: { nodeId: string; key: string }): Promise<void>;
+  healthCheck?(nodeId?: string): Promise<{ ok: boolean; nachricht: string }>;
 }
 
-/**
- * Ziel-Adressierung für Team-übergreifende Abfragen (Phase 4 Federation & Phase 5 Camp-Modus).
- */
-export type ExchangeTarget =
-  | { mode: 'LOCAL'; teamId: string }
-  | { mode: 'REMOTE'; instanceId: string; teamId: string };
+// ============================================================================
+// Notification-Dispatcher & Channel-Plugins (`SidelineOS-channel-smtp`, etc.)
+// ============================================================================
 
-export interface PluginScopeItem {
-  id: string;
-  title: string;
-  season?: string;
-  updatedAt: string;
-  assetKeys?: string[];
-}
-
-export interface PluginExportScopeResult {
-  schemaVersion: string;
-  pluginId: PluginId;
-  items: PluginScopeItem[];
-  payload: unknown;
-  assetKeys: string[];
-}
-
-export type NotificationPrioritaet = 'info' | 'warning' | 'urgent';
-
-export interface PluginNotificationChannel {
-  id: string;
-  label: string;
-  description?: string;
-}
-
-export interface PluginNotificationChannelInfo extends PluginNotificationChannel {
-  providerPluginId: string;
-  aktiv: boolean;
+export interface NotificationEmpfaengerInfo {
+  uuid: string;
+  vollerName: string;
+  benutzername: string;
+  email: string;
+  preferredLocale: UnterstuetzteSprache;
 }
 
 export interface NotificationPayload {
@@ -284,13 +275,6 @@ export interface NotificationPayload {
   metadata?: Record<string, unknown>;
 }
 
-export interface NotificationEmpfaengerInfo {
-  uuid: string;
-  vollerName: string;
-  benutzername: string;
-  preferredLocale: string;
-}
-
 export interface NotificationDispatchEvent {
   eventType: string;
   title: string;
@@ -298,19 +282,11 @@ export interface NotificationDispatchEvent {
   linkPath?: string;
   priority: NotificationPrioritaet;
   sourcePluginId: string;
+  clubId?: string;
   teamId?: string;
-  teamName?: string;
   recipients: NotificationEmpfaengerInfo[];
   metadata: Record<string, unknown>;
   createdAt: string;
-}
-
-export interface PluginNotificationChannelKontext {
-  readonly pluginId: PluginId;
-  readonly manifest: PluginManifest;
-  readonly channelId: string;
-  readonly db: PluginDbScope;
-  readonly team?: TeamKontext;
 }
 
 export interface NotificationChannelErgebnis {
@@ -327,210 +303,254 @@ export interface NotificationDispatchErgebnis {
   channelResults: NotificationChannelErgebnis[];
 }
 
+export interface PluginNotificationChannelDef {
+  id: string;
+  label: string;
+  description?: string;
+  /** Wenn true, wird der Kanal nur versendet, wenn er explizit angefordert wird oder für System-Events aktiv ist. */
+  explicitOnly?: boolean;
+}
+
+export interface PluginNotificationChannelInfo {
+  id: string;
+  label: string;
+  description?: string;
+  providerPluginId: string;
+  aktiv: boolean;
+}
+
 export interface PluginNotificationScope {
   send(payload: NotificationPayload): Promise<NotificationDispatchErgebnis>;
   listChannels(): Promise<PluginNotificationChannelInfo[]>;
 }
 
-export interface PluginPublicS3ReadScope {
-  readonly prefix: string;
-  getSignedDownloadUrl(params: {
-    objectPath: string;
-    expiresInSeconds?: number;
-  }): Promise<{ url: string; key: string; expiresIn: number }>;
-}
+// ============================================================================
+// Privilegierte Core-Admin-Scopes (ersetzen direkten Zugriff auf core.*)
+// ============================================================================
 
-export interface PluginPublicSignedDownloadParams {
-  teamId: string;
-  objectPath: string;
-  expiresInSeconds?: number;
-}
-
-export type PluginPublicSignedDownloadFn = {
-  (params: PluginPublicSignedDownloadParams): Promise<{
-    url: string;
-    key: string;
-    expiresIn: number;
-  }>;
-  (
+export interface PluginCoreOrgScope {
+  listClubs(): Promise<ClubKontext[]>;
+  createClub(input: { slug: string; name: string; metadata?: Record<string, unknown> }): Promise<ClubKontext>;
+  updateClub(clubId: string, patch: { name?: string; metadata?: Record<string, unknown> }): Promise<ClubKontext | null>;
+  listTeams(clubId: string, optionen?: { includeArchived?: boolean }): Promise<TeamKontext[]>;
+  createTeam(input: {
+    clubId: string;
+    slug: string;
+    name: string;
+    akzentFarbe?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<TeamKontext>;
+  updateTeam(
     teamId: string,
-    objectPath: string,
-    expiresInSeconds?: number
-  ): Promise<{ url: string; key: string; expiresIn: number }>;
-};
-
-/**
- * Optionaler Kontext für unauthentifizierte `handlePublicRequest`-Aufrufe (`/share/<token>`).
- * Read-Only S3-Signierhelfer werden nur injiziert, wenn das Plugin sowohl `share:public-links`
- * als auch `s3:team-rw` besitzt und der Ziel-Team-Scope aktiv ist.
- */
-export interface PluginPublicKontext {
-  readonly pluginId: PluginId;
-  readonly manifest: PluginManifest;
-  readonly createTeamS3ReadScope?: (teamId: string) => PluginPublicS3ReadScope;
-  readonly getSignedDownloadUrlForTeam?: PluginPublicSignedDownloadFn;
+    patch: { name?: string; akzentFarbe?: string; metadata?: Record<string, unknown> }
+  ): Promise<TeamKontext | null>;
+  setTeamStatus(teamId: string, status: TeamStatus): Promise<TeamKontext | null>;
+  listClubMembers(clubId: string): Promise<Array<ClubMitgliedschaft & { user: BenutzerKonto }>>;
+  upsertClubMembership(input: {
+    userUuid: string;
+    clubId: string;
+    rolle: ClubRolle;
+    status?: 'ACTIVE' | 'PENDING' | 'SUSPENDED';
+  }): Promise<ClubMitgliedschaft>;
+  listTeamMembers(teamId: string): Promise<Array<TeamMitgliedschaft & { user: BenutzerKonto }>>;
+  upsertTeamMembership(input: {
+    userUuid: string;
+    teamId: string;
+    rolle: TeamRolle;
+    groups?: string[];
+    status?: 'ACTIVE' | 'PENDING' | 'SUSPENDED';
+  }): Promise<TeamMitgliedschaft>;
+  createInvitation(input: {
+    clubId: string;
+    teamId?: string | null;
+    clubRolle?: ClubRolle;
+    teamRolle?: TeamRolle;
+    groups?: string[];
+    zielEmail?: string;
+    bestaetigungErforderlich?: boolean;
+    gueltigBis: string;
+  }): Promise<{ einladung: EinladungEintrag; token: string; pfad: string }>;
+  listInvitations(clubId: string): Promise<EinladungEintrag[]>;
+  revokeInvitation(invitationId: string): Promise<boolean>;
 }
 
-/**
- * Laufzeit-Kontext für Plugin-Backend-Routen nach erfolgreicher Core-Auth-, Team- und Scope-Prüfung.
- */
-export interface PluginBackendKontext {
-  readonly pluginId: PluginId;
-  readonly manifest: PluginManifest;
-  readonly db: PluginDbScope;
-  readonly s3?: PluginS3Scope;
-  readonly cleanupQueue?: PluginCleanupQueueScope;
-  readonly notifications?: PluginNotificationScope;
-  readonly user: BenutzerKonto;
-  readonly locale: string;
-  readonly team: TeamKontext;
-  readonly teamRolle: TeamRolle;
-  /** Zugewiesene Spieler-/Coach-Units des eingeloggten Benutzers in diesem Team */
-  readonly userUnits?: SpielerUnit[];
-  hasPermission(permission: PluginPermission): boolean;
+export interface PluginCoreUsersScope {
+  listUsers(): Promise<BenutzerKonto[]>;
+  findUser(userUuid: string): Promise<BenutzerKonto | null>;
+  createUser(input: {
+    benutzername: string;
+    vollerName: string;
+    email: string;
+    passwort: string;
+    istSysadmin?: boolean;
+    metadata?: Record<string, unknown>;
+  }): Promise<BenutzerKonto>;
+  updateUser(
+    userUuid: string,
+    patch: { vollerName?: string; email?: string; istSysadmin?: boolean; metadata?: Record<string, unknown> }
+  ): Promise<BenutzerKonto | null>;
 }
 
-/**
- * Verbindlicher Backend-Vertrag eines Plugins (optional für reine Frontend-Prototypen).
- */
-export interface SidelineBackendPlugin {
-  readonly manifest: PluginManifest;
-  readonly migrations?: Array<{ name: string; sql: string }>;
-  readonly notificationChannels?: PluginNotificationChannel[];
-  deliverNotification?: (
-    event: NotificationDispatchEvent,
-    ctx: PluginNotificationChannelKontext
-  ) => Promise<{ delivered: number; error?: string }>;
-  handleRequest?: (
-    req: {
-      method: string;
-      path: string;
-      params: Record<string, string>;
-      query: Record<string, unknown>;
-      body: unknown;
-    },
-    ctx: PluginBackendKontext
-  ) => Promise<{ status: number; body: unknown }>;
-  handlePublicRequest?: (
-    req: {
-      method: string;
-      path: string;
-      query: Record<string, unknown>;
-      body: unknown;
-    },
-    db: PluginDbScope,
-    publicCtx?: PluginPublicKontext
-  ) => Promise<{ status: number; body: unknown }>;
-  listExportableItems?: (
-    ctx: PluginBackendKontext,
-    options?: { season?: string }
-  ) => Promise<PluginScopeItem[]>;
-  exportScope?: (
-    ctx: PluginBackendKontext,
-    options?: { itemIds?: string[]; season?: string }
-  ) => Promise<PluginExportScopeResult>;
-  importScope?: (
-    ctx: PluginBackendKontext,
-    bundle: PluginExportScopeResult,
-    options?: { mode: 'replace' | 'merge' }
-  ) => Promise<{ imported: number; skipped: number }>;
+export interface PluginCorePluginsScope {
+  listInstalled(): Promise<
+    Array<{
+      pluginId: PluginId;
+      version: string;
+      enabledGlobally: boolean;
+      approvedCapabilities: PrivilegiertePluginPermission[];
+      manifest: PluginManifest;
+      lastError?: string | null;
+    }>
+  >;
+  setEnabledGlobally(pluginId: PluginId, enabled: boolean): Promise<boolean>;
+  setScopeModuleEnabled(scopeTyp: ScopeTyp, scopeId: string, pluginId: PluginId, enabled: boolean): Promise<void>;
+  listScopeModules(scopeTyp: ScopeTyp, scopeId: string): Promise<PluginId[]>;
+  installArchiveBuffer(archiveBuffer: Uint8Array, sourceLabel?: string): Promise<{ pluginId: PluginId; version: string }>;
+  installArchiveUrl(archiveUrl: string): Promise<{ pluginId: PluginId; version: string }>;
+  uninstall(pluginId: PluginId): Promise<boolean>;
 }
 
-/**
- * Verbindlicher Plugin-Vertrag (`@sidelineos/plugin-sdk`).
- * Jedes externe GitHub-Modul implementiert genau dieses Interface.
- */
+export interface PluginCoreStorageQuotaScope {
+  getClubStorage(clubId: string): Promise<ClubSpeicherStatus | null>;
+  setClubQuota(
+    clubId: string,
+    params: { quotaBytes: number | null; softLimitPercent?: number }
+  ): Promise<ClubSpeicherStatus | null>;
+  reconcileClubUsage(clubId: string, exactUsedBytes: number): Promise<ClubSpeicherStatus | null>;
+}
+
+export interface PluginCoreStorageNodesScope {
+  getClubNode(clubId: string): Promise<string | null>;
+  assignClubNode(clubId: string, nodeId: string): Promise<ClubSpeicherStatus | null>;
+}
+
+export interface PluginCoreAdminScope {
+  org?: PluginCoreOrgScope;
+  users?: PluginCoreUsersScope;
+  plugins?: PluginCorePluginsScope;
+  storageQuota?: PluginCoreStorageQuotaScope;
+  storageNodes?: PluginCoreStorageNodesScope;
+}
+
+// ============================================================================
+// Frontend- & Backend-Plugin-Definitionen (SDK v2.0)
+// ============================================================================
+
+export interface PluginLaufzeitKontext {
+  pluginId: PluginId;
+  club: ClubKontext | null;
+  team: TeamKontext | null;
+  isReadOnly: boolean;
+  clubRolle: ClubRolle | null;
+  effektiveTeamRolle: TeamRolle | null;
+  user: BenutzerKonto;
+  userGroups: string[];
+  activeView: string;
+  navigateToView: (routeSegment: string) => void;
+  locale: UnterstuetzteSprache;
+  apiBaseUrl: string;
+  apiFetch: (subPfad: string, init?: RequestInit) => Promise<Response>;
+}
+
+export interface PluginAnsichtProps {
+  ctx: PluginLaufzeitKontext;
+}
+
+export interface PluginSettingsPanelProps {
+  panelId: string;
+  target: SettingsPanelZiel;
+  club: ClubKontext | null;
+  team: TeamKontext | null;
+  user: BenutzerKonto;
+  locale: UnterstuetzteSprache;
+  apiFetch: (subPfad: string, init?: RequestInit) => Promise<Response>;
+  onContextRefresh: () => Promise<void>;
+}
+
 export interface SidelinePlugin {
   manifest: PluginManifest;
-  /** Optionaler State-/Theme-Provider des Plugins (kapselt Modul-Zustand vollständig vom Core) */
-  Provider?: ComponentType<PluginProviderProps>;
-  defaultTab?: string;
-  getTabs?: (ctx: { teamRolle: TeamRolle; locale?: string }) => PluginTab[];
-  /** Optionale Primäraktion rechts in der TopBar (als eigenständige React-Komponente) */
-  PrimaerAktion?: ComponentType<{ ctx: PluginLaufzeitKontext; className: string }>;
-  renderMainView?: (ctx: PluginLaufzeitKontext) => ReactNode;
-  /** Optionaler öffentlicher Empfänger-View für /share/<token> ohne Anmeldung */
-  renderPublicShareView?: (ctx: {
-    token: string;
-    locale?: string;
-    onSchliessen: () => void;
-  }) => ReactNode;
-  settingsPanels?: {
-    user?: ComponentType<{ ctx: PluginSettingsKontext }>;
-    team?: ComponentType<{ ctx: PluginSettingsKontext }>;
-    sysadmin?: ComponentType<{ ctx: PluginSettingsKontext }>;
-  };
-  /** Optionale Theme-Presets (ergänzt oder überschreibt `manifest.themes` zur Laufzeit) */
-  themes?: readonly PluginThemePreset[];
+  HauptAnsicht?: ComponentType<PluginAnsichtProps>;
+  OeffentlicheAnsicht?: ComponentType<{ token: string; locale: UnterstuetzteSprache }>;
+  SettingsPanel?: ComponentType<PluginSettingsPanelProps>;
 }
 
-/**
- * Eintrag im SidelineOS Plugin Store (Katalog oder manuell eingebundenes GitHub-Repo).
- */
-export interface PluginStoreEintrag {
+export interface PluginSqlMigration {
+  name: string;
+  sql: string;
+}
+
+export interface PluginDbScope {
+  readonly schemaName: string;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[]; rowCount: number }>;
+}
+
+export interface PluginBackendAnfrage {
+  method: string;
+  path: string;
+  scope: 'team' | 'club' | 'system';
+  params: Record<string, string>;
+  query: Record<string, unknown>;
+  body: unknown;
+}
+
+export interface PluginBackendAntwort {
+  status: number;
+  body: unknown;
+}
+
+export interface PluginBackendKontext {
+  pluginId: PluginId;
   manifest: PluginManifest;
-  quelle: 'OFFICIAL_GITHUB' | 'CUSTOM_GITHUB';
-  verifiziert: boolean;
-  releaseTag: string;
-  paketFormat: 'sideline-plugin-v1';
+  db: PluginDbScope;
+  storage?: PluginStorageScope;
+  notifications?: PluginNotificationScope;
+  coreAdmin?: PluginCoreAdminScope;
+  user: BenutzerKonto;
+  locale: UnterstuetzteSprache;
+  club: ClubKontext | null;
+  team: TeamKontext | null;
+  isReadOnly: boolean;
+  clubRolle: ClubRolle | null;
+  effektiveTeamRolle: TeamRolle | null;
+  userGroups: string[];
+  hasPermission(permission: PluginPermission): boolean;
+  hasApprovedCapability(capability: PrivilegiertePluginPermission): boolean;
 }
 
-export const PERMISSION_BESCHREIBUNGEN: Record<PluginPermission, string> = {
-  'team:read': 'Liest Team-Stammdaten, Saisons und aktive Rolle',
-  'team:roster-read': 'Liest Kaderliste, Units und Spieler-Profile des Teams',
-  's3:team-rw': 'Speichert/streamt Dateien im eigenen S3-Team-Präfix',
-  's3:cleanup-queue': 'Registriert verwaiste S3-Objekte in der Sysadmin-Schonfrist',
-  'db:plugin-tables': 'Verwaltet eigene isolierte PostgreSQL-Tabellen',
-  'share:public-links': 'Erzeugt zeitlich befristete öffentliche /share/-Links',
-  'notifications:send': 'Löst Benachrichtigungen über den Core-Notification-Endpunkt aus',
-  'notifications:channel': 'Registriert einen eigenen Zustellweg (z. B. Push/Webhook) für Core-Benachrichtigungen',
-};
-
-export const PERMISSION_BESCHREIBUNGEN_I18N: Record<
-  UnterstuetzteSprache,
-  Record<PluginPermission, string>
-> = {
-  de: PERMISSION_BESCHREIBUNGEN,
-  en: {
-    'team:read': 'Reads team metadata, seasons, and active role',
-    'team:roster-read': 'Reads roster members, units, and player profiles',
-    's3:team-rw': 'Stores/streams files within the plugin S3 team prefix',
-    's3:cleanup-queue': 'Registers orphaned S3 objects in the sysadmin retention queue',
-    'db:plugin-tables': 'Manages isolated PostgreSQL plugin tables',
-    'share:public-links': 'Creates time-limited public /share/ links',
-    'notifications:send': 'Triggers notifications via the core notification endpoint',
-    'notifications:channel': 'Provides an external delivery channel (e.g. push/webhook) for core notifications',
-  },
-};
-
-export function holePermissionBeschreibung(
-  permission: PluginPermission,
-  locale?: string
-): string {
-  const code: UnterstuetzteSprache = locale === 'en' ? 'en' : 'de';
-  return PERMISSION_BESCHREIBUNGEN_I18N[code][permission];
+export interface PluginPublicKontext {
+  pluginId: PluginId;
+  manifest: PluginManifest;
+  getSignedDownloadUrlForTeam?: (params: {
+    teamId: string;
+    objectPath: string;
+    expiresInSeconds?: number;
+  }) => Promise<{ url: string; key: string; expiresIn: number }>;
 }
 
-/**
- * Ermittelt die zugehörige Saison eines saisongebundenen Eintrags (Fallback: Jahr aus eventDate).
- */
-export function ermittleEintragSaison(eintrag: {
-  saison?: string;
-  eventDate: string;
-}): string {
-  const explizit = eintrag.saison?.trim();
-  if (explizit) return explizit;
-  return eintrag.eventDate.slice(0, 4);
+export interface SidelineBackendPlugin {
+  manifest: PluginManifest;
+  migrations?: PluginSqlMigration[];
+  storageProvider?: StorageProviderAdapter;
+  notificationChannels?: PluginNotificationChannelDef[];
+  deliverNotification?: (
+    event: NotificationDispatchEvent,
+    ctx: { pluginId: PluginId; manifest: PluginManifest; channelId: string; db: PluginDbScope }
+  ) => Promise<{ delivered: number; error?: string }>;
+  handleRequest?: (
+    req: PluginBackendAnfrage,
+    ctx: PluginBackendKontext
+  ) => Promise<PluginBackendAntwort>;
+  handlePublicRequest?: (
+    req: Omit<PluginBackendAnfrage, 'params' | 'scope'>,
+    db: PluginDbScope,
+    publicCtx: PluginPublicKontext
+  ) => Promise<PluginBackendAntwort>;
 }
 
-/**
- * Filtert saisongebundene Plugin-Daten nach gewählter Saison ("ALL" gibt alles zurück).
- */
-export function filtereNachSaison<T extends { saison?: string; eventDate: string }>(
-  eintraege: readonly T[],
-  saison: string
-): T[] {
-  if (!saison || saison === 'ALL') return [...eintraege];
-  return eintraege.filter((eintrag) => ermittleEintragSaison(eintrag) === saison);
+export function definierePlugin(plugin: SidelinePlugin): SidelinePlugin {
+  return plugin;
 }
 
+export function definiereBackendPlugin(plugin: SidelineBackendPlugin): SidelineBackendPlugin {
+  return plugin;
+}
